@@ -9,7 +9,8 @@ use crate::gba::{header, sgb_enhanced};
 
 /// Which machine a cart is for, and so which shelf it belongs on.
 ///
-/// Three shelves, because that is how a card is filed and how a hand asks for one. Decided off
+/// Four shelves, because that is how a card is filed and how a hand asks for one — three Game
+/// Boys and the Super Nintendo. Decided off
 /// the *extension* rather than by opening the rom, for the same reason everything else here is:
 /// the fast path of `scan_cached` reads a name and nothing else, and a property that costs a
 /// name to answer is free.
@@ -25,11 +26,18 @@ pub enum System {
     Gba,
     Gb,
     Gbc,
+    /// The Super Nintendo. The first machine here that is not a Game Boy, and the first whose
+    /// frame is a size the panel does not divide by three.
+    Sfc,
 }
 
 impl System {
     /// From whatever follows the last dot in a file name. Compared without case, because a
     /// card written on another machine arrives in whatever case that machine felt like.
+    ///
+    /// A Super Nintendo rom comes as either spelling: `.sfc` and `.smc` are the same bytes,
+    /// the second named for the copier that made it. Both are the console, and neither is
+    /// a different machine, so they land on one shelf rather than two.
     pub fn from_extension(ext: &str) -> Option<Self> {
         if ext.eq_ignore_ascii_case("gba") {
             Some(System::Gba)
@@ -37,6 +45,8 @@ impl System {
             Some(System::Gb)
         } else if ext.eq_ignore_ascii_case("gbc") {
             Some(System::Gbc)
+        } else if ext.eq_ignore_ascii_case("sfc") || ext.eq_ignore_ascii_case("smc") {
+            Some(System::Sfc)
         } else {
             None
         }
@@ -48,6 +58,7 @@ impl System {
             System::Gba => "GBA",
             System::Gb => "GB",
             System::Gbc => "GBC",
+            System::Sfc => "SFC",
         }
     }
 }
@@ -505,7 +516,14 @@ fn build(
         });
         let (title, code) = match known {
             Some(row) => (row.title.clone(), row.code.clone()),
-            None => header(&rom),
+            // `header` reads the Game Boy Advance's header, at a fixed offset in a Game Boy
+            // Advance rom. Those same offsets inside another machine's rom hold whatever that
+            // machine keeps there, and reading them files a Super Nintendo cart on the shelf
+            // under twelve bytes of its own code. Only the machine the offsets belong to has
+            // one to read; every other cart is named by its file, which is what the shelf
+            // shows anyway.
+            None if machine_of(name) == Some(System::Gba.dir_name()) => header(&rom),
+            None => (String::new(), String::new()),
         };
         let stem = stem_of(name).unwrap_or_default();
         let label = label_for(&labels_dir, machine_of(name), &stem, labels);

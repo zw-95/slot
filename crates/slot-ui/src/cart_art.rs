@@ -89,6 +89,10 @@ pub struct CartArt {
     gb: Option<Art>,
     gbc: Option<Art>,
     gba: Option<Art>,
+    /// A Super Nintendo cart of the card's own. Absent, that machine is drawn with the built-in
+    /// shell it shares with the Advance — same landscape shape — so a card that starts filing
+    /// SFC games looks finished before anybody draws anything for it.
+    sfc: Option<Art>,
     board: Option<BoardArt>,
 }
 
@@ -105,6 +109,7 @@ pub fn art_for(system: System) -> Option<&'static Art> {
         System::Gb => all.gb.as_ref(),
         System::Gbc => all.gbc.as_ref(),
         System::Gba => all.gba.as_ref(),
+        System::Sfc => all.sfc.as_ref(),
     }
 }
 
@@ -116,6 +121,7 @@ pub fn load(root: &Path) -> CartArt {
         gb: read(&dir.join("cart_gb.png")),
         gbc: read(&dir.join("cart_gbc.png")),
         gba: read(&dir.join("cart_gba.png")),
+        sfc: read(&dir.join("cart_sfc.png")),
         board: read_board(&dir.join("board_gba.png")),
     }
 }

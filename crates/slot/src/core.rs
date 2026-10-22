@@ -101,7 +101,11 @@ pub fn open_core_for(
     // `apply_core_options`.
     let initial_options: Vec<(&str, &str)> = match core {
         Core::Mgba => vec![("mgba_sgb_borders", "OFF"), ("mgba_gb_colors", "Grayscale")],
-        Core::Gpsp => vec![],
+        // Neither of the other two is asked for anything before `retro_load_game`: gpSP's one
+        // option is read there, and Supafaust's own defaults are the ones a Super Nintendo
+        // wants. Options are named per core, so "nothing to set" is the honest answer rather
+        // than a placeholder.
+        Core::Gpsp | Core::Supafaust => vec![],
     };
     for path in paths {
         if !path.exists() {

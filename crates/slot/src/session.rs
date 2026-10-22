@@ -536,13 +536,15 @@ impl Session {
         // in practice, right up until `open_core` did not yet know `Core` existed. `App` stores
         // this rather than re-deriving it later, which is what makes that class of drift
         // structurally unreachable now instead of merely unobserved.
-        // gpSP does the Game Boy Advance and nothing else, so anything that is not one has
-        // exactly one core that can take it, whatever the card's own file says — including a
-        // line somebody wrote into it by hand. Everything downstream reads the core from the
-        // variable above, so clamping it here is all it takes to keep a `.gb` off gpSP.
+        // Only the Game Boy Advance has a choice to make, and the choice is the card's. Every
+        // other machine has exactly one core that can take it, whatever the card's own file
+        // says — including a line somebody wrote into it by hand. Everything downstream reads
+        // the core from the variable above, so clamping it here is all it takes to keep a
+        // `.gb` off gpSP and a `.sfc` off mGBA.
         let core = match system {
             System::Gba => slot_store::core_for(&self.root, stem),
             System::Gb | System::Gbc => Core::Mgba,
+            System::Sfc => Core::Supafaust,
         };
         self.app.set_core(core);
         // An SGB-enhanced GB/GBC cart would draw mGBA's Super Game Boy border, which SLOT
@@ -584,11 +586,12 @@ impl Session {
         let (which, slot) = match system {
             System::Gb => ("gb", 0),
             System::Gbc => ("gbc", 1),
-            System::Gba => ("", 0),
+            // Neither has an overlay set: both wear their screen look as an aperture preset.
+            System::Gba | System::Sfc => ("", 0),
         };
         if which.is_empty() {
             // No overlay set for this system: drop the previous cart's overlay.
-            eprintln!("slot: overlay: GBA has no set — clearing");
+            eprintln!("slot: overlay: {} has no set — clearing", system.dir_name());
             self.app.clear_overlay_set();
         } else {
             let list = crate::root::overlay_files(&self.root, which);

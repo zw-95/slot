@@ -24,12 +24,20 @@ pub const GBA_SRC_H: u32 = 160;
 pub const GB_SRC_W: u32 = 160;
 pub const GB_SRC_H: u32 = 144;
 
+/// The Super Nintendo's. Twice, not three times: 256x224 at three would be 768x672, which is
+/// off the panel in both directions. Two is the only integer scale that fits the whole frame.
+pub const SFC_SRC_W: u32 = 256;
+pub const SFC_SRC_H: u32 = 224;
+
 /// Which machine's picture is on the panel.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum System {
     Gba,
     /// Game Boy *and* Game Boy Color: one row, because one frame size.
     Gb,
+    /// The Super Nintendo. The first machine here whose frame does not divide into the panel
+    /// three times, and so the first that answers a different scale.
+    Sfc,
 }
 
 impl System {
@@ -47,6 +55,9 @@ impl System {
         match self {
             System::Gba => 3,
             System::Gb => 3,
+            // 512x448 centred: 104 panel pixels of margin either side and 16 above and below,
+            // which is where a bezel goes.
+            System::Sfc => 2,
         }
     }
 
@@ -57,6 +68,7 @@ impl System {
         match self {
             System::Gba => GBA_SRC_W,
             System::Gb => GB_SRC_W,
+            System::Sfc => SFC_SRC_W,
         }
     }
 
@@ -64,6 +76,7 @@ impl System {
         match self {
             System::Gba => GBA_SRC_H,
             System::Gb => GB_SRC_H,
+            System::Sfc => SFC_SRC_H,
         }
     }
 

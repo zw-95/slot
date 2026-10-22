@@ -4,12 +4,19 @@ use std::path::Path;
 pub const SELECTED_CORE_FILE: &str = "System/selected_core.ini";
 
 /// Which emulator runs a cart. mGBA is the whole product's default; gpSP exists for the
-/// serial hardware mGBA's libretro build does not carry.
+/// serial hardware mGBA's libretro build does not carry; Supafaust is the Super Nintendo,
+/// for which there is no choice to make and no second core to choose between.
+///
+/// A core is not a machine, and the two are deliberately not the same list: two of these run
+/// Game Boy Advance carts, and which one a cart gets is written on the card per cart. The
+/// machine says what a cart *is*; the core says what runs it.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum Core {
     #[default]
     Mgba,
     Gpsp,
+    /// Mednafen's Super Nintendo core, the `mednafen_supafaust` libretro build.
+    Supafaust,
 }
 
 impl Core {
@@ -17,12 +24,15 @@ impl Core {
     /// `migrate_states` walks this rather than spelling the variant list out a second time,
     /// so a third core added here does not also have to be remembered at every call site
     /// that needs to tell a core's own directory apart from a cart's.
-    pub const ALL: [Core; 2] = [Core::Mgba, Core::Gpsp];
+    pub const ALL: [Core; 3] = [Core::Mgba, Core::Gpsp, Core::Supafaust];
 
     pub fn as_str(&self) -> &'static str {
         match self {
             Core::Mgba => "mgba",
             Core::Gpsp => "gpsp",
+            // The libretro name, because that is what it is called on every other frontend
+            // and what the `.so` on the card is called. `text` is the player's name for it.
+            Core::Supafaust => "mednafen_supafaust",
         }
     }
 
@@ -38,6 +48,9 @@ impl Core {
         match self {
             Core::Mgba => "mGBA",
             Core::Gpsp => "gpSP",
+            // Not the libretro name: that is `mednafen_supafaust`, which is a name from the
+            // build system, and what the picker is putting on a panel is the emulator.
+            Core::Supafaust => "Supafaust",
         }
     }
 
@@ -45,6 +58,8 @@ impl Core {
         match s.trim().to_ascii_lowercase().as_str() {
             "mgba" => Some(Core::Mgba),
             "gpsp" => Some(Core::Gpsp),
+            // The libretro name, and the short one a hand is likelier to type.
+            "mednafen_supafaust" | "supafaust" => Some(Core::Supafaust),
             _ => None,
         }
     }

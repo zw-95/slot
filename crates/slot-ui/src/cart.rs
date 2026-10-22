@@ -83,7 +83,11 @@ pub struct CartSize {
 
 pub const fn size_for(system: slot_store::System) -> CartSize {
     match system {
-        slot_store::System::Gba => CartSize {
+        // A Super Nintendo cart is a landscape cart of the same shape as an Advance one —
+        // wide, and wider than it is tall — which is the shape this block is. It borrows the
+        // Advance's shell rather than inventing a third shape, and a card that ships its own
+        // `cart_sfc.png` still redraws it (see `cart_art::art_for`).
+        slot_store::System::Gba | slot_store::System::Sfc => CartSize {
             w: CART_W,
             h: CART_H,
             pitch: 360.0,

@@ -549,7 +549,7 @@ struct DisplayFilter {
     /// The Advance's aperture choice, 0..=4. Read by nothing else — see the struct doc.
     /// The Advance's aperture preset, `0..MASK_STATES` — what SELECT+X steps.
     mask_mode: u8,
-    /// One colour-correction choice per machine, in `MACHINE_SLOTS` order (GBA, GB, GBC).
+    /// One colour-correction choice per machine, in `MACHINE_SLOTS` order (GBA, GB, GBC, SFC).
     ///
     /// Per machine because the three machines want different *kinds* of correction and there is
     /// no sensible shared index into them. A Game Boy is a greyscale machine: saturation is
@@ -562,12 +562,12 @@ struct DisplayFilter {
     /// `u16` rather than `u8` because the Game Boy's slot is an index into the whole palette
     /// table, which is past 255 entries and will only grow. The two colour machines' slots still
     /// hold 0..=6; the width is shared because the three are read as one array.
-    cc: [u16; 3],
+    cc: [u16; 4],
 }
 
 /// How many machines have their own shelf and their own colour correction. The three the
 /// device ships with; `machine_slot` is the mapping and it is the only one.
-const MACHINE_SLOTS: usize = 3;
+const MACHINE_SLOTS: usize = 4;
 impl DisplayFilter {
     const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     // GRAYSCALE (0% saturation): plain luma. The whole picture collapses to its luma
@@ -612,6 +612,7 @@ impl DisplayFilter {
             System::Gba => 0,
             System::Gb => 1,
             System::Gbc => 2,
+            System::Sfc => 3,
         }
     }
 
@@ -733,7 +734,7 @@ impl DisplayFilter {
         lcd3x: [[[u8; 3]; 3]; 3],
         nocolor_cc: [[f32; 3]; 3],
         mode: u8,
-        cc: [u16; 3],
+        cc: [u16; 4],
     ) -> Self {
         Self {
             lcd3x,
@@ -744,6 +745,10 @@ impl DisplayFilter {
                 cc[0].min(Self::CC_COUNT - 1),
                 cc[1].min(Self::GB_CC_COUNT - 1),
                 cc[2].min(Self::CC_COUNT - 1),
+                // The Super Nintendo shares the colour machines' eighteen grades, so it clamps
+                // against the same count. It has a slot of its own rather than sharing the
+                // Advance's because a player who sets one machine's look has not set the other's.
+                cc[3].min(Self::CC_COUNT - 1),
             ],
         }
     }
@@ -1392,7 +1397,7 @@ impl App {
                 slot_gfx::builtin_panel_mask(),
                 DisplayFilter::DEFAULT_CC,
                 2,
-                [0, 0, 0],
+                [0, 0, 0, 0],
             ),
             // Page one, browser shut. `App::boot` moves the page onto whatever the card had
             // chosen, so the first tap of the palette key walks the fifteen around it.
@@ -1558,7 +1563,10 @@ impl App {
                 };
                 Some((colour, DisplayFilter::GBC_GRID_MIX, false))
             }
-            System::Gba => None,
+            // Neither of the two machines that hang their screen look off an overlay ring draws
+            // a lattice from here. A Super Nintendo's mesh is the aperture preset instead: the
+            // scanline, which `mask_ring` keeps for it — see `display_mask`.
+            System::Gba | System::Sfc => None,
         }
     }
 
@@ -2125,7 +2133,9 @@ impl App {
         let slot = match system {
             System::Gb => 0,
             System::Gbc => 1,
-            System::Gba => return,
+            // No overlay set to walk: the Advance's and the Super Nintendo's screen looks are
+            // the aperture presets, which `cycle_mask` steps.
+            System::Gba | System::Sfc => return,
         };
         let Some(root) = self.root.clone() else {
             return;
@@ -2236,7 +2246,7 @@ impl App {
         if self.shelf_switch.is_some() || !self.on_shelf() || self.core_picker.is_some() {
             return;
         }
-        const ORDER: [System; 3] = [System::Gba, System::Gb, System::Gbc];
+        const ORDER: [System; 4] = [System::Gba, System::Gb, System::Gbc, System::Sfc];
         let cur = ORDER.iter().position(|&s| s == self.shelf_system).unwrap_or(0);
         for k in 1..=ORDER.len() {
             let to = ORDER[(cur + k) % ORDER.len()];
@@ -2317,6 +2327,7 @@ impl App {
             System::Gb => 0,
             System::Gbc => 1,
             System::Gba => 2,
+            System::Sfc => 3,
         };
         let faces = match slot_ui::palette::mode() {
             slot_ui::Mode::Light => &self.shelf_ind_light,
@@ -2627,13 +2638,14 @@ impl App {
 
     /// Which machine's picture belongs on the panel.
     ///
-    /// The card's three shelves collapse into the renderer's two here, because Game Boy and
-    /// Game Boy Color hand back the same 160x144 frame — `slot_store::System` is the three and
-    /// `slot_gfx::System` is the two. `Gba` stands in for an empty shelf, where there is no
+    /// The card's four shelves collapse into the renderer's three here, because Game Boy and
+    /// Game Boy Color hand back the same 160x144 frame — `slot_store::System` is the four and
+    /// `slot_gfx::System` is the three. `Gba` stands in for an empty shelf, where there is no
     /// picture to misplace either way.
     pub fn screen_system(&self) -> ScreenSystem {
         match self.shelf.current_cart().map(|c| c.system()) {
             Some(System::Gb) | Some(System::Gbc) => ScreenSystem::Gb,
+            Some(System::Sfc) => ScreenSystem::Sfc,
             _ => ScreenSystem::Gba,
         }
     }

@@ -14,7 +14,10 @@ const DETAIL_GB_SVG: &str = include_str!("../assets/cart_gb_detail.svg");
 /// black carts) and not for class C (Game Boy Color only), which is the physical lockout.
 fn outline(system: System) -> &'static str {
     match system {
-        System::Gba => CART_GBA_SVG,
+        // A Super Nintendo cart is drawn with the Advance's landscape outline: same shape,
+        // and a second SVG that is byte for byte the first one is a second thing to keep in
+        // step. It stops being true when the two shells are drawn differently.
+        System::Gba | System::Sfc => CART_GBA_SVG,
         System::Gb => CART_GB_SVG,
         System::Gbc => CART_GBC_SVG,
     }
@@ -22,14 +25,17 @@ fn outline(system: System) -> &'static str {
 
 fn detail(system: System) -> &'static str {
     match system {
-        System::Gba => DETAIL_GBA_SVG,
+        System::Gba | System::Sfc => DETAIL_GBA_SVG,
         System::Gb | System::Gbc => DETAIL_GB_SVG,
     }
 }
 
 fn index(system: System) -> usize {
     match system {
-        System::Gba => 0,
+        // One cache slot for the two machines that share an outline and a size: the masks are
+        // keyed on what was rasterised, not on who asked, so sharing is the truth rather than
+        // a shortcut.
+        System::Gba | System::Sfc => 0,
         System::Gb => 1,
         System::Gbc => 2,
     }

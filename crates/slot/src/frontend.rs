@@ -341,8 +341,9 @@ impl Frontend {
             }
         };
         self.session.app_mut().set_fav_faces(star, off, on);
-        // The three machine logos for the shelf indicator, bottom-left, in `GB, GBC, GBA`
-        // order. Text for now — the user will bake real machine logos — uploaded here with the
+        // The four machine logos for the shelf indicator, bottom-left, in `GB, GBC, GBA, SFC`
+        // order — the order `draw_shelf_logo` indexes them in. Text for now — the user will
+        // bake real machine logos — uploaded here with the
         // rest of the fixed furniture so nothing is rasterised mid-swap.
         // A card that supplies its own badge is used as it is; a card that does not gets the
         // built-in word. Either way the face comes with its size, because the app fits it into
@@ -352,6 +353,7 @@ impl Frontend {
             ("GB", "type_gb.png"),
             ("GBC", "type_gbc.png"),
             ("GBA", "type_gba.png"),
+            ("SFC", "type_sfc.png"),
         ]
         .iter()
         .map(|(word, file)| {
@@ -375,6 +377,7 @@ impl Frontend {
             ("GB", "type_gb_light.png"),
             ("GBC", "type_gbc_light.png"),
             ("GBA", "type_gba_light.png"),
+            ("SFC", "type_sfc_light.png"),
         ]
         .iter()
         .map(|(word, file)| {

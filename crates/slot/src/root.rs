@@ -270,7 +270,7 @@ pub fn color_correction(root: &Path) -> Option<[[f32; 3]; 3]> {
     }
 }
 
-/// The display modes, read from `System/display.txt` as "mask_mode cc_gba cc_gb cc_gbc":
+/// The display modes, read from `System/display.txt` as "mask_mode cc_gba cc_gb cc_gbc cc_sfc":
 /// mask_mode 0..=4 (OFF, LCD3X 50%, LCD3X 100%, SCANLINE 50%, SCANLINE 100%) and one colour
 /// choice per machine — 0..=2 for the colour machines (GRAYSCALE, AGB-001, NDS) and the whole
 /// palette table for the Game Boy, whose list is palettes rather than saturations. The ranges are
@@ -311,7 +311,7 @@ pub const MASK_STATES: usize = 7;
 ///
 /// Both are read as *indices* rather than as names, so every list has to clamp: an out-of-range
 /// `cc` is corrected by `DisplayFilter::new`, and an out-of-range `mask` here.
-pub fn display_modes(root: &Path) -> (u8, [u16; 3]) {
+pub fn display_modes(root: &Path) -> (u8, [u16; 4]) {
     let text = std::fs::read_to_string(root.join("System/display.txt")).ok();
     let vals: Vec<u16> = text
         .map(|t| {
@@ -328,21 +328,27 @@ pub fn display_modes(root: &Path) -> (u8, [u16; 3]) {
         .unwrap_or(2)
         .min(MASK_STATES as u16 - 1) as u8;
     let one = vals.get(1).copied().unwrap_or(0);
-    let cc = if vals.len() >= 4 {
-        [one, vals[2], vals[3]]
+    let cc = if vals.len() >= 5 {
+        [one, vals[2], vals[3], vals[4]]
+    } else if vals.len() >= 4 {
+        // The file as it was before the Super Nintendo had a slot of its own. No number in it
+        // means the card never chose a colour for that machine, and the colour it chose for the
+        // Advance is the closer reading than grayscale: both are colour machines walking the
+        // same eighteen grades.
+        [one, vals[2], vals[3], one]
     } else {
         // The older two-integer file, or the one-integer one: whatever colour was chosen then
         // was chosen for every machine, and that is still what it means.
-        [one, one, one]
+        [one, one, one, one]
     };
     (mask, cc)
 }
 
 /// Persist the display modes. Best effort: a read only card simply keeps the default.
-pub fn write_display_modes(root: &Path, mask: u8, cc: [u16; 3]) {
+pub fn write_display_modes(root: &Path, mask: u8, cc: [u16; 4]) {
     let _ = std::fs::write(
         root.join("System/display.txt"),
-        format!("{mask} {} {} {}", cc[0], cc[1], cc[2]),
+        format!("{mask} {} {} {} {}", cc[0], cc[1], cc[2], cc[3]),
     );
 }
 
@@ -409,8 +415,9 @@ pub fn migrate_display_modes(root: &Path) {
         return;
     }
     let (mask, mut cc) = display_modes(root);
-    for slot in [0usize, 2usize] {
-        // GB slot (1) is a palette index, not a grade; skip it.
+    // Every slot that is a colour grade: the Advance's, the Color's and the Super Nintendo's.
+    // GB slot (1) is a palette index, not a grade, and is left alone.
+    for slot in [0usize, 2usize, 3usize] {
         if let Some(mapped) = CC_LEGACY.get(cc[slot] as usize) {
             cc[slot] = *mapped;
         }

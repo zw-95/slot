@@ -124,15 +124,15 @@ pub struct Shelf {
     /// (this card files its three Game Boy carts at 27, 127 and 637 among nine hundred Advance
     /// ones), so any measurement of "how far away is this cart" that walks `carts` is measuring
     /// the wrong thing.
-    machines: [Vec<usize>; 3],
+    machines: [Vec<usize>; 4],
     /// Each machine's own subfolders, sorted and distinct — the folders `folder_pick` chooses
     /// among. A cart loose in its machine's folder contributes none; the folders are read off the
     /// roms' own paths (`Games/<machine>/<folder>/<rom>`), so a card that files its games per
     /// machine and then per language needs no second index to be switchable.
-    folders: [Vec<String>; 3],
+    folders: [Vec<String>; 4],
     /// Which of a machine's subfolders its shelf is showing, or `None` for all of them. Per
     /// machine, so a folder picked on one shelf is still picked when the user comes back to it.
-    folder_pick: [Option<usize>; 3],
+    folder_pick: [Option<usize>; 4],
     /// One entry per cart: its position in its own machine's shelf, or `u32::MAX` for a cart no
     /// shelf shows. Where a switch to that machine lands is the *front* of this list, which is
     /// what makes the front of every machine the set worth keeping faces for.
@@ -170,14 +170,14 @@ pub struct Shelf {
 impl Shelf {
     pub fn new(carts: Vec<Cart>) -> Self {
         let view: Vec<usize> = (0..carts.len()).collect();
-        let mut machines: [Vec<usize>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+        let mut machines: [Vec<usize>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         let mut pos_in_machine = vec![u32::MAX; carts.len()];
         for (i, c) in carts.iter().enumerate() {
             let list = &mut machines[Self::machine_slot(c.system())];
             pos_in_machine[i] = list.len() as u32;
             list.push(i);
         }
-        let mut folders: [Vec<String>; 3] = [Vec::new(), Vec::new(), Vec::new()];
+        let mut folders: [Vec<String>; 4] = [Vec::new(), Vec::new(), Vec::new(), Vec::new()];
         for c in &carts {
             let slot = Self::machine_slot(c.system());
             if let Some(f) = folder_of(&c.rom, c.system().dir_name()) {
@@ -197,7 +197,7 @@ impl Shelf {
             carts,
             machines,
             folders,
-            folder_pick: [None, None, None],
+            folder_pick: [None, None, None, None],
             pos_in_machine,
             pos_in_view,
             system: System::Gba,
@@ -414,12 +414,14 @@ impl Shelf {
         Some(d.min(n - d))
     }
 
-    /// Which of the three shelves a machine's carts live on.
+    /// Which shelf a machine's carts live on. One slot per machine, in the order `System`
+    /// lists them; a fourth machine is a fourth shelf and nothing else changes.
     fn machine_slot(s: System) -> usize {
         match s {
             System::Gba => 0,
             System::Gb => 1,
             System::Gbc => 2,
+            System::Sfc => 3,
         }
     }
 
