@@ -6,7 +6,7 @@ use slot_store::{Core, System};
 use slot_ui::{FfState, Toast};
 
 use crate::app::{App, Phase};
-use crate::audio::{open_sink, AudioSink, Profile, Ring, Sfx, GBA_HZ};
+use crate::audio::{open_sink, AudioSink, Profile, Ring, Sfx, DEVICE_HZ};
 use crate::core::open_core;
 use crate::emu::{CoreState, EmuHandle, Speed};
 use crate::frames::FrameRef;
@@ -37,9 +37,10 @@ impl Session {
     pub fn boot(root: PathBuf) -> Self {
         let mut sink: Box<dyn AudioSink> = open_sink();
         let audio = crate::root::audio_profile(&root);
-        // A frontend for one console knows the rate before it knows the cart. A device that
-        // refuses it still opens, and the worker resamples to whatever it did take.
-        if let Err(e) = sink.open(GBA_HZ, audio) {
+        // The device is opened for one rate before there is a cart to ask. A core that answers
+        // another one still lands: the worker resamples from the core's rate to whatever the
+        // device took.
+        if let Err(e) = sink.open(DEVICE_HZ, audio) {
             eprintln!("slot: audio: {e}");
         }
         let pad_remap = crate::root::remap(&root).unwrap_or_default();
@@ -317,7 +318,7 @@ impl Session {
             return;
         }
         self.audio = wanted;
-        if let Err(e) = self.sink.open(GBA_HZ, wanted) {
+        if let Err(e) = self.sink.open(DEVICE_HZ, wanted) {
             eprintln!("slot: audio: {e}");
         }
         eprintln!("slot: audio profile {}", wanted.as_str());

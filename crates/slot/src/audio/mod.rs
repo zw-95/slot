@@ -15,9 +15,16 @@ pub use sfx::Sfx;
 pub use sink::{AudioError, AudioSink};
 pub use stub::StubSink;
 
-/// The GBA's own rate. slot plays nothing else, so the device is opened for it before there
-/// is a core to ask, and a device that takes it needs no resampling at all.
-pub const GBA_HZ: u32 = 32_768;
+/// The rate the PCM is opened at, chosen before there is a core to ask: the device is opened
+/// once at boot and outlives every cart, and a cart clicks home while it is still on its way
+/// in — exactly when no core exists yet.
+///
+/// It is the GBA's own rate because that is the machine this frontend had, and a cart from it
+/// needs no conversion at all. A cart whose core answers another rate is not opened for: the
+/// worker holds a resampler from the core's rate to whatever the device took, so the two rates
+/// meet there instead. Rename this when a machine arrives that is worth reopening the hardware
+/// for, which is a different decision and a different place.
+pub const DEVICE_HZ: u32 = 32_768;
 
 /// How hard the audio path trades latency for slack.
 ///
