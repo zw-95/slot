@@ -436,6 +436,11 @@ impl Worker {
             }
         }
         let av = core.av_info();
+        // The frame pool was built for the GBA, because that is the machine this frontend had.
+        // A machine whose frame is larger gets it resized once, here, before anything is
+        // published into it — and a machine whose frame is the same size costs nothing.
+        self.frames
+            .grow((av.max_width * av.max_height * 4) as usize);
         // A device that refused the GBA's rate reports its own, and a device that failed to
         // open reports zero, which the resampler reads as "no conversion to do".
         let device_hz = match ring.sample_rate() {
@@ -596,7 +601,8 @@ impl Worker {
                     // difference. Nothing was being replayed faithfully; it was being
                     // re-played.
                     core.run_frame(ButtonMask(0));
-                    self.publish(core.video_xrgb8888());
+                    let av = core.av_info();
+                    self.publish(core.video_xrgb8888(), av.width, av.height);
                 }
                 self.shared
                     .rewind_fill
@@ -615,7 +621,8 @@ impl Worker {
                 // and on both devices. A GBA that asked a question and heard nothing for four
                 // frames reports a communication error, which is what it should do.
                 flush_outbound(&mut transport, &link);
-                self.publish(core.video_xrgb8888());
+                let av = core.av_info();
+                self.publish(core.video_xrgb8888(), av.width, av.height);
 
                 // Counted per present rather than per frame, so a fast forward pays the
                 // same snapshot cost per present as normal play and simply records a
@@ -687,11 +694,11 @@ impl Worker {
         }
     }
 
-    fn publish(&self, video: &[u8]) {
+    fn publish(&self, video: &[u8], w: u32, h: u32) {
         let mut buf = self.frames.take_write();
         buf.clear();
         buf.extend_from_slice(video);
-        self.frames.publish(buf);
+        self.frames.publish(buf, w, h);
         self.shared.published.fetch_add(1, Ordering::Relaxed);
     }
 

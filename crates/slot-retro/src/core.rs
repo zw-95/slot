@@ -7,6 +7,13 @@ use crate::rumble::Rumble;
 pub const GBA_W: u32 = 240;
 pub const GBA_H: u32 = 160;
 
+/// The largest frame a core is believed, no matter what geometry it reports. A frame buffer is
+/// sized off the geometry, and a core that lies — or simply misreports — would otherwise ask for
+/// whatever it likes: 1024x1024 is four megabytes per buffer, which is already more than a
+/// handheld should hand over on the strength of a number in a struct.
+pub const MAX_FRAME_W: u32 = 1024;
+pub const MAX_FRAME_H: u32 = 1024;
+
 /// libretro `RETRO_DEVICE_ID_JOYPAD` bit order. Y and X have no GBA equivalent, so bits 1
 /// and 9 are never set.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]

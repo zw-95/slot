@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use libloading::Library;
 
-use crate::core::{AvInfo, ButtonMask, CoreError, RetroCore, GBA_H, GBA_W};
+use crate::core::{
+    AvInfo, ButtonMask, CoreError, RetroCore, GBA_H, GBA_W, MAX_FRAME_H, MAX_FRAME_W,
+};
 use crate::ffi::*;
 use crate::link::Link;
 use crate::rumble::Rumble;
@@ -36,6 +38,12 @@ struct Host {
     /// can cut the buffer at the size it really is rather than the size it was allocated at.
     frame_w: u32,
     frame_h: u32,
+    /// How big a frame `video` currently has room for, in pixels. Starts at the GBA's and grows
+    /// once a core reports a machine that needs more — see `reserve_video`. `video_refresh`
+    /// clips against this rather than against `GBA_W`/`GBA_H`: it is the buffer's real extent,
+    /// so it is the only bound that keeps the copy inside it.
+    cap_w: u32,
+    cap_h: u32,
     audio: Vec<i16>,
     input: u16,
     system_dir: CString,
@@ -385,8 +393,8 @@ unsafe extern "C" fn video_refresh(
         return; // duplicate frame, keep the previous one
     }
     with_host(|h| {
-        let cols = width.min(GBA_W) as usize;
-        let rows = height.min(GBA_H) as usize;
+        let cols = width.min(h.cap_w) as usize;
+        let rows = height.min(h.cap_h) as usize;
         // Pack tightly into the destination at the *frame's* width, not the GBA's. A GB/GBC
         // core hands its picture back as 160x144; writing 160 columns but striding on 240
         // leaves an 80-pixel band of stale bytes at the end of every row, which the panel then
@@ -418,8 +426,8 @@ unsafe extern "C" fn video_refresh(
         }
         // The size this frame really is, for anything that cuts the buffer by dimension
         // rather than by the GBA it was allocated at (the thumbnail encoder).
-        h.frame_w = width.min(GBA_W);
-        h.frame_h = height.min(GBA_H);
+        h.frame_w = width.min(h.cap_w);
+        h.frame_h = height.min(h.cap_h);
     });
 }
 
@@ -585,6 +593,8 @@ impl LibretroCore {
             format: PixelFormat::Xrgb8888,
             frame_w: 0,
             frame_h: 0,
+            cap_w: GBA_W,
+            cap_h: GBA_H,
             audio: Vec::new(),
             input: 0,
             system_dir: cdir(system_dir)?,
@@ -623,6 +633,22 @@ impl LibretroCore {
             loaded: false,
             _lib: lib,
         })
+    }
+
+    /// Grow the video buffer to hold a frame this big. Called once the core has reported its
+    /// geometry, which is the first moment anybody knows how large a frame can get; until then
+    /// the buffer is the GBA's, which is what every machine that came before this one needed.
+    /// Only ever grows, and leaves the picture alone when it already fits, so a cart swap
+    /// between two machines of the same size costs nothing.
+    fn reserve_video(&mut self, w: u32, h: u32) {
+        if w <= self.host.cap_w && h <= self.host.cap_h {
+            return;
+        }
+        let cap_w = self.host.cap_w.max(w);
+        let cap_h = self.host.cap_h.max(h);
+        self.host.video = vec![0; (cap_w * cap_h * 4) as usize];
+        self.host.cap_w = cap_w;
+        self.host.cap_h = cap_h;
     }
 
     fn unload(&mut self) {
@@ -674,9 +700,18 @@ impl RetroCore for LibretroCore {
         unsafe { (self.api.get_system_av_info)(&mut av) };
         // `max_*` is what the core says it will never exceed. Some leave it zero, and a few
         // leave it below `base_*`, so take the larger of the two: a zero here becomes a
-        // zero-byte frame buffer downstream, which is worse than a slightly too big one.
-        let max_w = av.geometry.max_width.max(av.geometry.base_width);
-        let max_h = av.geometry.max_height.max(av.geometry.base_height);
+        // zero-byte frame buffer downstream, which is worse than a slightly too big one. Then
+        // clamp, because the number is the core's word and the buffer is ours.
+        let max_w = av
+            .geometry
+            .max_width
+            .max(av.geometry.base_width)
+            .min(MAX_FRAME_W);
+        let max_h = av
+            .geometry
+            .max_height
+            .max(av.geometry.base_height)
+            .min(MAX_FRAME_H);
         self.av = AvInfo {
             fps: av.timing.fps,
             sample_rate: av.timing.sample_rate,
@@ -685,6 +720,7 @@ impl RetroCore for LibretroCore {
             max_width: max_w,
             max_height: max_h,
         };
+        self.reserve_video(max_w, max_h);
         unsafe { (self.api.set_controller_port_device)(0, DEVICE_JOYPAD) };
         Ok(())
     }
@@ -831,6 +867,8 @@ mod tests {
             format: PixelFormat::Xrgb8888,
             frame_w: 0,
             frame_h: 0,
+            cap_w: GBA_W,
+            cap_h: GBA_H,
             audio: Vec::new(),
             input: 0,
             system_dir: CString::new(".").unwrap(),
