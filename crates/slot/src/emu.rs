@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU16, AtomicU64, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, Ordering};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -106,7 +106,7 @@ enum Cmd {
 }
 
 struct Shared {
-    input: AtomicU16,
+    input: AtomicU32,
     speed: AtomicU8,
     /// What the worker last read `speed` as, stored right after that read with `Release` so
     /// `EmuHandle::observed_speed` can tell a stopped core from a merely descheduled one — see
@@ -156,7 +156,7 @@ impl EmuHandle {
         let link = core.net();
         let frames = Frames::new((GBA_W * GBA_H * 4) as usize);
         let shared = Arc::new(Shared {
-            input: AtomicU16::new(0),
+            input: AtomicU32::new(0),
             // Paused until told otherwise. A core spawned during the insert would
             // otherwise run a frame or two before the session's first `sync_speed` lands,
             // and those frames are the start of the bios boot animation.
@@ -456,6 +456,14 @@ impl Worker {
             _ => av.sample_rate,
         };
         let mut resampler = Resampler::new(core_hz, device_hz);
+        // The device has no console and a cart that comes up in the wrong shape gives no other
+        // sign of it, so the numbers a core actually answered have to be readable off the card.
+        // Printed once, here, where they have just been read: a per-frame line would be the log
+        // itself.
+        eprintln!(
+            "slot: core: {} Hz audio, {:.4} fps, frame up to {}x{}",
+            av.sample_rate, av.fps, av.max_width, av.max_height
+        );
         ring.clear_faults();
         self.shared
             .state

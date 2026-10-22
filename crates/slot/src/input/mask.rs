@@ -86,7 +86,7 @@ impl Pad {
     }
 
     pub fn mask(&self) -> ButtonMask {
-        let mut m = 0u16;
+        let mut m = 0u32;
         for i in 0..BTN_COUNT {
             if self.down[i] {
                 if let Some(bit) = bit(self.remap.map[i]) {
@@ -110,7 +110,13 @@ impl Default for Pad {
     }
 }
 
-fn bit(btn: Btn) -> Option<u16> {
+/// The physical button's place in the libretro order. `None` is not a mapping failure: Menu,
+/// the volume rocker, power and the lid belong to the handheld and never reach a core.
+///
+/// X, Y, L2 and R2 have a home in that order even though a GBA has no such buttons, and this
+/// is where that pays off: the key is already wired to the bit a machine with those buttons
+/// reads, so a cart from one of them needs nothing here. A GBA core ignores the bits.
+fn bit(btn: Btn) -> Option<u32> {
     Some(match btn {
         Btn::Up => ButtonMask::UP,
         Btn::Down => ButtonMask::DOWN,
@@ -118,8 +124,12 @@ fn bit(btn: Btn) -> Option<u16> {
         Btn::Right => ButtonMask::RIGHT,
         Btn::A => ButtonMask::A,
         Btn::B => ButtonMask::B,
+        Btn::X => ButtonMask::X,
+        Btn::Y => ButtonMask::Y,
         Btn::L1 => ButtonMask::L,
         Btn::R1 => ButtonMask::R,
+        Btn::L2 => ButtonMask::L2,
+        Btn::R2 => ButtonMask::R2,
         Btn::Start => ButtonMask::START,
         Btn::Select => ButtonMask::SELECT,
         _ => return None,

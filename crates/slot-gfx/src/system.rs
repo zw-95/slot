@@ -16,11 +16,6 @@
 
 use crate::surface::{OUT_H, OUT_W};
 
-/// The only scale that exists. One source pixel is exactly SCALE x SCALE panel pixels,
-/// nearest neighbour, and it is what collapses LCD3x to a 3x3 mask tiled once per source
-/// pixel.
-pub const SCALE: u32 = 3;
-
 /// The GBA's own frame. The pair this module used to be.
 pub const GBA_SRC_W: u32 = 240;
 pub const GBA_SRC_H: u32 = 160;
@@ -38,6 +33,23 @@ pub enum System {
 }
 
 impl System {
+    /// How many panel pixels one source pixel covers, nearest neighbour and exactly.
+    ///
+    /// A method rather than a constant because this is the one number a new machine answers
+    /// differently: 256x224 lands in the panel twice, not three times. Both machines that
+    /// exist answer 3, which is the number the panel was built around — 240 across 720, and
+    /// 160x144 across the 480x432 window it leaves.
+    ///
+    /// The 3x3 LCD mask is tied to this: it is one RGB triad per *source* pixel, so it only
+    /// means what it says at 3. A machine that answers 2 has to be drawn without it — bezel
+    /// and a single-line scanline instead — which is the thing to settle when one arrives.
+    pub fn scale(self) -> u32 {
+        match self {
+            System::Gba => 3,
+            System::Gb => 3,
+        }
+    }
+
     /// The frame the core hands us, in pixels. This is also how many times the 3x3 mask
     /// tiles across the window: one RGB triad per source pixel, exactly — which is why a
     /// different source size needs no change to the mask itself.
@@ -62,8 +74,8 @@ impl System {
     /// and Game Boy's comes out as 480x432 sat in the middle. One formula, and the machine
     /// that fills the panel is the case that falls out of it rather than a special case.
     pub fn screen_base(self) -> (f32, f32, f32, f32) {
-        let w = self.src_w() as f32 * SCALE as f32;
-        let h = self.src_h() as f32 * SCALE as f32;
+        let w = self.src_w() as f32 * self.scale() as f32;
+        let h = self.src_h() as f32 * self.scale() as f32;
         ((OUT_W as f32 - w) / 2.0, (OUT_H as f32 - h) / 2.0, w, h)
     }
 }

@@ -45,7 +45,7 @@ struct Host {
     cap_w: u32,
     cap_h: u32,
     audio: Vec<i16>,
-    input: u16,
+    input: u32,
     system_dir: CString,
     save_dir: CString,
     rumble: Rumble,

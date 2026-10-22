@@ -14,22 +14,34 @@ pub const GBA_H: u32 = 160;
 pub const MAX_FRAME_W: u32 = 1024;
 pub const MAX_FRAME_H: u32 = 1024;
 
-/// libretro `RETRO_DEVICE_ID_JOYPAD` bit order. Y and X have no GBA equivalent, so bits 1
-/// and 9 are never set.
+/// libretro `RETRO_DEVICE_ID_JOYPAD` bit order, which is the same order for every machine: a
+/// SNES core reads bit 9 as X and a Mega Drive one reads bit 12 as its mode button, so one
+/// mask serves all of them and each reads the bits its own console has.
+///
+/// The GBA has no Y, X, L2, R2, L3 or R3, so those bits stay clear on a GBA cart and its core
+/// ignores them — which is what keeps this one struct honest for every machine at once.
+/// Carried as `u32` rather than `u16`: the order does not stop at R, and a wider mask costs
+/// nothing a narrower one would have saved.
 #[derive(Copy, Clone, Default, PartialEq, Eq, Debug)]
-pub struct ButtonMask(pub u16);
+pub struct ButtonMask(pub u32);
 
 impl ButtonMask {
-    pub const B: u16 = 1 << 0;
-    pub const SELECT: u16 = 1 << 2;
-    pub const START: u16 = 1 << 3;
-    pub const UP: u16 = 1 << 4;
-    pub const DOWN: u16 = 1 << 5;
-    pub const LEFT: u16 = 1 << 6;
-    pub const RIGHT: u16 = 1 << 7;
-    pub const A: u16 = 1 << 8;
-    pub const L: u16 = 1 << 10;
-    pub const R: u16 = 1 << 11;
+    pub const B: u32 = 1 << 0;
+    pub const Y: u32 = 1 << 1;
+    pub const SELECT: u32 = 1 << 2;
+    pub const START: u32 = 1 << 3;
+    pub const UP: u32 = 1 << 4;
+    pub const DOWN: u32 = 1 << 5;
+    pub const LEFT: u32 = 1 << 6;
+    pub const RIGHT: u32 = 1 << 7;
+    pub const A: u32 = 1 << 8;
+    pub const X: u32 = 1 << 9;
+    pub const L: u32 = 1 << 10;
+    pub const R: u32 = 1 << 11;
+    pub const L2: u32 = 1 << 12;
+    pub const R2: u32 = 1 << 13;
+    pub const L3: u32 = 1 << 14;
+    pub const R3: u32 = 1 << 15;
 }
 
 #[derive(Copy, Clone, Debug)]
