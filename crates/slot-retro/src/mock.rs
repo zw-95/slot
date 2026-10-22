@@ -134,6 +134,8 @@ impl RetroCore for MockCore {
             sample_rate: SAMPLE_RATE,
             width: GBA_W,
             height: GBA_H,
+            max_width: GBA_W,
+            max_height: GBA_H,
         }
     }
 }

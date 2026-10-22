@@ -617,6 +617,8 @@ impl LibretroCore {
                 sample_rate: 0.0,
                 width: 0,
                 height: 0,
+                max_width: 0,
+                max_height: 0,
             },
             loaded: false,
             _lib: lib,
@@ -670,11 +672,18 @@ impl RetroCore for LibretroCore {
         self.loaded = true;
         let mut av = SystemAvInfo::default();
         unsafe { (self.api.get_system_av_info)(&mut av) };
+        // `max_*` is what the core says it will never exceed. Some leave it zero, and a few
+        // leave it below `base_*`, so take the larger of the two: a zero here becomes a
+        // zero-byte frame buffer downstream, which is worse than a slightly too big one.
+        let max_w = av.geometry.max_width.max(av.geometry.base_width);
+        let max_h = av.geometry.max_height.max(av.geometry.base_height);
         self.av = AvInfo {
             fps: av.timing.fps,
             sample_rate: av.timing.sample_rate,
             width: 0,
             height: 0,
+            max_width: max_w,
+            max_height: max_h,
         };
         unsafe { (self.api.set_controller_port_device)(0, DEVICE_JOYPAD) };
         Ok(())
@@ -752,6 +761,8 @@ impl RetroCore for LibretroCore {
             sample_rate: self.av.sample_rate,
             width: self.host.frame_w,
             height: self.host.frame_h,
+            max_width: self.av.max_width,
+            max_height: self.av.max_height,
         }
     }
 

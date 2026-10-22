@@ -35,6 +35,43 @@ pub struct AvInfo {
     /// first frame arrives.
     pub width: u32,
     pub height: u32,
+    /// The largest frame this core will ever hand back, taken from the geometry it reported at
+    /// load. `width`/`height` above grow into this pair; anything that has to size a buffer
+    /// *before* the first frame arrives reads these instead, because the measured pair is zero
+    /// until then. Never zero once a game is loaded.
+    pub max_width: u32,
+    pub max_height: u32,
+}
+
+/// What a core can be asked to do beyond running frames.
+///
+/// The GBA pair answers `true` to everything on by default here, so a core that never overrides
+/// this behaves exactly as the frontend did when those two were all it had. The bits exist so
+/// the shelf, the pause menu and the cheat sheet can hide an entry a machine cannot honour
+/// instead of offering it and doing nothing: EasyRPG and PICO-8 have no savestate, gpSP exports
+/// no cheat entry point, and a core fed an archive wants a path rather than bytes.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub struct Capabilities {
+    /// `serialize`/`unserialize` do something. Gates save states and rewind.
+    pub savestate: bool,
+    /// `set_cheat`/`cheat_reset` reach the core. Gates the cheat list.
+    pub cheats: bool,
+    /// The core exposes battery-backed save ram. Gates reading and writing `.srm`.
+    pub save_ram: bool,
+    /// The core wants `path` only, with `data` left null: archives it opens itself (FBNeo's
+    /// romsets) and directory-shaped content (EasyRPG). Gates how `load` hands content over.
+    pub needs_fullpath: bool,
+}
+
+impl Default for Capabilities {
+    fn default() -> Self {
+        Capabilities {
+            savestate: true,
+            cheats: true,
+            save_ram: true,
+            needs_fullpath: false,
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -75,6 +112,13 @@ pub trait RetroCore: Send {
     fn save_ram(&self) -> Option<Vec<u8>>;
     fn load_save_ram(&mut self, data: &[u8]) -> Result<(), CoreError>;
     fn av_info(&self) -> AvInfo;
+    /// What this core can do beyond running frames. Defaults to the GBA pair's answer, which is
+    /// what every caller here was written against; a core that cannot save state, cannot take a
+    /// cheat code, or wants a path rather than bytes overrides it rather than having its callers
+    /// ask which machine it is.
+    fn capabilities(&self) -> Capabilities {
+        Capabilities::default()
+    }
     /// Where this core's rumble lands. A core that was never offered the interface, or one
     /// that turned it down, hands back a cell nothing ever writes.
     fn rumble(&self) -> Rumble {
