@@ -3,7 +3,7 @@ use crate::power::{screen_brightness, screen_rect_in};
 use crate::quad::Quad;
 use crate::shaders::{GAME_FRAG, RECT_VERT};
 use crate::surface::{GfxError, OUT_H, OUT_W};
-use crate::system::{System, GBA_SRC_H, GBA_SRC_W, GB_SRC_H, GB_SRC_W};
+use crate::system::{System, GBA_SRC_H, GBA_SRC_W};
 
 /// The GBA's frame, which is what these two meant when there was one machine. Anything that
 /// wants a source size should ask `System` for the one it is drawing.
@@ -15,12 +15,26 @@ const IDENTITY_CC: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
 
 pub struct GamePass {
     prog: gl::types::GLuint,
-    /// One texture per machine rather than one rebuilt on a switch, so that switching costs a
-    /// bind and nothing at all else. The two together are 240 KiB — the GBA's frame is
-    /// 153,600 bytes and Game Boy's 92,160 — which is not memory worth saving on anything
-    /// this runs on.
-    game_gba: gl::types::GLuint,
-    game_gb: gl::types::GLuint,
+    /// The frame texture: one, allocated for exactly the frame that is up.
+    ///
+    /// One per machine was right while there were two machines — two together are 240 KiB,
+    /// which is not memory worth saving on anything this runs on, and a switch then cost a
+    /// bind and nothing else. It stops being right the moment a third machine arrives: a
+    /// third field, a third arm in `active_texture`, a third thing to delete, and one more
+    /// for every machine after. So the texture is allocated for the size in use instead, and
+    /// `set_system` reallocates when a machine's frame does not fit — a cart swap at worst,
+    /// and nothing at all between two machines of one size.
+    ///
+    /// Sized exactly to the frame rather than to the largest frame any machine could bring,
+    /// because the shader samples it over [0,1]: a texture with room to spare would put the
+    /// pixels that were never uploaded on screen. Exact is what lets `u_src` stay the frame
+    /// size and the shader stay as it is.
+    game: gl::types::GLuint,
+    /// What `game` was allocated for. Compared against the frame size rather than against the
+    /// machine: Game Boy and Game Boy Color are two machines of one size, and reallocating
+    /// between them would be a blank first frame for no reason.
+    tex_w: u32,
+    tex_h: u32,
     /// Whose frame `upload` takes and `draw` puts up. The GBA, because it is the machine this
     /// pass was written for.
     active: System,
@@ -59,17 +73,11 @@ pub struct GamePass {
 impl GamePass {
     pub fn new() -> Result<Self, GfxError> {
         let prog = crate::shaders::program(RECT_VERT, GAME_FRAG)?;
-        let game_gba = crate::gl::texture(
+        // Created for the machine `active` starts on; `set_system` resizes it the first time a
+        // core hands over a frame of some other size.
+        let game = crate::gl::texture(
             GBA_SRC_W,
             GBA_SRC_H,
-            gl::NEAREST,
-            gl::CLAMP_TO_EDGE,
-            gl::BGRA,
-            None,
-        );
-        let game_gb = crate::gl::texture(
-            GB_SRC_W,
-            GB_SRC_H,
             gl::NEAREST,
             gl::CLAMP_TO_EDGE,
             gl::BGRA,
@@ -153,8 +161,9 @@ impl GamePass {
         }
         let mut pass = GamePass {
             prog,
-            game_gba,
-            game_gb,
+            game,
+            tex_w: GBA_SRC_W,
+            tex_h: GBA_SRC_H,
             active: System::Gba,
             mask,
             u_rect,
@@ -178,8 +187,19 @@ impl GamePass {
     /// Whose frame this pass is drawing. Called when a cart goes in or the shelf switches
     /// machines, which is to say rarely — nothing here is per frame.
     pub fn set_system(&mut self, system: System) {
-        if self.active == system {
+        let (w, h) = (system.src_w(), system.src_h());
+        if self.active == system && self.tex_w == w && self.tex_h == h {
             return;
+        }
+        // A different frame size needs a different texture, because this one is sized to the
+        // frame exactly — see the field. Two machines of one size share it and never get here.
+        if self.tex_w != w || self.tex_h != h {
+            unsafe {
+                gl::DeleteTextures(1, &self.game);
+            }
+            self.game = crate::gl::texture(w, h, gl::NEAREST, gl::CLAMP_TO_EDGE, gl::BGRA, None);
+            self.tex_w = w;
+            self.tex_h = h;
         }
         self.active = system;
         // The mask tiles once per source pixel, so a different frame size is a different
@@ -189,18 +209,17 @@ impl GamePass {
             gl::UseProgram(self.prog);
             gl::Uniform2f(
                 crate::gl::uniform_location(self.prog, "u_src"),
-                system.src_w() as f32,
-                system.src_h() as f32,
+                w as f32,
+                h as f32,
             );
         }
     }
 
-    /// The texture `upload` writes into and `draw` puts up, for the machine that is active.
+    /// The texture `upload` writes into and `draw` puts up. One for every machine now, so
+    /// this is just which one that is — kept as a method because `draw_still` and the
+    /// reflection pass ask for it by name and would otherwise reach into the field.
     pub fn active_texture(&self) -> gl::types::GLuint {
-        match self.active {
-            System::Gba => self.game_gba,
-            System::Gb => self.game_gb,
-        }
+        self.game
     }
 
     /// The rect, in offscreen pixels, the game picture currently occupies — what the screen
@@ -413,8 +432,7 @@ impl GamePass {
 impl Drop for GamePass {
     fn drop(&mut self) {
         unsafe {
-            gl::DeleteTextures(1, &self.game_gba);
-            gl::DeleteTextures(1, &self.game_gb);
+            gl::DeleteTextures(1, &self.game);
             gl::DeleteTextures(1, &self.mask);
             gl::DeleteTextures(1, &self.pal);
             gl::DeleteTextures(1, &self.pix);

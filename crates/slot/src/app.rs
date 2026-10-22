@@ -796,9 +796,29 @@ impl DisplayFilter {
     fn cc_border(&self, _machine: System) -> Option<[f32; 3]> {
         None
     }
-    /// Step the aperture preset, wrapping at the end of the ring.
-    fn cycle_mask(&mut self) {
-        self.mask_mode = (self.mask_mode + 1) % Self::MASK_STATES as u8;
+    /// Step the aperture preset, wrapping at the end of the ring the machine up actually
+    /// wears rather than at the end of the whole list of them.
+    fn cycle_mask(&mut self, machine: System) {
+        let ring = Self::mask_ring(machine);
+        let at = ring.iter().position(|p| *p == self.mask_mode).unwrap_or(0);
+        self.mask_mode = ring[(at + 1) % ring.len()];
+    }
+
+    /// The presets `SELECT+X` walks on a machine, in order.
+    ///
+    /// Not every machine can wear all seven: the LCD3x table is one RGB triad per *source*
+    /// pixel, which is only a structure where a source pixel covers 3x3 panel pixels. On a
+    /// machine whose source pixel covers 2x2 it is sampled at three points out of its own
+    /// grid and comes out as noise, so those machines get the two presets that are made of
+    /// whole rows instead of of triads — nothing at all, and the scanline at two strengths.
+    ///
+    /// Game Boy and Game Boy Color never come through here at all: their `SELECT+X` walks the
+    /// overlay ring, and they are on `flat` besides.
+    fn mask_ring(machine: System) -> &'static [u8] {
+        match machine {
+            System::Gba => &[0, 1, 2, 3, 4, 5, 6],
+            _ => &[0, 5, 6],
+        }
     }
     /// Step the colour correction of one of the **colour** machines, wrapping at the end of its
     /// list of three (grayscale, AGB-001, NDS).
@@ -1677,7 +1697,7 @@ impl App {
     /// LCD3X at 25, 50, 75 and 100% -> SCANLINE at 50 and 100%) and persist the choice to
     /// `System/display.txt`.
     fn cycle_mask(&mut self) {
-        self.display.cycle_mask();
+        self.display.cycle_mask(self.current_machine());
         if let Some(root) = &self.root {
             crate::root::write_display_modes(root, self.display.mask_mode, self.display.cc);
         }
@@ -2822,7 +2842,15 @@ impl App {
                 // machine that ships no art at all — the Advance — steps its `MASK_STATES`
                 // aperture presets instead (off, the LCD3X table at four strengths, the scanline
                 // at two). Art where there is art, grid where there is none.
-                Action::MaskCycle if self.current_machine() != System::Gba => self.overlay_next(),
+                //
+                // The test is "does this machine have art to walk" and not "is it not an
+                // Advance", because a machine at another scale walks the aperture presets too —
+                // just not the ones made of RGB triads. See `mask_ring`.
+                Action::MaskCycle
+                    if matches!(self.current_machine(), System::Gb | System::Gbc) =>
+                {
+                    self.overlay_next()
+                }
                 Action::MaskCycle => self.cycle_mask(),
                 Action::ColorCycle => self.cycle_cc(),
                 // The long half of the same key. Held, SELECT+Y opens the browser; tapped, it
