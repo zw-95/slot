@@ -39,13 +39,13 @@ fn eject_clears_the_slot_only_after_the_state_is_durable() {
     eject(
         d.path(),
         Core::Mgba,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&[9u8; 1024]),
         Some(b"savdata"),
     )
     .unwrap();
     assert_eq!(read_slot_state(d.path()).cart, None);
-    let r = StateRing::new(d.path(), Core::Mgba, "Emerald");
+    let r = StateRing::new(d.path(), Core::Mgba, slot_store::System::Gba, "Emerald");
     assert_eq!(r.read_resume().unwrap().unwrap().len(), 1024);
     assert_eq!(
         std::fs::read(d.path().join("Saves/Emerald.sav")).unwrap(),
@@ -64,7 +64,7 @@ fn a_resume_that_cannot_be_written_leaves_the_cart_in_the_slot() {
     let d = tmp_root_with_carts(&["Emerald"]);
     write_slot_state(d.path(), &seated("Emerald")).unwrap();
     std::fs::write(d.path().join("States/mgba"), b"in the way").unwrap();
-    assert!(eject(d.path(), Core::Mgba, "Emerald", Some(&[9u8; 1024]), None).is_err());
+    assert!(eject(d.path(), Core::Mgba, slot_store::System::Gba, "Emerald", Some(&[9u8; 1024]), None).is_err());
     assert_eq!(read_slot_state(d.path()).cart, Some("Emerald".into()));
 }
 
@@ -79,14 +79,14 @@ fn an_unchanged_battery_save_is_not_rewritten() {
     let unchanged = eject(
         d.path(),
         Core::Mgba,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&[0u8; 8]),
         Some(b"savdata"),
     );
     let changed = eject(
         d.path(),
         Core::Mgba,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&[0u8; 8]),
         Some(b"changed"),
     );
@@ -118,9 +118,9 @@ fn write_sav_refuses_to_shrink_an_existing_save() {
         *b = (i % 251) as u8;
     }
     let small = vec![0x11u8; 512];
-    slot::persist::write_sav(d.path(), "Emerald", &big).unwrap();
+    slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &big).unwrap();
 
-    let wrote = slot::persist::write_sav(d.path(), "Emerald", &small)
+    let wrote = slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &small)
         .expect("a shrink is refused, not an error");
     assert!(
         !wrote,
@@ -135,7 +135,7 @@ fn write_sav_refuses_to_shrink_an_existing_save() {
     // A growth, by contrast, is exactly what a legitimate re-save looks like and must go
     // through — the guard is specifically for shrinking, not for change.
     let bigger = vec![0x22u8; 8192];
-    let wrote = slot::persist::write_sav(d.path(), "Emerald", &bigger).unwrap();
+    let wrote = slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &bigger).unwrap();
     assert!(wrote, "a longer save must not be refused");
     assert_eq!(
         std::fs::read(d.path().join("Saves/Emerald.sav")).unwrap(),
@@ -157,10 +157,10 @@ fn write_sav_moves_a_tool_made_tail_aside_and_writes() {
     let sav = |len: usize, fill: u8| vec![fill; len];
     let mut big = vec![0x00u8; 131_072];
     big[..32_768].fill(0xEE);
-    slot::persist::write_sav(d.path(), "Emerald", &big).unwrap();
+    slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &big).unwrap();
 
     let small = sav(32_768, 0x11);
-    let wrote = slot::persist::write_sav(d.path(), "Emerald", &small).unwrap();
+    let wrote = slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &small).unwrap();
     assert!(wrote, "a filler tail must not lock the cart out of saving");
     assert_eq!(
         std::fs::read(d.path().join("Saves/Emerald.sav")).unwrap(),
@@ -175,8 +175,8 @@ fn write_sav_moves_a_tool_made_tail_aside_and_writes() {
 
     // A second one keeps both: the reason for renaming rather than deleting does not expire
     // the second time a cart hits this.
-    slot::persist::write_sav(d.path(), "Emerald", &sav(131_072, 0x00)).unwrap();
-    let wrote = slot::persist::write_sav(d.path(), "Emerald", &sav(32_768, 0x22)).unwrap();
+    slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &sav(131_072, 0x00)).unwrap();
+    let wrote = slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &sav(32_768, 0x22)).unwrap();
     assert!(wrote);
     assert!(
         d.path().join("Saves/Emerald.sav.bak-131072-2").exists(),
@@ -204,7 +204,7 @@ fn write_sav_refuses_to_shrink_an_existing_srm() {
     std::fs::write(d.path().join("Saves/Emerald.srm"), &big).unwrap();
 
     let small = vec![0x11u8; 8_192];
-    let wrote = slot::persist::write_sav(d.path(), "Emerald", &small)
+    let wrote = slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &small)
         .expect("a shrink is refused, not an error");
     assert!(
         !wrote,
@@ -215,14 +215,14 @@ fn write_sav_refuses_to_shrink_an_existing_srm() {
         "a refused shrink must not create a .sav that would shadow the larger .srm"
     );
     assert_eq!(
-        slot::persist::read_sav(d.path(), "Emerald").as_deref(),
+        slot::persist::read_sav(d.path(), slot_store::System::Gba, "Emerald").as_deref(),
         Some(&big[..]),
         "the real save carried on the srm must survive"
     );
 
     // The healthy path must still work against an srm baseline: a legitimate growth writes.
     let bigger = vec![0x22u8; 200_000];
-    let wrote = slot::persist::write_sav(d.path(), "Emerald", &bigger).unwrap();
+    let wrote = slot::persist::write_sav(d.path(), slot_store::System::Gba, "Emerald", &bigger).unwrap();
     assert!(
         wrote,
         "a longer save must not be refused against an srm baseline"
@@ -255,7 +255,7 @@ fn eject_preserves_the_levels() {
         favorites: Default::default(),},
     )
     .unwrap();
-    eject(d.path(), Core::Mgba, "Emerald", Some(&[0u8; 8]), None).unwrap();
+    eject(d.path(), Core::Mgba, slot_store::System::Gba, "Emerald", Some(&[0u8; 8]), None).unwrap();
     let s = read_slot_state(d.path());
     assert_eq!((s.brightness, s.blue_light, s.volume), (2, 7, 35));
     assert!(s.muted, "the cart came out and the sound came back");
@@ -269,7 +269,7 @@ fn ejecting_a_playing_cart_flushes_before_the_animation_starts() {
     let mut a = app_playing_in(d.path(), "Emerald");
     a.apply(Action::Eject);
     assert!(matches!(a.phase(), Phase::Ejecting { .. }));
-    let r = StateRing::new(d.path(), Core::Mgba, "Emerald");
+    let r = StateRing::new(d.path(), Core::Mgba, slot_store::System::Gba, "Emerald");
     assert_eq!(
         r.read_resume().unwrap().expect("nothing was flushed").len(),
         1024
@@ -289,7 +289,7 @@ fn a_refused_cart_writes_no_resume() {
     for _ in 0..120 {
         a.update(1.0 / 60.0);
     }
-    assert!(StateRing::new(d.path(), Core::Mgba, "Emerald")
+    assert!(StateRing::new(d.path(), Core::Mgba, slot_store::System::Gba, "Emerald")
         .read_resume()
         .unwrap()
         .is_none());

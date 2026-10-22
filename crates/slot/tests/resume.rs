@@ -42,13 +42,13 @@ fn read_resume_finds_what_a_flush_wrote() {
     persist::flush(
         d.path(),
         slot_store::Core::Mgba,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&[7u8; 64]),
         None,
     )
     .unwrap();
     assert_eq!(
-        persist::read_resume(d.path(), slot_store::Core::Mgba, "Emerald"),
+        persist::read_resume(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald"),
         Some(vec![7u8; 64])
     );
 }
@@ -66,7 +66,7 @@ fn flush_routes_by_the_core_it_is_given() {
     persist::flush(
         d.path(),
         slot_store::Core::Gpsp,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&[7u8; 64]),
         None,
     )
@@ -83,7 +83,7 @@ fn a_retroarch_srm_is_read_when_there_is_no_sav() {
     let d = common::tmp_root_with_carts(&["Emerald"]);
     std::fs::write(d.path().join("Saves/Emerald.srm"), b"srm bytes").unwrap();
     assert_eq!(
-        persist::read_sav(d.path(), "Emerald").as_deref(),
+        persist::read_sav(d.path(), slot_store::System::Gba, "Emerald").as_deref(),
         Some(&b"srm bytes"[..])
     );
 }
@@ -101,8 +101,8 @@ fn srm_bytes_on_disk_reach_the_cores_save_ram() {
         Box::new(MockCore::new()),
         d.path().join("Games/Emerald.gba"),
         StubSink::new().ring(),
-        persist::read_sav(d.path(), "Emerald"),
-        persist::read_resume(d.path(), slot_store::Core::Mgba, "Emerald"),
+        persist::read_sav(d.path(), slot_store::System::Gba, "Emerald"),
+        persist::read_resume(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald"),
         Profile::default(),
     );
     wait_ready(&emu);
@@ -116,7 +116,7 @@ fn a_sav_wins_over_an_srm_when_both_exist() {
     std::fs::write(d.path().join("Saves/Emerald.srm"), b"srm bytes").unwrap();
     std::fs::write(d.path().join("Saves/Emerald.sav"), b"sav bytes").unwrap();
     assert_eq!(
-        persist::read_sav(d.path(), "Emerald").as_deref(),
+        persist::read_sav(d.path(), slot_store::System::Gba, "Emerald").as_deref(),
         Some(&b"sav bytes"[..])
     );
 }
@@ -168,7 +168,7 @@ fn a_power_press_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     persist::flush(
         d.path(),
         slot_store::Core::Mgba,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&real_resume),
         None,
     )
@@ -178,8 +178,8 @@ fn a_power_press_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     // will refuse both: the mock, standing in for "no dylib present" or "SLOT_CORE points at
     // the wrong game" — `open_core_for` cannot tell those apart from a core that opened fine,
     // and this is deliberately exercising the downstream guard rather than that fallback.
-    let sav = persist::read_sav(d.path(), "Emerald");
-    let resume = persist::read_resume(d.path(), slot_store::Core::Mgba, "Emerald");
+    let sav = persist::read_sav(d.path(), slot_store::System::Gba, "Emerald");
+    let resume = persist::read_resume(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald");
     let emu = EmuHandle::spawn(
         Box::new(MockCore::new()),
         d.path().join("Games/Emerald.gba"),
@@ -199,7 +199,7 @@ fn a_power_press_does_not_let_a_refusing_mock_overwrite_a_real_save() {
         "the mock's own save ram overwrote the real one"
     );
     assert_eq!(
-        persist::read_resume(d.path(), slot_store::Core::Mgba, "Emerald").unwrap(),
+        persist::read_resume(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald").unwrap(),
         real_resume,
         "the mock's own resume overwrote the real one"
     );
@@ -217,14 +217,14 @@ fn an_eject_does_not_let_a_refusing_mock_overwrite_a_real_save() {
     persist::flush(
         d.path(),
         slot_store::Core::Mgba,
-        "Emerald",
+        slot_store::System::Gba, "Emerald",
         Some(&real_resume),
         None,
     )
     .unwrap();
 
-    let sav = persist::read_sav(d.path(), "Emerald");
-    let resume = persist::read_resume(d.path(), slot_store::Core::Mgba, "Emerald");
+    let sav = persist::read_sav(d.path(), slot_store::System::Gba, "Emerald");
+    let resume = persist::read_resume(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald");
     let emu = EmuHandle::spawn(
         Box::new(MockCore::new()),
         d.path().join("Games/Emerald.gba"),
@@ -244,7 +244,7 @@ fn an_eject_does_not_let_a_refusing_mock_overwrite_a_real_save() {
         "the mock's own save ram overwrote the real one on eject"
     );
     assert_eq!(
-        persist::read_resume(d.path(), slot_store::Core::Mgba, "Emerald").unwrap(),
+        persist::read_resume(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald").unwrap(),
         real_resume,
         "the mock's own resume overwrote the real one on eject"
     );
@@ -264,7 +264,7 @@ fn a_refusing_mock_does_not_evict_a_real_ring_entry_on_manual_save() {
     let real_resume = vec![0xA5u8; 262_144];
 
     // A full ring of genuine saves, ten deep, oldest to newest.
-    let ring = slot_store::StateRing::new(d.path(), slot_store::Core::Mgba, "Emerald");
+    let ring = slot_store::StateRing::new(d.path(), slot_store::Core::Mgba, slot_store::System::Gba, "Emerald");
     for i in 0..slot_store::RING_MAX {
         let stamp = format!("2026-01-01_00-00-{i:02}");
         ring.push(&vec![i as u8; 200_000], b"png", &stamp)

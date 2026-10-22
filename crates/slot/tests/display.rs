@@ -6,7 +6,7 @@
 mod common;
 
 use common::tmp_root_with_carts;
-use slot::app::MASK_STATES;
+use slot::root::MASK_STATES;
 use slot::root::{display_modes, write_display_modes};
 
 #[test]
