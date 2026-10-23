@@ -607,6 +607,47 @@ pub fn chip_face(_core: Core) -> CartFace {
     padded(&face, TURN_PAD)
 }
 
+/// The row of dots above the chip: one per core the machine offers, and the one that is lit is
+/// the core in hand. The name on the chip says *which* core that is; the row says *how many
+/// there are and where in them you are standing*, which is the part a name cannot say — a
+/// machine with thirteen cores and one with two both look like "a chip with a name on it"
+/// until the row is there.
+///
+/// Panel pixels rather than board units, and therefore not scaled with the board: the row is
+/// read as a row whatever size the board happens to be at, and a dot that grew with the
+/// enlargement would be a different control on a portrait cart than on a landscape one.
+pub const CORE_DOT: f32 = 9.0;
+pub const CORE_DOT_GAP: f32 = 7.0;
+/// Clear of the chip's top edge by this much, so the row reads as sitting above the chip and
+/// not as printed on it.
+pub const CORE_DOT_LIFT: f32 = 12.0;
+/// How far a dot that is not the one in hand is held back. Enough to be counted, not enough to
+/// be mistaken for the lit one — the same reading the switcher's dots are drawn on.
+pub const CORE_DOT_DIM: f32 = 0.28;
+
+/// One dot: a filled disc, white, its edge antialiased by coverage. A disc rather than the
+/// square the switcher's dots are, because these stand for a seat on the board and read as
+/// lamps, and a square lamp is a solder pad.
+pub fn core_dot_face() -> CartFace {
+    let (w, h) = (CORE_DOT.ceil() as u32, CORE_DOT.ceil() as u32);
+    let mut face = CartFace {
+        rgba: vec![0; (w * h * 4) as usize],
+        w,
+        h,
+    };
+    let c = (w as f32 - 1.0) / 2.0;
+    for y in 0..h {
+        for x in 0..w {
+            let d = ((x as f32 - c) * (x as f32 - c) + (y as f32 - c) * (y as f32 - c)).sqrt();
+            let cov = (c + 0.5 - d).clamp(0.0, 1.0);
+            let i = ((y * w + x) * 4) as usize;
+            face.rgba[i..i + 3].copy_from_slice(&CHIP_INK);
+            face.rgba[i + 3] = (cov * 255.0) as u8;
+        }
+    }
+    face
+}
+
 /// A core's name on nothing, wide enough for the longest of them and centred in that width so
 /// that it can slide: while the core changes, two of these are drawn at once, one leaving and
 /// one arriving, and both travel the same distance either side of the middle.

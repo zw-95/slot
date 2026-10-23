@@ -13,9 +13,9 @@ use slot_ui::{
     board_at, board_zoom, draw_backdrop, draw_edge_glow, draw_empty_slot, draw_shortcut_row,
     draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of,
     ClockPicker, Draw, FfState, Hud, HudKind, Icon, Letters, Millis, Placed, Polaroids,
-    PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W, CORE_H,
-    CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H, NAME_TRAVEL, NAME_W, PLATE_Y, SHELF_TITLE_H,
-    STICKER_H, TURN_PAD,
+    PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W, CORE_DOT,
+    CORE_DOT_DIM, CORE_DOT_GAP, CORE_DOT_LIFT, CORE_H, CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H,
+    NAME_TRAVEL, NAME_W, PLATE_Y, SHELF_TITLE_H, STICKER_H, TURN_PAD,
 };
 
 use crate::audio::{Profile, Sfx};
@@ -1116,6 +1116,10 @@ pub struct App {
     /// Each core's name, in `Core::ALL` order. This is the part that changes when the core does,
     /// and it is a face of its own so that it can travel off the chip and back onto it.
     core_name_faces: Vec<TexId>,
+    /// One dot of the row above the chip. One face for all of them, lit or not: how lit a dot is
+    /// is the draw's alpha rather than a second picture, which is what lets the light travel
+    /// from one to the next instead of blinking.
+    core_dot_face: Option<TexId>,
     /// The shadow under the open lid.
     core_chip_shadow_face: Option<TexId>,
     /// `B` Cancel, the two arrows, `A` Choose, each with the width it was rastered at, laid out
@@ -1393,6 +1397,7 @@ impl App {
             core_faces_stem: None,
             core_chip_face: None,
             core_name_faces: Vec::new(),
+            core_dot_face: None,
             core_chip_shadow_face: None,
             core_legend_faces: Vec::new(),
             game_menu: None,
@@ -3904,6 +3909,10 @@ impl App {
         self.core_chip_shadow_face = Some(shadow);
     }
 
+    pub fn set_core_dot_face(&mut self, dot: TexId) {
+        self.core_dot_face = Some(dot);
+    }
+
     pub fn set_core_legend_faces(&mut self, faces: Vec<(TexId, u32)>) {
         self.core_legend_faces = faces;
     }
@@ -4091,6 +4100,64 @@ impl App {
         });
     }
 
+    /// The row of dots above the chip: one per core the machine offers, and the lit one is the
+    /// core in hand.
+    ///
+    /// The name on the chip says *which* core that is. This says the two things the name cannot:
+    /// how many there are, and which of them you are standing on — a machine with thirteen
+    /// cores and one with two both read as "a chip with a name on it" until the row is there,
+    /// and pressing right on the last one looks like nothing happened.
+    ///
+    /// Drawn only from the second core up. One dot says nothing that a chip with a name on it
+    /// did not already say, and a machine with one core opens no picker at all.
+    fn draw_core_dots(
+        &self,
+        picker: &CorePicker,
+        board: &Placed,
+        chip_top: f32,
+        lift: f32,
+        now: Millis,
+        out: &mut Vec<Draw>,
+    ) {
+        let Some(tex) = self.core_dot_face else {
+            return;
+        };
+        let n = picker.count();
+        if n < 2 || lift <= 0.0 {
+            return;
+        }
+        let row = n as f32 * CORE_DOT + (n - 1) as f32 * CORE_DOT_GAP;
+        let x0 = board.x + (board.w - row) / 2.0;
+        // Above the chip's top edge, and **not** carried along by the refusal shake: the row is
+        // the machine's own scale and not a part of the chip, and a ruler that flinches when a
+        // press is refused is no ruler.
+        let y = (chip_top - CORE_DOT_LIFT - CORE_DOT).round();
+        for i in 0..n {
+            let x = (x0 + i as f32 * (CORE_DOT + CORE_DOT_GAP)).round();
+            let lit = picker.dot_lit(i, now);
+            // Two draws of one face. A dot that is being left and one that is being arrived at
+            // are both halfway lit at the same moment, and one alpha cannot say that: the dim
+            // one has to stay where it is under the light that is crossing to it.
+            let base = CORE_DOT_DIM * lift;
+            out.push(Draw::Tex {
+                x,
+                y,
+                w: CORE_DOT,
+                h: CORE_DOT,
+                tex,
+                alpha: base,
+            });
+            out.push(Draw::Tex {
+                x,
+                y,
+                w: CORE_DOT,
+                h: CORE_DOT,
+                tex,
+                alpha: (1.0 - CORE_DOT_DIM) * lit * lift,
+            });
+        }
+    }
+
     /// The picker, but only once it has started opening: `None` while it is still standing on
     /// the shelf waiting for this cart's faces, so nothing of it is on screen yet and the row
     /// has not made way for it.
@@ -4166,6 +4233,8 @@ impl App {
                     alpha: 1.0,
                 });
             }
+            // How many cores this machine offers, in a row above the chip.
+            self.draw_core_dots(picker, &board, body.y, lift, now, out);
             // And the name on it. One name while nothing is changing, and two while it is:
             // the one being left goes out the way the hand went, and the one being arrived
             // at comes in from the other side.

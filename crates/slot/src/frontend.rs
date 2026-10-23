@@ -10,7 +10,7 @@ use slot_store::{format_stamp, System};
 use slot_ui::lang;
 use slot_ui::{
     arrows_hint_face, cart_face, cart_placeholder, cart_shadow, cheat_row_face, chip_face,
-    core_name_face, dialog_line_face, size_for,
+    core_dot_face, core_name_face, dialog_line_face, size_for,
     chip_shadow_face, clean_label, clock_face, hhmm, hint_face, icon_face, letters, menu_face,
     palette_cell_w, palette_name_face, palette_name_h, photo_face, set_clock_hint_face,
     shelf_folder_face, shelf_title_face, shortcut_hint_face, shortcut_row_face, sticker_face,
@@ -459,6 +459,11 @@ impl Frontend {
         self.session
             .app_mut()
             .set_core_part_faces(chip, names, shadow);
+        // One dot of the row above the chip, and one for the whole row: how lit each dot is a
+        // alpha on this one picture, not a second picture per state.
+        let dot = core_dot_face();
+        let dot = compositor.create_texture(dot.w, dot.h, &dot.rgba);
+        self.session.app_mut().set_core_dot_face(dot);
         // Every action the picker takes, the way out first and the choice last, as the
         // switcher's legend is ordered.
         let legend = [

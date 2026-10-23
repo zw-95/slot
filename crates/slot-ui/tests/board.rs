@@ -2,8 +2,8 @@ use slot_store::{Cart, Core, System};
 use slot_ui::{
     board_at, board_face, chip_face, chip_shadow_face, lid_at, lift_of, on_board, padded,
     shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed, BOARD_H, BOARD_W, CART_H,
-    DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H, SOCKET_W,
-    TURN_PAD,
+    CORE_DOT, DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H,
+    SOCKET_W, TURN_PAD,
 };
 
 fn cart(stem: &str, code: &str) -> Cart {
@@ -97,8 +97,11 @@ fn the_board_takes_the_shells_own_tint() {
 }
 
 /// A board that failed to draw would come back transparent and every other test here would pass
-/// on nothing. Board pixel (250, 180) is bare substrate — right of where the traces stop, above
-/// the edge connector, below the socket and clear of the ROM.
+/// on nothing. Board pixel (40, 100) is bare substrate — left of the socket, above where the
+/// traces climb up from the fingers, clear of everything drawn. It used to sit **below** the
+/// socket at (250, 180), until the chip widened: the traces end at the chip's legs, so a wider
+/// chip is a wider fan, and the pixel they used to leave bare now has one running through it.
+/// A point beside the socket stays beside it whatever the chip's width does.
 #[test]
 fn the_board_itself_is_drawn() {
     let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
@@ -112,9 +115,9 @@ fn the_board_itself_is_drawn() {
         .try_into()
         .unwrap();
     assert!(
-        near(rgb(&face, 250, 180), base),
+        near(rgb(&face, 40, 100), base),
         "the board is {:?}",
-        rgb(&face, 250, 180)
+        rgb(&face, 40, 100)
     );
 }
 
@@ -357,4 +360,27 @@ fn the_core_names_edges_are_antialiased() {
             "{core:?}'s name has only {soft} soft-edged pixels"
         );
     }
+}
+
+/// One face for the whole row, however many cores a machine offers: how lit a dot is is the
+/// draw's alpha, and lit and unlit are the same disc. What has to hold is that the disc is a
+/// disc — solid in the middle, gone at the corners, and soft at the edge, because a hard-edged
+/// dot at nine pixels is a square with delusions.
+#[test]
+fn a_core_dot_is_a_disc_and_not_a_square() {
+    let dot = slot_ui::core_dot_face();
+    let (w, h) = (CORE_DOT.ceil() as u32, CORE_DOT.ceil() as u32);
+    assert_eq!((dot.w, dot.h), (w, h));
+    let mid = (w / 2, h / 2);
+    assert_eq!(alpha(&dot, mid.0, mid.1), 255, "the middle is solid");
+    assert_eq!(alpha(&dot, 0, 0), 0, "the corner is nothing");
+    // An antialiased edge somewhere between the two, along the rim.
+    let soft = (0..h)
+        .flat_map(|y| (0..w).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let a = alpha(&dot, x, y);
+            a > 0 && a < 255
+        })
+        .count();
+    assert!(soft > 4, "only {soft} soft-edged pixels round the rim");
 }
