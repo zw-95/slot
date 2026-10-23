@@ -1,4 +1,6 @@
-use slot::core_picker::{CorePicker, Outcome, Press, CLOSE_MS, HOP_MS, LIFT_MS, OPEN_MS, SLIDE_MS};
+use slot::core_picker::{
+    CorePicker, Outcome, Press, CLOSE_MS, HOP_MS, LIFT_MS, OPEN_MS, SLIDE_MS, SOCKETS,
+};
 use slot_store::{Core, System};
 use slot_ui::Millis;
 
@@ -223,9 +225,15 @@ fn the_arrows_do_nothing_while_the_picker_waits() {
 /// it, and both ends are still ends — the arrow refuses rather than wrapping to the far side.
 #[test]
 fn a_run_of_three_puts_the_middle_socket_in_the_middle() {
-    let cores = System::Sfc.cores();
-    assert_eq!(cores.len(), 3, "the Super Nintendo offers three");
-    let mut p = CorePicker::open(Core::Supafaust, cores, 0);
+    // Spelled out rather than taken from a machine, because a machine's list can grow past what
+    // the board holds and this is about three that fit.
+    let cores = [
+        Core::Supafaust,
+        Core::Snes9x2010,
+        Core::Snes9x2005Plus,
+    ];
+    assert_eq!(cores.len(), SOCKETS, "this list fills the board");
+    let mut p = CorePicker::open(Core::Supafaust, &cores, 0);
     p.start(0);
     assert_eq!(p.chip(0).across, 0.0);
 
@@ -243,6 +251,49 @@ fn a_run_of_three_puts_the_middle_socket_in_the_middle() {
         "the arrow wrapped round to the far socket"
     );
     assert_eq!(p.seat(), cores[2]);
+}
+
+/// A machine may offer more cores than the board has sockets for. The board shows a window of
+/// them and rolls it along: the chip walks to the end of what is showing, and the next press
+/// brings the next core onto the board without the chip leaving the socket it is standing on.
+#[test]
+fn a_list_longer_than_the_board_rolls_under_the_chip() {
+    let cores = System::Sfc.cores();
+    assert!(cores.len() > SOCKETS, "this machine fits, so nothing rolls");
+    let mut p = CorePicker::open(cores[0], cores, 0);
+    p.start(0);
+    assert_eq!(p.window(), &cores[..SOCKETS]);
+    assert_eq!(p.chip(0).visible, SOCKETS);
+
+    // To the far end of what is showing.
+    p.press(Press::Right, 100);
+    assert_eq!(p.chip(100 + HOP_MS).across, 0.5);
+    p.press(Press::Right, 200);
+    assert_eq!(p.chip(200 + HOP_MS).across, 1.0);
+    assert_eq!(p.window(), &cores[..SOCKETS]);
+
+    // One more, and it is the window that moves: the chip is still on the right-hand socket,
+    // and the core under it is the next one along.
+    p.press(Press::Right, 300);
+    assert_eq!(p.seat(), cores[3]);
+    assert_eq!(p.chip(300 + HOP_MS).across, 1.0, "the chip left the board");
+    assert_eq!(p.window(), &cores[1..1 + SOCKETS]);
+    // It hopped on the spot, and upright: a window rolling under it is not a direction.
+    assert_eq!(p.chip(300 + HOP_MS / 2).tip, 0.0);
+}
+
+/// Opening on a core at the far end of a long list has to bring the board to it, or the chip
+/// would be drawn standing on a socket that is not showing the core it is standing for.
+#[test]
+fn opening_on_a_core_at_the_end_brings_the_window_to_it() {
+    let cores = System::Sfc.cores();
+    let last = cores[cores.len() - 1];
+    let mut p = CorePicker::open(last, cores, 0);
+    p.start(0);
+    assert_eq!(p.seat(), last);
+    assert_eq!(p.window().last().copied(), Some(last));
+    // And it is the end: nothing to the right of it.
+    assert_eq!(p.press(Press::Right, 100), Outcome::Refused);
 }
 
 /// A machine with one core is not asked: there is nowhere for the chip to hop to, and `App`

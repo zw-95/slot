@@ -16,6 +16,10 @@ use crate::root;
 /// anyone who forgot it was set.
 const CORE_ENV: &str = "SLOT_CORE";
 
+/// Where a card keeps its cores, under its own `System/`. One drawer rather than a dozen loose
+/// `.so` files alongside the binary, now that a machine can offer more than one.
+pub const CORES_DIR: &str = "cores";
+
 /// Which dylib backs a core. The device keeps both in `System/`, so this is a filename
 /// rather than a search: whichever the cart asked for is either there or it is not.
 pub fn dylib_name(core: Core) -> String {
@@ -39,7 +43,15 @@ fn candidates(root: &Path, core: Core) -> Vec<PathBuf> {
     }
     // Spelled from the platform's own convention so the same search finds the device's `.so`.
     let name = dylib_name(core);
-    let mut paths = vec![root.join("System").join(&name)];
+    let system = root.join("System");
+    // Cores have a directory of their own now: there are a dozen of them and `System/` holds
+    // the whole frontend besides, so a card's cores read as a drawer rather than as loose
+    // files among the binaries.
+    //
+    // The old place is searched second and not dropped: a card copied before the move has them
+    // at the top of `System/`, and a card is not something a player should have to tidy before
+    // their games start. Two paths, both cheap, either one an answer.
+    let mut paths = vec![system.join(CORES_DIR).join(&name), system.join(&name)];
     if let Some(dir) = std::env::current_exe()
         .ok()
         .and_then(|exe| exe.parent().map(Path::to_path_buf))
@@ -104,9 +116,22 @@ pub fn open_core_for(
         // None of the others is asked for anything before `retro_load_game`: gpSP's one option
         // is read there, and every Super Nintendo core's own defaults are the ones a Super
         // Nintendo wants. Options are named per core, so "nothing to set" is the honest
-        // answer rather than a placeholder — and a Snes9x option pasted in here would be
-        // silently ignored by Supafaust and vice versa.
-        Core::Gpsp | Core::Supafaust | Core::Snes9x2005Plus | Core::Snes9x2010 => vec![],
+        // answer rather than a placeholder — and an option pasted in here would be silently
+        // ignored by every core that does not spell it the same way.
+        Core::Gpsp
+        | Core::Supafaust
+        | Core::Snes9x2005Plus
+        | Core::Snes9x2005
+        | Core::Snes9x2002
+        | Core::Snes9x
+        | Core::Snes9xNext
+        | Core::Snes9x2010
+        | Core::MesenS
+        | Core::Bsnes
+        | Core::Bsnes2014Performance
+        | Core::BsnesMercuryPerformance
+        | Core::BsnesCplusplus98
+        | Core::ChimeraSnes => vec![],
     };
     for path in paths {
         if !path.exists() {
@@ -199,13 +224,27 @@ mod tests {
     /// that fed `open_core` the wrong `Core` had no candidate list a test could observe
     /// disagree.
     #[test]
-    fn candidates_search_the_roots_own_system_directory() {
+    fn candidates_search_the_roots_own_cores_directory() {
         let _g = lock();
         std::env::remove_var(CORE_ENV);
         let root = Path::new("/some/content/root");
         assert_eq!(
             candidates(root, Core::Gpsp)[0],
-            root.join("System").join(dylib_name(Core::Gpsp)),
+            root.join("System").join(CORES_DIR).join(dylib_name(Core::Gpsp)),
+        );
+    }
+
+    /// A card copied before cores got a drawer of their own has them at the top of `System/`,
+    /// and is served: moving the files is not something a player should have to do before their
+    /// games start again.
+    #[test]
+    fn candidates_still_search_the_place_a_card_used_to_keep_them() {
+        let _g = lock();
+        std::env::remove_var(CORE_ENV);
+        let root = Path::new("/some/content/root");
+        assert!(
+            candidates(root, Core::Gpsp).contains(&root.join("System").join(dylib_name(Core::Gpsp))),
+            "a card with its cores at the old place finds nothing"
         );
     }
 

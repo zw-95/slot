@@ -1009,9 +1009,6 @@ pub struct App {
     /// stars the cart and a hold that swaps the shelf, and which one a press is cannot be known
     /// until it either comes up or passes `PLAY_HOLD_MS`.
     fav_held: Option<Millis>,
-    /// When Y went down on the shelf: a hold cycles which machine's shelf is up. Same shape as
-    /// `fav_held`, and spent the same way.
-    sys_held: Option<Millis>,
     /// When B went down on the shelf: a hold opens the direct-connect dialog. A tap does nothing.
     mtp_held: Option<Millis>,
     /// The mark a favourite cart wears, with the size it was rasterised at. One colour whatever
@@ -1313,7 +1310,6 @@ impl App {
             letter_ridge_face: None,
             play_held: None,
             fav_held: None,
-            sys_held: None,
             mtp_held: None,
             fav_star: None,
             fav_ind: None,
@@ -2248,7 +2244,8 @@ impl App {
         }
     }
 
-    /// SELECT+L2: start a swap to the next machine that has any carts. Nothing happens — and
+    /// SELECT+Y on the shelf: start a swap to the next machine that has any carts. Nothing
+    /// happens — and
     /// the press is refused, so it reads as answered — on a card that carries only one machine.
     /// A swap already in flight swallows the press, so a second one cannot stack on the first.
     fn cycle_system(&mut self) {
@@ -2821,6 +2818,13 @@ impl App {
                 // is answered on this screen and nowhere else, so the press does nothing under
                 // the picker's open lid — where the band is not drawn either.
                 Action::ModeToggle if self.core_picker.is_none() => self.toggle_mode(),
+                // SELECT+Y, which in a game is the colour correction and on the shelf is
+                // nothing at all: there is no picture up here to recolour, and the chord has
+                // been free on this screen since the shelf stopped changing the correction.
+                // It swaps which machine's shelf is up — what a hold of Y used to do. A hold is
+                // a wait in front of the one thing a player does several times running, and
+                // with more machines on the card it is a longer wait every time.
+                Action::ColorCycle if self.core_picker.is_none() => self.cycle_system(),
                 // Ahead of the shelf's own movement, so an open picker takes the arrows
                 // before the row of carts underneath it does.
                 _ if self.core_picker.is_some() => self.core_picker_input(action),
@@ -2861,17 +2865,10 @@ impl App {
                         self.toggle_favorite();
                     }
                 }
-                // Y holds to swap which machine's shelf is up. Nothing fires on the press: the
-                // hold is spent in `sys_hold` on the timer and the release only clears.
-                Action::GbaDown(Btn::Y) => self.sys_held = Some(now),
-                // A tap walks this machine's subfolders; a hold (`sys_hold`) swaps the machine
-                // instead and has already spent `sys_held` by this point — so `take()` coming back
-                // `Some` is exactly "the press was a tap".
-                Action::GbaUp(Btn::Y) => {
-                    if self.sys_held.take().is_some() {
-                        self.cycle_folder();
-                    }
-                }
+                // Y is one thing now: a tap walks this machine's subfolders. It used to hold to
+                // swap the machine as well, and no longer does — that is SELECT+Y, which costs
+                // a chord rather than half a second of waiting.
+                Action::GbaUp(Btn::Y) => self.cycle_folder(),
                 // (长按 B 起 WiFi 直连的入口已按用户要求移除——功能暂缓。)
                 Action::Insert => self.insert(false),
                 _ => {}
@@ -3272,7 +3269,6 @@ impl App {
     fn timers(&mut self) {
         self.play_hold();
         self.fav_hold();
-        self.sys_hold();
         // The "connect the cable" beat hands over to the live screen on its own, a moment after
         // the gadget has been switched.
         // While the connect beat is up, poll for the address the enter script leaves behind: the
@@ -4062,7 +4058,7 @@ impl App {
                 // One per core this machine offers, and not one per core that exists: every
                 // core's socket face is uploaded at boot, but the board has room for a
                 // machine's own list and the rest of them are not this cart's to choose from.
-                for (i, core) in picker.cores().iter().copied().enumerate() {
+                for (i, core) in picker.window().iter().copied().enumerate() {
                     let Some(tex) = self.core_socket_faces.get(core.index()).copied() else {
                         continue;
                     };
@@ -4082,7 +4078,7 @@ impl App {
             let chip = picker.chip(now);
             // Between the ends of the run: `across` is a fraction of that run and the sockets
             // are evenly spaced, so the last socket is where 1.0 lands whatever the count is.
-            let u = CHIP_U[0] + (CHIP_U[chip.count - 1] - CHIP_U[0]) * chip.across;
+            let u = CHIP_U[0] + (CHIP_U[chip.visible - 1] - CHIP_U[0]) * chip.across;
             if !own_board && chip.lift > 0.0 {
                 if let Some(tex) = self.core_chip_shadow_face {
                     // Under the body's middle and 90 units down the board, where the mockup's
@@ -4301,22 +4297,6 @@ impl App {
         if self.now().saturating_sub(at) >= PLAY_HOLD_MS {
             self.fav_held = None;
             self.toggle_fav_view();
-        }
-    }
-
-    /// A hold of Y: swap which machine's shelf is up. Spent like `fav_hold`, so it fires once
-    /// rather than on every timer tick the button stays down.
-    fn sys_hold(&mut self) {
-        let Some(at) = self.sys_held else {
-            return;
-        };
-        if !self.on_shelf() {
-            self.sys_held = None;
-            return;
-        }
-        if self.now().saturating_sub(at) >= PLAY_HOLD_MS {
-            self.sys_held = None;
-            self.cycle_system();
         }
     }
 
@@ -5222,7 +5202,6 @@ impl App {
         self.shelf.release_hold();
         self.play_held = None;
         self.fav_held = None;
-        self.sys_held = None;
         self.mtp_held = None;
     }
 

@@ -25,6 +25,30 @@ pub enum Core {
     Snes9x2005Plus,
     /// Snes9x's 2010 branch. More accurate than 2005+, and the most expensive of the three.
     Snes9x2010,
+    /// The 2005 branch without the patches. Offered because it is on the card, not because it
+    /// is better than `Plus` — it is the same core a year earlier.
+    Snes9x2005,
+    /// The 2002 branch: the cheapest Snes9x there is, and the least compatible. Kept for the
+    /// handful of games that ran on it and on nothing else.
+    Snes9x2002,
+    /// Snes9x current, the branch the project still maintains.
+    Snes9x,
+    /// `snes9x_next`, Snes9x's accuracy fork.
+    Snes9xNext,
+    /// Mesen's Super Nintendo core. The most accurate thing here and the second most expensive.
+    MesenS,
+    /// bsnes, the original. Cycle accurate and the heaviest core on the card by a long way.
+    Bsnes,
+    /// The 2014 rewrite, in its performance profile: much of bsnes's accuracy at a price this
+    /// handheld can sometimes pay.
+    Bsnes2014Performance,
+    /// The Mercury accuracy profile of the same 2014 core.
+    BsnesMercuryPerformance,
+    /// The 2014 core as it was before it was rewritten in C++11.
+    BsnesCplusplus98,
+    /// Snes9x's very old Chimera branch. On the card, and the least of these by some distance,
+    /// but it costs nothing to leave it in the list.
+    ChimeraSnes,
 }
 
 impl Core {
@@ -32,12 +56,22 @@ impl Core {
     /// `migrate_states` walks this rather than spelling the variant list out a second time,
     /// so a third core added here does not also have to be remembered at every call site
     /// that needs to tell a core's own directory apart from a cart's.
-    pub const ALL: [Core; 5] = [
+    pub const ALL: [Core; 15] = [
         Core::Mgba,
         Core::Gpsp,
         Core::Supafaust,
         Core::Snes9x2005Plus,
         Core::Snes9x2010,
+        Core::Snes9x2005,
+        Core::Snes9x2002,
+        Core::Snes9x,
+        Core::Snes9xNext,
+        Core::MesenS,
+        Core::Bsnes,
+        Core::Bsnes2014Performance,
+        Core::BsnesMercuryPerformance,
+        Core::BsnesCplusplus98,
+        Core::ChimeraSnes,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -49,6 +83,16 @@ impl Core {
             Core::Supafaust => "mednafen_supafaust",
             Core::Snes9x2005Plus => "snes9x2005_plus",
             Core::Snes9x2010 => "snes9x2010",
+            Core::Snes9x2005 => "snes9x2005",
+            Core::Snes9x2002 => "snes9x2002",
+            Core::Snes9x => "snes9x",
+            Core::Snes9xNext => "snes9x_next",
+            Core::MesenS => "mesen-s",
+            Core::Bsnes => "bsnes",
+            Core::Bsnes2014Performance => "bsnes2014_performance",
+            Core::BsnesMercuryPerformance => "bsnes_mercury_performance",
+            Core::BsnesCplusplus98 => "bsnes_cplusplus98",
+            Core::ChimeraSnes => "chimerasnes",
         }
     }
 
@@ -69,6 +113,16 @@ impl Core {
             Core::Supafaust => "Supafaust",
             Core::Snes9x2005Plus => "Snes9x 2005+",
             Core::Snes9x2010 => "Snes9x 2010",
+            Core::Snes9x2005 => "Snes9x 2005",
+            Core::Snes9x2002 => "Snes9x 2002",
+            Core::Snes9x => "Snes9x",
+            Core::Snes9xNext => "Snes9x Next",
+            Core::MesenS => "Mesen-S",
+            Core::Bsnes => "bsnes",
+            Core::Bsnes2014Performance => "bsnes 2014",
+            Core::BsnesMercuryPerformance => "bsnes Mercury",
+            Core::BsnesCplusplus98 => "bsnes C++98",
+            Core::ChimeraSnes => "ChimeraSNES",
         }
     }
 
@@ -78,8 +132,17 @@ impl Core {
             "gpsp" => Some(Core::Gpsp),
             // The libretro name, and the short one a hand is likelier to type.
             "mednafen_supafaust" | "supafaust" => Some(Core::Supafaust),
-            "snes9x2005_plus" | "snes9x2005plus" | "snes9x2005" => Some(Core::Snes9x2005Plus),
-            "snes9x2010" | "snes9x2010_plus" => Some(Core::Snes9x2010),
+            "snes9x2005_plus" | "snes9x2005plus" => Some(Core::Snes9x2005Plus),
+            "snes9x2005" => Some(Core::Snes9x2005),
+            "snes9x2002" => Some(Core::Snes9x2002),
+            "snes9x" => Some(Core::Snes9x),
+            "snes9x_next" | "snes9xnext" => Some(Core::Snes9xNext),
+            "mesen-s" | "mesens" | "mesen" => Some(Core::MesenS),
+            "bsnes" => Some(Core::Bsnes),
+            "bsnes2014_performance" | "bsnes2014" => Some(Core::Bsnes2014Performance),
+            "bsnes_mercury_performance" | "bsnes_mercury" => Some(Core::BsnesMercuryPerformance),
+            "bsnes_cplusplus98" => Some(Core::BsnesCplusplus98),
+            "chimerasnes" | "chimera" => Some(Core::ChimeraSnes),
             _ => None,
         }
     }
@@ -96,7 +159,30 @@ impl System {
         match self {
             System::Gba => &[Core::Mgba, Core::Gpsp],
             System::Gb | System::Gbc => &[Core::Mgba],
-            System::Sfc => &[Core::Supafaust, Core::Snes9x2005Plus, Core::Snes9x2010],
+            // Thirteen, which is every Super Nintendo core muOS ships, and in the order a
+            // player should meet them rather than the order the archives list them: the one
+            // that has been tested first, then the accurate-but-cheap Snes9x branches, then the
+            // ones that want more machine than this handheld has, and last the two that are
+            // only here because they came off the card with the rest.
+            //
+            // The board shows three at a time and rolls the rest along under the chip, so a
+            // long list costs nothing but travelling: what it does cost is that a player has to
+            // walk to find out what is on it.
+            System::Sfc => &[
+                Core::Supafaust,
+                Core::Snes9x2010,
+                Core::Snes9x2005Plus,
+                Core::Snes9x,
+                Core::Snes9xNext,
+                Core::Snes9x2002,
+                Core::MesenS,
+                Core::Bsnes2014Performance,
+                Core::BsnesMercuryPerformance,
+                Core::Bsnes,
+                Core::BsnesCplusplus98,
+                Core::ChimeraSnes,
+                Core::Snes9x2005,
+            ],
         }
     }
 
