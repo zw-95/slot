@@ -3,21 +3,26 @@ use std::sync::OnceLock;
 use slot_store::System;
 
 const CART_GBA_SVG: &str = include_str!("../assets/cart.svg");
+const CART_SFC_SVG: &str = include_str!("../assets/cart_sfc.svg");
 const CART_GB_SVG: &str = include_str!("../assets/cart_gb.svg");
 const CART_GBC_SVG: &str = include_str!("../assets/cart_gbc.svg");
 const DETAIL_GBA_SVG: &str = include_str!("../assets/cart_detail.svg");
+const DETAIL_SFC_SVG: &str = include_str!("../assets/cart_sfc_detail.svg");
 /// Shared by class A, B and C, which is why there is one of it rather than two.
 const DETAIL_GB_SVG: &str = include_str!("../assets/cart_gb_detail.svg");
 
-/// Which of the three shells a machine's carts are: the Advance cart's landscape outline, and
-/// the Game Boy family's portrait one — carrying the top notch for class A and B (the grey and
-/// black carts) and not for class C (Game Boy Color only), which is the physical lockout.
+/// Which of the four shells a machine's carts are: the Advance cart's landscape outline, the
+/// Super Nintendo's, and the Game Boy family's portrait one — carrying the top notch for class
+/// A and B (the grey and black carts) and not for class C (Game Boy Color only), which is the
+/// physical lockout.
 fn outline(system: System) -> &'static str {
     match system {
-        // A Super Nintendo cart is drawn with the Advance's landscape outline: same shape,
-        // and a second SVG that is byte for byte the first one is a second thing to keep in
-        // step. It stops being true when the two shells are drawn differently.
-        System::Gba | System::Sfc => CART_GBA_SVG,
+        System::Gba => CART_GBA_SVG,
+        // Its own outline, and the reason is one shape detail: a Super Nintendo shell has a
+        // finger groove stepped down each side, which is the most recognisable thing about it
+        // and nothing the Advance's shell has. The two still share a row, a size and a label
+        // box — only the outline differs.
+        System::Sfc => CART_SFC_SVG,
         System::Gb => CART_GB_SVG,
         System::Gbc => CART_GBC_SVG,
     }
@@ -25,17 +30,22 @@ fn outline(system: System) -> &'static str {
 
 fn detail(system: System) -> &'static str {
     match system {
-        System::Gba | System::Sfc => DETAIL_GBA_SVG,
+        System::Gba => DETAIL_GBA_SVG,
+        // The groove across the top of the shell and the boss below it where it steps out
+        // towards the connector, rather than the Advance's grip ridge and thumb notch.
+        System::Sfc => DETAIL_SFC_SVG,
         System::Gb | System::Gbc => DETAIL_GB_SVG,
     }
 }
 
 fn index(system: System) -> usize {
     match system {
-        // One cache slot for the two machines that share an outline and a size: the masks are
-        // keyed on what was rasterised, not on who asked, so sharing is the truth rather than
-        // a shortcut.
-        System::Gba | System::Sfc => 0,
+        // One slot per outline: the masks are keyed on what was rasterised, not on who asked.
+        // The Super Nintendo used to share the Advance's slot because it shared its outline,
+        // and no longer does — a shared slot over two different outlines is whichever one
+        // rasterised first, which is not a bug you can see in the code.
+        System::Gba => 0,
+        System::Sfc => 3,
         System::Gb => 1,
         System::Gbc => 2,
     }
@@ -49,7 +59,7 @@ struct Masks {
     detail: Vec<u8>,
 }
 
-static MASKS: [OnceLock<Masks>; 3] = [const { OnceLock::new() }; 3];
+static MASKS: [OnceLock<Masks>; 4] = [const { OnceLock::new() }; 4];
 
 fn masks(system: System, w: u32, h: u32) -> &'static Masks {
     MASKS[index(system)].get_or_init(|| {

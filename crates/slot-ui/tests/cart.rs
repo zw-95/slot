@@ -184,7 +184,7 @@ fn the_label_is_wide_and_sits_low() {
 /// invented rather than the cartridge that was traced.
 #[test]
 fn the_body_is_narrower_than_its_grip_ears() {
-    let m = silhouette(CART_W, CART_H);
+    let m = silhouette(System::Gba, CART_W, CART_H);
     let solid = |x: u32, y: u32| m[(y * CART_W + x) as usize] > 128;
     let width_at = |y: u32| (0..CART_W).filter(|&x| solid(x, y)).count();
 
@@ -314,8 +314,8 @@ fn the_cart_shadow_is_the_cart_in_black() {
     let s = cart_shadow(size_for(System::Gba), System::Gba);
     // Same resolution as the face it backs, because it is drawn into the same quad.
     assert_eq!((s.w, s.h), (FACE_W, FACE_H));
-    let mask = silhouette(FACE_W, FACE_H);
-    for (px, cover) in s.rgba.chunks_exact(4).zip(&mask) {
+    let mask = silhouette(System::Gba, FACE_W, FACE_H);
+    for (px, cover) in s.rgba.chunks_exact(4).zip(mask) {
         assert_eq!(&px[..3], &[0, 0, 0], "the shadow is not black");
         assert_eq!(px[3], *cover, "the shadow is not the cart's shape");
     }
@@ -323,6 +323,23 @@ fn the_cart_shadow_is_the_cart_in_black() {
         s.rgba.chunks_exact(4).any(|p| p[3] > 250),
         "the shadow is transparent everywhere, so it backs nothing"
     );
+}
+
+/// A Super Nintendo cart has an outline of its own — the finger grooves stepped down each side,
+/// which is the most recognisable thing about that shell — so it is not shaped like an Advance
+/// cart. The two share a row, a size and a label box, and they used to share a mask as well; a
+/// shared mask over two different outlines is whichever of them rasterised first, which is a
+/// mistake no reading of the source would find. This is the only place it can be seen.
+#[test]
+fn a_super_nintendo_cart_is_not_shaped_like_an_advance_one() {
+    let sfc = silhouette(System::Sfc, FACE_W, FACE_H);
+    let gba = silhouette(System::Gba, FACE_W, FACE_H);
+    assert_ne!(sfc, gba, "two shells, one outline");
+    // And both are still a cart: the middle of either face is inside the shell rather than
+    // outside it, which is what a hollow or unreadable outline would give.
+    let mid = (FACE_H / 2 * FACE_W + FACE_W / 2) as usize;
+    assert!(sfc[mid] > 127, "the Super Nintendo shell is hollow");
+    assert!(gba[mid] > 127, "the Advance shell is hollow");
 }
 
 /// Every machine's label panel has to fit inside that machine's own face.

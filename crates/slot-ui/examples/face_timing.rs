@@ -37,7 +37,7 @@ fn main() {
     rows.push(("字母面 ×27", ms(t), n));
 
     let t = Instant::now();
-    let a = slot_ui::cart_shadow();
+    let a = slot_ui::cart_shadow(slot_ui::size_for(slot_store::System::Gba), slot_store::System::Gba);
     let b = slot_ui::chip_shadow_face();
     rows.push(("卡带/芯片投影", ms(t), a.rgba.len() + b.rgba.len()));
 
