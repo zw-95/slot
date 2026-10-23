@@ -267,16 +267,17 @@ pub fn title_face(text: &str) -> UndoFace {
     }
 }
 
-/// One line of the direct-connect dialog's own type. Its own builder rather than a share of a
-/// screen's, because the dialog is a screen of its own and asks for sizes (36/24) nothing else
-/// prints at. The box is twice the type's height so the font's own line box fits rather than being
-/// clipped — `text::coverage` drops ink past the box's edge instead of shrinking it.
-pub fn dialog_line_face(text: &str, px: f32) -> UndoFace {
-    let max_w = 640.0f32;
+/// One line of type, as wide as its own ink and never wider than `max_w`.
+///
+/// Shared, because two screens want exactly this and would otherwise each keep a copy of the
+/// same two passes: measure the ink, then set it into a box the width of what was measured. The
+/// box is twice the type's height so the font's own line box fits rather than being clipped —
+/// `text::coverage` drops ink past the box's edge instead of shrinking it.
+pub fn line_face(text: &str, px: f32, min_px: f32, max_w: f32) -> UndoFace {
     let box_h = (px * 2.0).ceil() as u32;
     let mut w = 1u32;
     if let Some(font) = text::label_font() {
-        let layout = text::fit(font, text, max_w, 1, px, px * 0.5);
+        let layout = text::fit(font, text, max_w, 1, px, min_px);
         let ink = layout
             .lines
             .iter()
@@ -286,10 +287,34 @@ pub fn dialog_line_face(text: &str, px: f32) -> UndoFace {
     }
     let mut rgba = vec![0u8; (w * box_h * 4) as usize];
     if let Some(font) = text::label_font() {
-        let layout = text::fit(font, text, w as f32, 1, px, px * 0.5);
+        let layout = text::fit(font, text, w as f32, 1, px, min_px);
         text::draw_centred(&mut rgba, w, box_h, &layout, ink());
     }
     UndoFace { rgba, w, h: box_h }
+}
+
+/// One line of the direct-connect dialog's own type. Its own builder rather than a share of a
+/// screen's, because the dialog is a screen of its own and asks for sizes (36/24) nothing else
+/// prints at.
+pub fn dialog_line_face(text: &str, px: f32) -> UndoFace {
+    line_face(text, px, px * 0.5, 640.0)
+}
+
+/// The shelf's other line of type: the subfolder the machine's shelf is cut to, down in the
+/// bottom band beside the machine's badge.
+///
+/// Only ever drawn when there is one — a machine whose carts all sit directly in
+/// `Games/<machine>/` has no folder to name, and `Y` does nothing on it, so a band that named
+/// one anyway would be claiming a control the shelf does not have.
+const FOLDER_PX: f32 = 18.0;
+/// How small a long folder name gets shrunk to before it is allowed to run past the band. Small
+/// but legible, because a folder whose name nobody can read is worse than a small one.
+const FOLDER_MIN_PX: f32 = 11.0;
+/// The band's room: from the badge's right edge to where the bay starts.
+const FOLDER_MAX_W: f32 = 118.0;
+
+pub fn shelf_folder_face(text: &str) -> UndoFace {
+    line_face(text, FOLDER_PX, FOLDER_MIN_PX, FOLDER_MAX_W)
 }
 
 /// The shelf's line of type: the game under the eye, for the screen below the row. Cut from

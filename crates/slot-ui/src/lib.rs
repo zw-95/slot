@@ -68,7 +68,8 @@ pub use palette_browser::{
 };
 pub use plate::{
     arrows_hint_face, arrows_hint_width, cap_width, clock_face, clock_width, hint_face, hint_quad,
-    dialog_line_face, hint_row, hint_width, shelf_title_face, title_face, word_face, word_width,
+    dialog_line_face, hint_row, hint_width, shelf_folder_face, shelf_title_face, title_face,
+    word_face, word_width,
     Hint, UndoFace,
     ARROW_GAP, CAP, CAP_GAP, HINT_EDGE, HINT_GAP, HINT_H, SHELF_TITLE_H, SHELF_TITLE_W, STATUS_H,
     TITLE_H, TITLE_W,

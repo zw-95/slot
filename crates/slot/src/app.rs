@@ -937,6 +937,9 @@ const FAV_IND_DRAW: f32 = 36.0;
 /// their edges. Repeated here so the two bottom corner marks can stand in the same columns as the
 /// two readings above them.
 const STATUS_READ_MARGIN: f32 = 24.0;
+/// Clear of the badge's right edge, so the folder reads as a second word after the machine's
+/// rather than as part of the mark.
+const FOLDER_GAP: f32 = 8.0;
 
 /// The shell that brings WiFi up and starts the SSH server, on demand rather than at boot: the
 /// radio is a real drain on a standby budget, so it is the user who asks for it. `ags-net ssh`
@@ -1031,6 +1034,11 @@ pub struct App {
     /// is held it says which of three carts is which, not which game this is, and a long title
     /// on it is three small lines rather than a name.
     shelf_title_face: Option<(TexId, u32, u32)>,
+    /// The subfolder the machine's shelf is cut to, in the bottom band beside the machine's
+    /// badge. `None` twice over and for two different reasons: the machine may have no
+    /// subfolders at all, in which case the band says nothing, or it may be showing all of
+    /// them, in which case there is no cut to name.
+    shelf_folder_face: Option<(TexId, u32, u32)>,
     /// What the shutdown says, one per `PowerChoice::ALL` in that order and rastered at the
     /// menu's own size. "Powering down" under a restart was the screen contradicting the row
     /// the user had just chosen.
@@ -1313,6 +1321,7 @@ impl App {
             refused_from: None,
             alert_face: None,
             shelf_title_face: None,
+            shelf_folder_face: None,
             shutdown_faces: Vec::new(),
             power_menu: None,
             power_menu_faces: Vec::new(),
@@ -2355,6 +2364,31 @@ impl App {
             h: sh,
             tex,
             alpha,
+        });
+    }
+
+    /// The subfolder the shelf is cut to, in the band beside the machine's badge: the second
+    /// word of one reading, which machine's shelf is up and which of its folders is on it.
+    ///
+    /// Says nothing when the machine has no subfolders — not "all", which would be a name for
+    /// something that is not there. `Y` is refused on such a machine (`Shelf::cycle_folder`
+    /// answers false), and a band that named a folder anyway would be showing a control the
+    /// shelf does not have.
+    fn draw_shelf_folder(&self, out: &mut Vec<Draw>) {
+        let Some((tex, w, h)) = self.shelf_folder_face else {
+            return;
+        };
+        // On the badge's centre line and clear of its right edge, so the pair reads as one
+        // line of type rather than as two marks sharing a corner.
+        let cy = OUT_H as f32 - MOUTH_H / 2.0;
+        let clock_cx = STATUS_READ_MARGIN + self.shelf_clock.w as f32 / 2.0;
+        out.push(Draw::Tex {
+            x: clock_cx + SHELF_IND_W / 2.0 + FOLDER_GAP,
+            y: cy - h as f32 / 2.0,
+            w: w as f32,
+            h: h as f32,
+            tex,
+            alpha: 1.0,
         });
     }
 
@@ -3493,8 +3527,10 @@ impl App {
                         }
                         self.draw_fav_indicator(out);
                         // Which machine's shelf is up, in the opposite bottom corner — the
-                        // mirror of the favourites star.
+                        // mirror of the favourites star — and, beside it, which of that
+                        // machine's folders the shelf is cut to.
                         self.draw_shelf_indicator(out);
+                        self.draw_shelf_folder(out);
                     }
                 }
                 // After the row and before the case: it names what the row is showing, so it
@@ -3740,6 +3776,17 @@ impl App {
 
     pub fn set_shelf_title_face(&mut self, face: Option<(TexId, u32, u32)>) {
         self.shelf_title_face = face;
+    }
+
+    /// The subfolder the shelf is cut to, or `None` when it is showing the machine whole. The
+    /// frontend asks every frame, and that comparison is what re-rasterises the band's line
+    /// when `Y` moves the cut — and only then.
+    pub fn shelf_folder_name(&self) -> Option<String> {
+        self.shelf.folder_name(self.shelf_system).map(str::to_string)
+    }
+
+    pub fn set_shelf_folder_face(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.shelf_folder_face = face;
     }
 
     pub fn set_alert_face(&mut self, face: TexId) {

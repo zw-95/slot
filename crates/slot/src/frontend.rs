@@ -13,7 +13,8 @@ use slot_ui::{
     dialog_line_face, size_for,
     chip_shadow_face, clean_label, clock_face, hhmm, hint_face, icon_face, letters, menu_face,
     palette_cell_w, palette_name_face, palette_name_h, photo_face, set_clock_hint_face,
-    shelf_title_face, shortcut_hint_face, shortcut_row_face, socket_face, sticker_face,
+    shelf_folder_face, shelf_title_face, shortcut_hint_face, shortcut_row_face, socket_face,
+    sticker_face,
     title_face, toast_face, wallpaper_face, word_face, Icon, PowerChoice, StickerFields, Toast,
     ALERT_PX, BOLT_PX, HUD_ICON_PX, LEGEND, PALETTE_FOOT_PX, SHORTCUT_ROWS,
 };
@@ -66,6 +67,11 @@ pub struct Frontend {
     /// eye changes and at no other time.
     shelf_title_tex: Option<TexId>,
     shelf_titled: Option<String>,
+    /// The band's folder line, and the folder it was built for. The same deal again: one
+    /// texture, rebuilt when `Y` moves the cut or a machine swap changes which folders there
+    /// are, and at no other time.
+    shelf_folder_tex: Option<TexId>,
+    shelf_foldered: Option<String>,
     /// Builds the open cart's faces off the frame loop.
     faces: FaceBuilder,
     /// Builds the shelf's remaining cart faces off the frame loop, nearest the caret first.
@@ -152,6 +158,8 @@ impl Frontend {
             title_tex: None,
             shelf_title_tex: None,
             shelf_titled: None,
+            shelf_folder_tex: None,
+            shelf_foldered: None,
             faces: FaceBuilder::spawn(),
             shelf_faces: ShelfFaceFiller::spawn(),
             shelf_missing: Vec::new(),
@@ -588,6 +596,8 @@ impl Frontend {
         self.title_tex = None;
         self.shelf_title_tex = None;
         self.shelf_titled = None;
+        self.shelf_folder_tex = None;
+        self.shelf_foldered = None;
         self.switcher = Switcher::default();
         self.clocks = Clocks::default();
         self.about = AboutFace::default();
@@ -938,6 +948,12 @@ impl Frontend {
             &mut self.shelf_title_tex,
             &mut self.shelf_titled,
         );
+        sync_shelf_folder(
+            self.session.app_mut(),
+            compositor,
+            &mut self.shelf_folder_tex,
+            &mut self.shelf_foldered,
+        );
         sync_core_picker(
             self.session.app_mut(),
             compositor,
@@ -1206,6 +1222,39 @@ fn sync_shelf_title(
             app.set_shelf_title_face(Some((id, w, h)));
         }
         None => app.set_shelf_title_face(None),
+    }
+}
+
+/// The band's folder line: which subfolder the machine's shelf is cut to, for the screen that
+/// cuts it.
+///
+/// Mirrors `sync_shelf_title` exactly, including what it does not do: the comparison is the
+/// whole cost of a frame that changed nothing, and rasterising is reserved for the two things
+/// that can change this — `Y` moving the cut, and a machine swap bringing another machine's
+/// folders with it. A machine with no subfolders asks for `None` and keeps asking, so the band
+/// stays empty on it rather than naming a folder that does not exist.
+///
+/// The name is the card's own, uncleaned: `clean_label` is for a dumped rom's filename, which
+/// carries facts about the dump, and a folder was named by whoever filed it.
+fn sync_shelf_folder(
+    app: &mut App,
+    compositor: &mut Compositor,
+    slot: &mut Option<TexId>,
+    shown: &mut Option<String>,
+) {
+    let want = app.shelf_folder_name();
+    if *shown == want {
+        return;
+    }
+    *shown = want.clone();
+    match want {
+        Some(name) => {
+            let face = shelf_folder_face(&name);
+            let (w, h) = (face.w, face.h);
+            let id = upload(compositor, slot, face);
+            app.set_shelf_folder_face(Some((id, w, h)));
+        }
+        None => app.set_shelf_folder_face(None),
     }
 }
 
