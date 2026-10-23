@@ -7,11 +7,14 @@
 
        - four vent slots in each top corner, above where the label plate sits (the plate runs
          from 17.6% down, so these live in the band of bare shell it leaves at the top).
-       - the oval trough across the middle of the lower half, the shutter the real shell
-         carries under its label. It replaces the small raised boss the previous detail drew
-         there: with the plate now printed high and wide, the trough is what the band below
-         it is for.
-       - two foot bosses, one at each lower corner, where the shell rests in the console.
+       - one rounded bar across the lower half, the shutter the real shell carries under its
+         label. Rounded corners, flat top and bottom edges: it is a slot, not an ellipse, and
+         the difference is legible at this size - at 104 x 13 the ends of an ellipse read as
+         lens shapes rather than as the ends of a channel.
+
+       No foot bosses, one at each lower corner, which an earlier pass put here: the reference
+       shell has none, and what made them look right was being symmetrical, which is not
+       evidence. The band under the bar is bare.
 
        Positions are read off the reference shell and compressed with the same third the
        outline was (see cart_sfc.svg); the plate's own box lives in `cart.rs::size_for`, and
@@ -25,8 +28,6 @@
     <path d="M210.5 5 h3.5 v9 h-3.5 z"/>
     <path d="M216.5 5 h3.5 v9 h-3.5 z"/>
     <path d="M222.5 5 h3.5 v9 h-3.5 z"/>
-    <ellipse cx="120" cy="100" rx="50" ry="6.5"/>
-    <circle cx="56" cy="119" r="8.5"/>
-    <circle cx="184" cy="119" r="8.5"/>
+    <rect x="68" y="94" width="104" height="13" rx="4"/>
   </g>
 </svg>
