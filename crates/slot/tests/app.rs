@@ -639,11 +639,20 @@ fn the_chip_goes_where_the_arrow_points_and_does_not_wrap() {
     app.apply(Action::GbaDown(Btn::Right));
     assert_eq!(app.core_picker(), Some(Core::Gpsp));
     let_it_hop(&mut app);
+    // Onward to the end of the Advance's list, one press at a time — gpSP stopped being the last
+    // of them when the machine grew past two. What is asserted is the same thing it always was:
+    // the walk stops at the end rather than wrapping round to the first core.
+    let cores = System::Gba.cores();
+    for next in &cores[2..] {
+        app.apply(Action::GbaDown(Btn::Right));
+        let_it_hop(&mut app);
+        assert_eq!(app.core_picker(), Some(*next));
+    }
     app.apply(Action::GbaDown(Btn::Right));
     assert_eq!(
         app.core_picker(),
-        Some(Core::Gpsp),
-        "right from gpSP wrapped round"
+        Some(*cores.last().unwrap()),
+        "right from the end wrapped round"
     );
 }
 
@@ -663,26 +672,30 @@ fn a_shelf_refusal_does_not_shake_once_the_picker_takes_over() {
 }
 
 #[test]
-fn back_mid_hop_turns_round_and_onward_does_nothing() {
+fn back_mid_change_turns_round_and_onward_keeps_walking() {
+    let cores = System::Gba.cores();
     let (_d, mut app) = on_shelf(&["Emerald", "Zzz"]);
     fake_picker_faces(&mut app);
     app.apply(Action::GbaDown(Btn::Start));
     app.apply(Action::GbaDown(Btn::Right));
     app.update(0.05);
 
+    // Onward again with somewhere to go: the walk carries on, and that is not a refusal. It used
+    // to be "nothing happens" because the machine had two cores and the walk had nowhere left.
     app.apply(Action::GbaDown(Btn::Right));
-    assert_eq!(app.core_picker(), Some(Core::Gpsp));
+    assert_eq!(app.core_picker(), Some(cores[2]));
     assert_eq!(
         app.core_picker_chip().unwrap().shake,
         0.0,
-        "onward mid-hop was refused"
+        "onward mid-change was refused"
     );
 
+    // And back the other way still turns it round, from the core it is on.
     app.apply(Action::GbaDown(Btn::Left));
     assert_eq!(
         app.core_picker(),
-        Some(Core::Mgba),
-        "back mid-hop did not turn the chip round"
+        Some(cores[1]),
+        "back mid-change did not turn the walk round"
     );
 }
 
@@ -838,7 +851,8 @@ fn select_on_the_shelf_leaves_the_picker_shut_so_it_can_still_chord() {
 struct PickerFaces {
     board: TexId,
     lid: TexId,
-    chips: [TexId; 2],
+    /// One chip for every core: the same picture whichever of them is in hand.
+    chip: TexId,
     /// Each core's name, which is what moves when the core changes.
     names: [TexId; 2],
     shadow: TexId,
@@ -852,12 +866,12 @@ fn fake_boot_faces(app: &mut App) -> PickerFaces {
     let f = PickerFaces {
         board: id(900),
         lid: id(901),
-        chips: [id(904), id(905)],
+        chip: id(904),
         names: [id(902), id(903)],
         shadow: id(907),
         legend: [(id(908), 60), (id(909), 90), (id(910), 80)],
     };
-    app.set_core_part_faces(f.chips.to_vec(), f.names.to_vec(), f.shadow);
+    app.set_core_part_faces(f.chip, f.names.to_vec(), f.shadow);
     app.set_core_legend_faces(f.legend.to_vec());
     f
 }
@@ -945,7 +959,7 @@ fn assert_parts_on_board(out: &[Draw], f: &PickerFaces, board: Placed, when: &st
         },
         TURN_PAD as f32 * zoom,
     );
-    let (_, chip) = tex_at(out, f.chips[0]).unwrap_or_else(|| panic!("no chip {when}"));
+    let (_, chip) = tex_at(out, f.chip).unwrap_or_else(|| panic!("no chip {when}"));
     assert!(
         near(
             chip,
@@ -989,8 +1003,7 @@ fn assert_plain_shelf(out: &[Draw], f: &PickerFaces, when: &str) {
     let picker = [
         f.board,
         f.lid,
-        f.chips[0],
-        f.chips[1],
+        f.chip,
         f.names[0],
         f.names[1],
         f.shadow,
@@ -1043,7 +1056,7 @@ fn the_open_cart_rests_over_the_shelf_with_its_lid_turned() {
 
     // The chip, in the middle of the board — there is no socket for it to be standing in —
     // and the name of the core in hand written on it.
-    let (chip_i, chip) = tex_at(&out, f.chips[0]).expect("the chip is not on the board");
+    let (chip_i, chip) = tex_at(&out, f.chip).expect("the chip is not on the board");
     let want_chip = grown(
         Placed {
             x: rest.x + (rest.w - slot_ui::CORE_W as f32) / 2.0,
@@ -1134,7 +1147,7 @@ fn the_sockets_and_the_seated_chip_rest_on_whole_pixels() {
     let out = frame(&app);
 
     let whole = |r: [f32; 4]| r[0].fract() == 0.0 && r[1].fract() == 0.0;
-    let (_, chip) = tex_at(&out, f.chips[0]).expect("the chip is not on the board");
+    let (_, chip) = tex_at(&out, f.chip).expect("the chip is not on the board");
     assert!(
         whole(chip),
         "the chip is off the pixel grid at {chip:?}"
@@ -1196,14 +1209,10 @@ fn the_name_on_the_chip_is_the_one_it_changed_to() {
         },
         TURN_PAD as f32,
     );
-    let (_, chip) = tex_at(&out, f.chips[1]).expect("the chip did not change to gpSP's");
+    let (_, chip) = tex_at(&out, f.chip).expect("the chip did not change to gpSP's");
     assert!(
         near(chip, [want.x.round(), want.y.round(), want.w, want.h]),
         "the chip is not in the middle of the board: {chip:?}"
-    );
-    assert!(
-        tex_all(&out, f.chips[0]).is_empty(),
-        "mGBA's chip is still drawn once the change to gpSP has landed"
     );
     // And the name written on it is gpSP's, settled and alone.
     assert!(
@@ -1321,14 +1330,14 @@ fn mid_change_both_names_travel_the_way_the_hand_went_and_the_chip_stays() {
     app.apply(Action::GbaDown(Btn::Start));
     let_it_open(&mut app);
     let at_rest = frame(&app);
-    let (_, seated) = tex_at(&at_rest, f.chips[0]).expect("the chip is not on the board");
+    let (_, seated) = tex_at(&at_rest, f.chip).expect("the chip is not on the board");
     let rest_x = tex_at(&at_rest, f.names[0]).expect("mGBA's name is not on the chip").1[0];
 
     app.apply(Action::GbaDown(Btn::Right));
     app.update(0.09);
     let out = frame(&app);
     // The chip has not gone anywhere, and has not gone blank: there is nothing in flight.
-    let (_, chip) = tex_at(&out, f.chips[0]).expect("the chip left the board");
+    let (_, chip) = tex_at(&out, f.chip).expect("the chip left the board");
     assert!(
         near(chip, seated),
         "the chip moved while the name changed: {chip:?}"
@@ -1377,19 +1386,26 @@ fn the_chip_alone_shakes_when_refused() {
     app.apply(Action::GbaDown(Btn::Left));
     let after = frame(&app);
 
-    let (_, still) = tex_at(&before, f.chips[0]).unwrap();
-    let (_, shaken) = tex_at(&after, f.chips[0]).unwrap();
+    let (_, still) = tex_at(&before, f.chip).unwrap();
+    let (_, shaken) = tex_at(&after, f.chip).unwrap();
     assert_ne!(still[0], shaken[0], "the chip did not move");
+    // The name moves with it: the name is written on the chip, so a shake that moved the chip and
+    // left the words behind would slide them off the picture they belong to.
+    let (_, name_still) = tex_at(&before, f.names[0]).unwrap();
+    let (_, name_shaken) = tex_at(&after, f.names[0]).unwrap();
+    assert_ne!(
+        name_still[0], name_shaken[0], "the name did not shake with the chip"
+    );
     let rest = |out: &[Draw]| -> Vec<Draw> {
         out.iter()
-            .filter(|d| !matches!(d, Draw::Turned { tex, .. } if *tex == f.chips[0]))
+            .filter(|d| !matches!(d, Draw::Tex { tex, .. } if *tex == f.chip || *tex == f.names[0]))
             .copied()
             .collect()
     };
     assert_eq!(
         rest(&before),
         rest(&after),
-        "something besides the chip moved"
+        "something besides the chip and its name moved"
     );
 }
 
@@ -1530,7 +1546,7 @@ fn the_open_starts_anyway_when_the_faces_never_come() {
         turned_at(&out, f.lid).is_none(),
         "the fallback open drew the other cart's lid"
     );
-    for tex in [f.chips[0], f.chips[1], f.names[0], f.names[1]] {
+    for tex in [f.chip, f.names[0], f.names[1]] {
         assert!(
             tex_at(&out, tex).is_none() && turned_at(&out, tex).is_none(),
             "the fallback open drew a chip or a name"
@@ -1605,11 +1621,17 @@ fn arrows_pressed_while_the_cart_waits_move_nothing() {
     let_it_open(&mut app);
     let out = frame(&app);
     assert!(
-        turned_at(&out, f.chips[0]).is_some(),
-        "the chip is not seated in mGBA once the cart is open"
+        tex_at(&out, f.chip).is_some(),
+        "the chip is not on the board once the cart is open"
+    );
+    // And the name on it is the cart's own core's: the arrows moved nothing while it waited, so
+    // there is nothing on the chip that the player did not see chosen.
+    assert!(
+        tex_at(&out, f.names[0]).is_some(),
+        "mGBA's name is not on the chip once the cart is open"
     );
     assert!(
-        turned_at(&out, f.chips[1]).is_none(),
-        "the chip opened in gpSP"
+        tex_at(&out, f.names[1]).is_none(),
+        "the cart opened with gpSP's name on it"
     );
 }

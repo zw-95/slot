@@ -145,9 +145,11 @@ fn back_shell(system: slot_store::System, shell: [u8; 3], w: u32, h: u32) -> Car
         if a == 0 {
             continue;
         }
-        // Dark at the rim and lifting inward over the first `RIM_PX`, which is how thick a
-        // cart's wall is at the size an open cart is drawn.
-        let k = 0.40 + 0.34 * (depth[i] as f32 / RIM_PX).min(1.0);
+        // Dark at the rim and lifting inward over the first `RIM_PX` to the shell's own colour,
+        // which is how thick a cart's wall is at the size an open cart is drawn. Past the rim
+        // it is the plastic itself and not a shade of it: the back of this shell is the same
+        // plastic the front of it is on the shelf.
+        let k = 0.42 + 0.58 * (depth[i] as f32 / RIM_PX).min(1.0);
         rgba[i * 4..i * 4 + 3].copy_from_slice(&shell.map(|v| (v as f32 * k).round() as u8));
         rgba[i * 4 + 3] = a;
     }
@@ -158,7 +160,11 @@ fn back_shell(system: slot_store::System, shell: [u8; 3], w: u32, h: u32) -> Car
 /// art's own proportions — capped by height, so a portrait shell does not get a board taller
 /// than the shell it sits in.
 fn pcb_size(w: u32, h: u32) -> (u32, u32) {
-    let mut pw = (w as f32 * 0.94).round() as u32;
+    // The board art's own proportions across the shell's full width, and not a hair less: the
+    // Advance's shell is the board art's own shape, so filling it is the same picture the board
+    // always was. A portrait shell is taller than any board, so the height caps it and the
+    // shell's own plastic shows above and below.
+    let mut pw = w;
     let mut ph = (pw as f32 * BOARD_H as f32 / BOARD_W as f32).round() as u32;
     if ph > h {
         ph = h;

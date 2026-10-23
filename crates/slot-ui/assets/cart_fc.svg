@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 276">
+  <!-- Famicom cartridge outline.
+
+       Portrait, like the Game Boy family's shell, and drawn at that row's own size (240 x 276),
+       which is close enough to the real thing's proportions to pass: a Famicom cart is a tall,
+       narrow shell, roughly 70 mm across and 125 mm down, and the step where the lower quarter
+       narrows is what reads as a Famicom cart rather than a Game Boy one.
+
+       That step is the whole shape: the wide part runs from the top down to 75% of the height,
+       where each side cuts in 24 px over 16 px of depth, and the narrower foot continues to the
+       bottom corners. On the real shell this is the part that goes into the console. Unlike
+       cart_gb.svg there is no notch in a top corner — the Famicom cart has no lockout step.
+
+       Both the step's width (24 px) and its run (16 px) are estimated from photographs. Replace
+       them if a cartridge is ever measured with calipers. -->
+  <path d="M12 0 H228 A12 12 0 0 1 240 12 V206 L216 222 V264
+           A12 12 0 0 1 204 276 H36 A12 12 0 0 1 24 264 V222 L0 206 V12
+           A12 12 0 0 1 12 0 Z" fill="#fff"/>
+</svg>

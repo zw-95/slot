@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 276">
+  <!-- Famicom cart face detail: the moulded groove that runs across the shell above the label,
+       and the step line where the shell narrows towards the connector. Both are face mouldings
+       rather than parts of the outline. Runs are read off photographs, not measured. -->
+  <path d="M28 34 H212 A5 5 0 0 1 217 39 V45 A5 5 0 0 1 212 50 H28
+           A5 5 0 0 1 23 45 V39 A5 5 0 0 1 28 34 Z" fill="#fff"/>
+  <path d="M24 198 H216 V204 H24 Z" fill="#fff"/>
+</svg>

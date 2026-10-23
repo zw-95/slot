@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 135">
+  <!-- Super Nintendo cart face detail: the moulded groove across the top of the shell, and the
+       raised boss in the middle of the lower half where the shell steps out towards the
+       connector. Both are face mouldings rather than parts of the outline, so they live here
+       and not in cart_sfc.svg. Depths and runs are read off photographs, not measured. -->
+  <path d="M36 22 H204 A5 5 0 0 1 209 27 V31 A5 5 0 0 1 204 36 H36
+           A5 5 0 0 1 31 31 V27 A5 5 0 0 1 36 22 Z" fill="#fff"/>
+  <path d="M108 96 H132 A4 4 0 0 1 136 100 V112 A4 4 0 0 1 132 116 H108
+           A4 4 0 0 1 104 112 V100 A4 4 0 0 1 108 96 Z" fill="#fff"/>
+</svg>

@@ -1075,10 +1075,12 @@ pub struct App {
     core_lid_face: Option<TexId>,
     /// The cart the uploaded board and lid were built for.
     core_faces_stem: Option<String>,
-    /// In `Core::ALL` order: the chip, and each core's name. Uploaded at boot, since neither ever
-    /// changes. The chip is one shape for all of them — what differs is the name on it, which is
-    /// why there is a face per core and not per core *and* per socket.
-    core_chip_faces: Vec<TexId>,
+    /// The chip: **one** face and not one per core, because it is one chip — the same shape
+    /// whichever core is in hand, and what tells two of them apart is the name written on it
+    /// rather than the picture. Uploaded at boot.
+    core_chip_face: Option<TexId>,
+    /// Each core's name, in `Core::ALL` order. This is the part that changes when the core does,
+    /// and it is a face of its own so that it can travel off the chip and back onto it.
     core_name_faces: Vec<TexId>,
     /// The shadow under the open lid.
     core_chip_shadow_face: Option<TexId>,
@@ -1338,7 +1340,7 @@ impl App {
             core_board_face: None,
             core_lid_face: None,
             core_faces_stem: None,
-            core_chip_faces: Vec::new(),
+            core_chip_face: None,
             core_name_faces: Vec::new(),
             core_chip_shadow_face: None,
             core_legend_faces: Vec::new(),
@@ -3817,14 +3819,9 @@ impl App {
         self.core_faces_stem = self.selected_stem().map(str::to_string);
     }
 
-    /// `chips` and `names`, both in `Core::ALL` order.
-    pub fn set_core_part_faces(
-        &mut self,
-        chips: Vec<TexId>,
-        names: Vec<TexId>,
-        shadow: TexId,
-    ) {
-        self.core_chip_faces = chips;
+    /// One chip, and `names` in `Core::ALL` order.
+    pub fn set_core_part_faces(&mut self, chip: TexId, names: Vec<TexId>, shadow: TexId) {
+        self.core_chip_face = Some(chip);
         self.core_name_faces = names;
         self.core_chip_shadow_face = Some(shadow);
     }
@@ -4003,7 +4000,17 @@ impl App {
         let Some(tex) = self.core_name_faces.get(core.index()).copied() else {
             return;
         };
-        out.push(Draw::Tex { x, y, w, h, tex, alpha });
+        // Whole pixels, as the chip and the board: the name is drawn at its own size and at a
+        // y that falls between two rows whenever the board's height is odd, and type on a half
+        // pixel is blurred type.
+        out.push(Draw::Tex {
+            x: x.round(),
+            y: y.round(),
+            w,
+            h,
+            tex,
+            alpha,
+        });
     }
 
     /// The picker, but only once it has started opening: `None` while it is still standing on
@@ -4101,20 +4108,20 @@ impl App {
                     w: cw,
                     h: ch,
                 };
-                if let Some(core) = chip.seated {
-                    if let Some(tex) = self.core_chip_faces.get(core.index()).copied() {
-                        // Grown into the transparent border the face carries, so the padding is
-                        // part of the draw and not a chip drawn too small.
-                        let at = grown(body, TURN_PAD as f32 * zoom);
-                        out.push(Draw::Tex {
-                            x: at.x.round(),
-                            y: at.y.round(),
-                            w: at.w,
-                            h: at.h,
-                            tex,
-                            alpha: 1.0,
-                        });
-                    }
+                // The chip, and it is the same chip whichever core is in hand: a press changes
+                // the name on it and nothing about the chip itself.
+                if let Some(tex) = self.core_chip_face {
+                    // Grown into the transparent border the face carries, so the padding is
+                    // part of the draw and not a chip drawn too small.
+                    let at = grown(body, TURN_PAD as f32 * zoom);
+                    out.push(Draw::Tex {
+                        x: at.x.round(),
+                        y: at.y.round(),
+                        w: at.w,
+                        h: at.h,
+                        tex,
+                        alpha: 1.0,
+                    });
                 }
                 // And the name on it. One name while nothing is changing, and two while it is:
                 // the one being left goes out the way the hand went, and the one being arrived

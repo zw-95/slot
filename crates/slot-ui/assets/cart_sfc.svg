@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 135">
+  <!-- Super Nintendo / Super Famicom cartridge outline.
+
+       Drawn at the shelf's own size (240 x 135, the Advance row's), NOT at the shell's real
+       proportions: a Super Famicom cart is about 135 x 115 mm, which at the shelf's scale
+       (240 px = 57 mm) would be 568 x 484 px — taller than the 480 px panel a row has to live
+       on. The height is therefore compressed by a third, and what is kept is what makes the
+       shell readable as a Super Nintendo cart at a glance:
+
+       - the two finger grooves, one down each side, stepped in 8 px between 48% and 79% of
+         the height. This is the single most recognisable thing about the shell and the reason
+         this file exists rather than reusing cart.svg.
+       - a small rounding up top (14 px) and a larger one at the foot (12 px on a 135 tall
+         face, which is softer than the Advance cart's).
+       - no notch anywhere: neither the Super Famicom nor the SNES shell carries the Game Boy
+         family's lockout step.
+
+       The groove's depth (8 px) and its run are estimated from photographs, not measured.
+       Replace them if a cartridge is ever measured with calipers; a stricter 135 x 115 mm
+       face would need its own row in `cart.rs` and a recheck of `foot_y`, which branches on
+       `h == CART_H` and would treat a 204 tall cart as a portrait row. -->
+  <path d="M14 0 H226 A14 14 0 0 1 240 14 V60 L232 65 V107 L240 112 V123
+           A12 12 0 0 1 228 135 H12 A12 12 0 0 1 0 123 V112 L8 107 V65 L0 60 V14
+           A14 14 0 0 1 14 0 Z" fill="#fff"/>
+</svg>

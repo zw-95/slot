@@ -429,18 +429,14 @@ impl Frontend {
             })
             .collect();
         self.session.app_mut().set_power_menu_faces(menu);
-        // The open cart's parts that never change: the chip, and each core's name, in
-        // `Core::ALL` order. At boot like the power menu's rows, so the first frame of a lid
-        // coming off is not spent in a rasteriser. The chip is one face per core only because
-        // the caller indexes it that way — it is the same chip for all of them, and what
-        // differs is the name that goes on it.
-        let chips = slot_store::Core::ALL
-            .iter()
-            .map(|c| {
-                let f = chip_face(*c);
-                compositor.create_texture(f.w, f.h, &f.rgba)
-            })
-            .collect();
+        // The open cart's parts that never change, at boot like the power menu's rows, so the
+        // first frame of a lid coming off is not spent in a rasteriser.
+        //
+        // **One chip** rather than one per core: it is one shape for all of them and always was,
+        // and the twenty-second copy of an identical picture is twenty-one textures of nothing.
+        // What differs per core is the name, and those are all uploaded.
+        let chip = chip_face(slot_store::Core::Mgba);
+        let chip = compositor.create_texture(chip.w, chip.h, &chip.rgba);
         let names = slot_store::Core::ALL
             .iter()
             .map(|c| {
@@ -452,7 +448,7 @@ impl Frontend {
         let shadow = compositor.create_texture(shadow.w, shadow.h, &shadow.rgba);
         self.session
             .app_mut()
-            .set_core_part_faces(chips, names, shadow);
+            .set_core_part_faces(chip, names, shadow);
         // Every action the picker takes, the way out first and the choice last, as the
         // switcher's legend is ordered.
         let legend = [

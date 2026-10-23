@@ -203,15 +203,19 @@ impl CorePicker {
             Press::Left => -1,
             Press::Right => 1,
         };
+        // While the cart waits on its faces the arrows answer nothing at all, and this comes
+        // before the question of the ends: at an end while waiting is still "nothing", because
+        // there is no chip on screen, and a refusal would shake one nobody can see and open the
+        // cart to a name already changed.
+        if self.waiting() {
+            return Outcome::Nothing;
+        }
         let target = self.seat as isize + step;
         if target < 0 || target >= self.count as isize {
             self.refusal = Some(Refusal::started(now));
             return Outcome::Refused;
         }
         let target = target as usize;
-        if self.waiting() {
-            return Outcome::Nothing;
-        }
         // The name the player is leaving is the one on the chip now, whatever the last change
         // was doing: a second press before the first has settled takes the name it was arriving
         // at and sends that one on its way, which is what makes a run of presses read as one

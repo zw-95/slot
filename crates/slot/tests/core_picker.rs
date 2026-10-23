@@ -57,32 +57,42 @@ fn right_from_mgba_sends_one_name_out_and_another_in() {
     assert_eq!(landed.seated, Some(Core::Gpsp));
 }
 
-/// Toward the socket it is already in there is nowhere to go. The chip shakes, and nothing
-/// else about the picker changes.
+/// At the end of the machine's list there is nowhere to go. The chip shakes, and nothing else
+/// about the picker changes. Spelled against the last of the Advance's cores rather than naming
+/// one: what is at the end is a machine's business, and the Advance has grown past two.
 #[test]
-fn toward_the_socket_it_is_in_is_refused_and_only_shakes() {
-    let mut p = opened(Core::Gpsp, 0);
+fn toward_the_end_of_the_list_is_refused_and_only_shakes() {
+    let last = *System::Gba.cores().last().unwrap();
+    let mut p = opened(last, 0);
     assert_eq!(p.press(Press::Right, 400), Outcome::Refused);
-    assert_eq!(p.seat(), Core::Gpsp);
+    assert_eq!(p.seat(), last);
     assert_ne!(p.chip(400).shake, 0.0, "a refusal with no shake");
-    assert_eq!(p.chip(400).seated, Some(Core::Gpsp));
+    assert_eq!(p.chip(400).seated, Some(last));
     assert_eq!(p.chip(700).shake, 0.0, "the shake outlived its 300 ms");
 }
 
-/// Back the other way mid-change, the name picks up from where it had got to rather than
-/// jumping to the start of a new travel: it is already a third of the way out to the right, so
-/// it comes back from a third of the way out to the right.
+/// Back the other way mid-change, the name picks up from where it is rather than jumping to the
+/// start of a new travel. The one arriving is still most of the way out to the left, so it turns
+/// round and goes back out the way it came — it does not slide to the middle first, and it does
+/// not start again from the far side.
 #[test]
 fn back_mid_change_turns_the_name_round_from_where_it_is() {
     let mut p = opened(Core::Mgba, 0);
     p.press(Press::Right, 400);
     let at = 400 + HOP_MS / 4;
-    let before = swap_pose(&p.chip(at).swap.expect("no name is moving")).0;
-    assert!(before > 0.0, "the name had not started leaving");
+    // Where gpSP's name is: the one arriving, still out to the left and not yet in the middle.
+    let before = swap_pose(&p.chip(at).swap.expect("no name is moving")).2;
+    assert!(before < 0.0, "the arriving name had not come from the left");
     assert_eq!(p.press(Press::Left, at), Outcome::Nothing);
     assert_eq!(p.seat(), Core::Mgba);
     let turned = p.chip(at).swap.expect("the name stopped moving");
     assert_eq!(turned.dir, -1.0, "a press to the left sends the name left");
+    // The same name, now the one leaving, from the same place it had got to.
+    assert_eq!(
+        turned.from,
+        Core::Gpsp,
+        "a different name is on its way out than the one that was on its way in"
+    );
     assert!(
         (swap_pose(&turned).0 - before).abs() < 0.05,
         "the name jumped from {before} to {} as it turned",
@@ -91,13 +101,21 @@ fn back_mid_change_turns_the_name_round_from_where_it_is() {
     assert_eq!(p.chip(at + HOP_MS).seated, Some(Core::Mgba));
 }
 
+/// Onward again mid-change, with somewhere to go: the walk carries on. Not a refusal — there is
+/// room — and so not a chip shaking over nothing.
 #[test]
-fn onward_mid_hop_does_nothing_and_is_not_a_refusal() {
-    let mut p = opened(Core::Mgba, 0);
+fn onward_mid_change_keeps_walking_and_is_not_a_refusal() {
+    let cores = System::Gba.cores();
+    let mut p = CorePicker::open(cores[0], cores, 0);
+    p.start(0);
     p.press(Press::Right, 400);
     assert_eq!(p.press(Press::Right, 450), Outcome::Nothing);
-    assert_eq!(p.chip(450).shake, 0.0);
-    assert_eq!(p.seat(), Core::Gpsp);
+    assert_eq!(
+        p.chip(450).shake,
+        0.0,
+        "a refusal where there is room to walk"
+    );
+    assert_eq!(p.seat(), cores[2], "the walk stopped one core along");
 }
 
 #[test]
@@ -139,12 +157,12 @@ fn a_close_during_the_lift_reverses_from_where_the_lid_had_got_to() {
 /// A refusal decays on its own clock and must not survive into a hop that actually happens: two
 /// things shaking at once reads as two separate failures.
 #[test]
-fn a_hop_started_soon_after_a_refusal_does_not_carry_its_shake() {
-    let mut p = opened(Core::Gpsp, 0);
+fn a_change_started_soon_after_a_refusal_does_not_carry_its_shake() {
+    let mut p = opened(*System::Gba.cores().last().unwrap(), 0);
     assert_eq!(p.press(Press::Right, 0), Outcome::Refused);
     assert_eq!(p.press(Press::Left, 100), Outcome::Nothing);
-    assert_eq!(p.chip(100).shake, 0.0, "the refusal rode along on the hop");
-    assert_eq!(p.chip(150).shake, 0.0, "the refusal rode along on the hop");
+    assert_eq!(p.chip(100).shake, 0.0, "the refusal rode along on the change");
+    assert_eq!(p.chip(150).shake, 0.0, "the refusal rode along on the change");
 }
 
 #[test]
@@ -226,10 +244,18 @@ fn the_arrows_do_nothing_while_the_picker_waits() {
         Core::Gpsp,
         "the arrow did nothing once the cart had opened"
     );
+    // And once the cart is open the arrow does work, so a name is changing — with the chip under
+    // it already the new core's. The chip is never blank: there is nothing in flight to stand
+    // in for, the name being the only thing that travels.
+    let mid = p.chip(300 + HOP_MS / 2);
+    assert!(
+        mid.swap.is_some(),
+        "the arrow did nothing once the cart had opened"
+    );
     assert_eq!(
-        p.chip(300 + HOP_MS / 2).seated,
-        None,
-        "no hop once the cart had opened"
+        mid.seated,
+        Some(Core::Gpsp),
+        "the chip went blank while the name was changing"
     );
 }
 
