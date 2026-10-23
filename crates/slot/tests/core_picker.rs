@@ -49,7 +49,10 @@ fn right_from_mgba_sends_one_name_out_and_another_in() {
     // Halfway through, and the two of them are the same distance either side of the middle and
     // equally solid — one leaving at exactly the rate the other arrives.
     let (out_x, out_a, in_x, in_a) = swap_pose(&swap);
-    assert!(out_x > 0.0 && in_x < 0.0, "the names are travelling together");
+    assert!(
+        out_x < 0.0 && in_x > 0.0,
+        "the arriving name did not come in from the right the hand pointed at"
+    );
     assert!((out_a - in_a).abs() < 0.02, "they are not changing hands evenly");
 
     let landed = p.chip(500 + HOP_MS);
@@ -80,9 +83,9 @@ fn back_mid_change_turns_the_name_round_from_where_it_is() {
     let mut p = opened(Core::Mgba, 0);
     p.press(Press::Right, 400);
     let at = 400 + HOP_MS / 4;
-    // Where gpSP's name is: the one arriving, still out to the left and not yet in the middle.
+    // Where gpSP's name is: the one arriving, still out to the right and not yet in the middle.
     let before = swap_pose(&p.chip(at).swap.expect("no name is moving")).2;
-    assert!(before < 0.0, "the arriving name had not come from the left");
+    assert!(before > 0.0, "the arriving name had not come from the right");
     assert_eq!(p.press(Press::Left, at), Outcome::Nothing);
     assert_eq!(p.seat(), Core::Mgba);
     let turned = p.chip(at).swap.expect("the name stopped moving");

@@ -157,6 +157,39 @@ impl CorePicker {
         self.seat
     }
 
+    /// How many cores this machine offers, and so how many dots the row under the board has.
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    /// How lit the `i`th dot is: 1.0 for the core in hand, 0.0 for every other one, and — while a
+    /// change is in flight — somewhere between the two, easing, so the light **travels** from the
+    /// dot being left to the one being arrived at rather than going out and coming back on. A row
+    /// of dots that blinked would read as a different row every press; this one reads as a hand
+    /// moving along it.
+    pub fn dot_lit(&self, i: usize, now: Millis) -> f32 {
+        let seated = self.seat;
+        let (from, q) = match (self.hop, self.progress(now)) {
+            (Some(hop), Some(q)) => (
+                self.cores[..self.count]
+                    .iter()
+                    .position(|c| *c == hop.from)
+                    .unwrap_or(seated),
+                ease(q),
+            ),
+            _ => {
+                return if i == seated { 1.0 } else { 0.0 };
+            }
+        };
+        if i == seated {
+            q
+        } else if i == from {
+            1.0 - q
+        } else {
+            0.0
+        }
+    }
+
     pub fn closing(&self) -> bool {
         self.close.is_some()
     }
@@ -274,12 +307,19 @@ impl CorePicker {
 ///
 /// `out` is the name on its way off, `in` the one arriving. Both are given as a fraction of the
 /// travel and an alpha, so the caller only has to know which way the hand went.
+///
+/// **Which way they go is the whole of this function's job, and it was backwards.** A press to the
+/// right takes the core to the right of this one, so the arriving name comes **in from the right**
+/// and the one it replaces leaves to the left — the new core is the one that was over there, and it
+/// arrives from there. It had them the other way about: pressing left sent the old name off to the
+/// left and brought the new one in from the right, which is the movement of a press to the right,
+/// so a press left read as "I have moved to the core on the right".
 pub fn swap_pose(swap: &Swap) -> (f32, f32, f32, f32) {
     let e = ease(swap.q);
     (
-        swap.dir * e,                  // leaving: towards the side the hand went
-        1.0 - e,                       // and fading out as it goes
-        -swap.dir * (1.0 - e),         // arriving: from the other side
-        e,                             // and coming up to full as it settles
+        -swap.dir * e,                 // leaving: away from the side the hand went
+        1.0 - e,                        // and fading out as it goes
+        swap.dir * (1.0 - e),           // arriving: from the side the hand went
+        e,                              // and coming up to full as it settles
     )
 }

@@ -1342,7 +1342,8 @@ fn mid_change_both_names_travel_the_way_the_hand_went_and_the_chip_stays() {
         near(chip, seated),
         "the chip moved while the name changed: {chip:?}"
     );
-    // mGBA leaving to the right, gpSP arriving from the left, both part-faded.
+    // mGBA leaving to the left, gpSP arriving from the right — the core the hand pointed at is
+    // the one that comes in from over there — both part-faded.
     let pose = |tex| {
         out.iter()
             .find_map(|d| match *d {
@@ -1354,12 +1355,12 @@ fn mid_change_both_names_travel_the_way_the_hand_went_and_the_chip_stays() {
     let (leaving_x, leaving_a) = pose(f.names[0]);
     let (arriving_x, arriving_a) = pose(f.names[1]);
     assert!(
-        leaving_x > rest_x,
-        "the name being left did not go right: {leaving_x} vs {rest_x}"
+        leaving_x < rest_x,
+        "the name being left did not go left: {leaving_x} vs {rest_x}"
     );
     assert!(
-        arriving_x < rest_x,
-        "the name arriving did not come from the left: {arriving_x} vs {rest_x}"
+        arriving_x > rest_x,
+        "the name arriving did not come from the right: {arriving_x} vs {rest_x}"
     );
     assert!(leaving_a < 1.0, "the leaving name has not begun to fade");
     assert!(

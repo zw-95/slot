@@ -40,24 +40,22 @@ const EMERALD: &str = "Pokemon - Emerald Version (USA, Europe)";
 #[test]
 fn the_board_carries_no_second_chip() {
     let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
-    // The whole upper-right region, where a mask ROM used to sit with the game's name on it:
-    // substrate from one end of it to the other, with nothing printed over it.
-    let shell = shell_for("BPEE").colour;
-    let base: [u8; 3] = [0x1e, 0x53, 0x36]
-        .iter()
-        .zip(shell)
-        .map(|(&x, y)| (x as f32 * 0.84 + y as f32 * 0.16).round() as u8)
-        .collect::<Vec<_>>()
-        .try_into()
-        .unwrap();
-    let plain = (12..58)
-        .flat_map(|y| (232..364).map(move |x| (x, y)))
-        .filter(|&(x, y)| near(rgb(&face, x, y), base))
+    // The board above the socket, where a mask ROM used to sit with the game's name on it: the
+    // Advance cart's own outline cuts its top-right corner away, so the region asked for is the
+    // board **inside** the socket's silkscreen and above it — substrate, wall shade and nothing
+    // else. What would give a second package away is its body, a flat grey-black with no green in
+    // it: the substrate is green enough that its red channel alone is under any threshold a black
+    // package would pass, so the test asks for grey — red and green within a step of each other.
+    let dark = (36..58)
+        .flat_map(|y| (150..260).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            let [r, g, _] = rgb(&face, x, y);
+            r < 60 && (g as i32 - r as i32).abs() < 25
+        })
         .count();
-    let total = 46 * 132;
-    assert!(
-        plain > total * 9 / 10,
-        "only {plain} of {total} pixels up there are bare substrate — something is still drawn"
+    assert_eq!(
+        dark, 0,
+        "{dark} dark pixels above the socket — a second package is still drawn there"
     );
 }
 
@@ -69,22 +67,31 @@ fn the_board_is_the_size_it_is_shown_at() {
     assert_eq!((BOARD_W, BOARD_H), (372, 209));
 }
 
-/// The back of the cart is the same plastic as its front on the shelf. On an Advance board the
-/// board art fills the shell, so the plastic shows on a portrait cart instead — a Game Boy's
-/// board is capped by its shell's height, and the shell's own plastic shows above and below it.
-/// Board pixel (126, 37) is in the strip above a Game Boy's board, clear of the rim's darkening.
+/// The board fills the shell now, so the shell's plastic does not show anywhere as plastic — but
+/// the substrate is pulled a sixteenth of the way to it, so a board out of a green cart is not the
+/// same green as one out of a blue one, and a cart can still be told by its own board. Board
+/// pixel (126, 37) of a Game Boy cart: on the board, clear of the wall and of everything drawn.
 #[test]
-fn the_back_shell_is_the_carts_own_plastic() {
+fn the_board_takes_the_shells_own_tint() {
+    let substrate = |shell: [u8; 3]| -> [u8; 3] {
+        [0x1e, 0x53, 0x36]
+            .iter()
+            .zip(shell)
+            .map(|(&x, y)| (x as f32 * 0.84 + y as f32 * 0.16).round() as u8)
+            .collect::<Vec<_>>()
+            .try_into()
+            .unwrap()
+    };
     let emerald = board_face(&cart(EMERALD, "BPEE"), System::Gb);
     assert!(
-        near(rgb(&emerald, 126, 37), shell_for("BPEE").colour),
-        "Emerald's wall is {:?}",
+        near(rgb(&emerald, 126, 37), substrate(shell_for("BPEE").colour)),
+        "Emerald's board is {:?}",
         rgb(&emerald, 126, 37)
     );
     let unknown = board_face(&cart("Homebrew", ""), System::Gb);
     assert!(
-        near(rgb(&unknown, 126, 37), DEFAULT_SHELL.colour),
-        "an unknown cart's wall is {:?}",
+        near(rgb(&unknown, 126, 37), substrate(DEFAULT_SHELL.colour)),
+        "an unknown cart's board is {:?}",
         rgb(&unknown, 126, 37)
     );
 }

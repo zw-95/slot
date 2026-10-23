@@ -40,61 +40,60 @@ pub const BOARD_H: u32 = 209;
 pub fn board_face(cart: &Cart, system: slot_store::System) -> CartFace {
     let shell = shell_for(&cart.code);
     let (w, h) = board_size(system);
+    // Its own raster, not the shelf's cached one: that cache keeps a single size per machine, and
+    // the board's is not it. See `silhouette::shell_at`.
+    let (mask, depth) = crate::silhouette::shell_at(system, w, h);
     // The back half of the shell, in this cart's own plastic and this machine's own shape.
-    let mut face = back_shell(system, shell.colour, w, h);
-    // And the board inside it, drawn at the proportions it was drawn at and inset in the shell
-    // rather than stretched to fill it: a portrait shell is nearly half again as tall as the
-    // board is, and pulling the art to that shape would bow its traces and oval its pads.
-    let (pw, ph) = pcb_size(w, h);
-    let pcb = pcb_face(shell.colour, pw, ph, system as u32);
-    let (px, py) = ((w - pw) / 2, (h - ph) / 2);
-    over(&mut face, &pcb, px, py);
+    let mut face = back_shell(shell.colour, w, h, &mask, &depth);
+    // And the board, filling it: **the cart's own outline, green from edge to edge.** It used to
+    // be a board of its own proportions inset in the shell, which is what left a shell-coloured
+    // band above and below a portrait cart's board and made the two halves read as two things.
+    // Now the shell is the shape and the substrate is what takes it.
+    let pcb = pcb_face(shell.colour, w, h, system as u32, &mask);
+    over(&mut face, &pcb, 0, 0);
+    // The wall's shadow, over the board as much as over the plastic: the board reaches the edge
+    // now, and a cart's wall is thick enough to darken it.
+    rim_shade(&mut face, &depth);
     face
 }
 
 /// The shell's back half: the machine's outline in this cart's plastic, darkened — it is the
 /// inside of a shell that has just been taken apart — with its thickness showing at the rim.
-fn back_shell(system: slot_store::System, shell: [u8; 3], w: u32, h: u32) -> CartFace {
-    // Its own raster, not the shelf's cached one: that cache keeps a single size per machine, and
-    // the board's is not it. See `silhouette::shell_at`.
-    let (mask, depth) = crate::silhouette::shell_at(system, w, h);
-    let depth = &depth;
+fn back_shell(shell: [u8; 3], w: u32, h: u32, mask: &[u8], depth: &[u8]) -> CartFace {
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     for i in 0..(w * h) as usize {
         let a = mask[i];
         if a == 0 {
             continue;
         }
-        // Dark at the rim and lifting inward over the first `RIM_PX` to the shell's own colour,
-        // which is how thick a cart's wall is at the size an open cart is drawn. Past the rim
-        // it is the plastic itself and not a shade of it: the back of this shell is the same
-        // plastic the front of it is on the shelf.
-        let k = 0.42 + 0.58 * (depth[i] as f32 / RIM_PX).min(1.0);
-        rgba[i * 4..i * 4 + 3].copy_from_slice(&shell.map(|v| (v as f32 * k).round() as u8));
+        rgba[i * 4..i * 4 + 3].copy_from_slice(&shell);
         rgba[i * 4 + 3] = a;
     }
-    CartFace { rgba, w, h }
+    let mut face = CartFace { rgba, w, h };
+    rim_shade(&mut face, depth);
+    face
 }
 
-/// How big the board is inside a shell of `w`×`h`: nearly the shell's width, and at the board
-/// art's own proportions — capped by height, so a portrait shell does not get a board taller
-/// than the shell it sits in.
-fn pcb_size(w: u32, h: u32) -> (u32, u32) {
-    // The board art's own proportions across the shell's full width, and not a hair less: the
-    // Advance's shell is the board art's own shape, so filling it is the same picture the board
-    // always was. A portrait shell is taller than any board, so the height caps it and the
-    // shell's own plastic shows above and below.
-    let mut pw = w;
-    let mut ph = (pw as f32 * BOARD_H as f32 / BOARD_W as f32).round() as u32;
-    if ph > h {
-        ph = h;
-        pw = (ph as f32 * BOARD_W as f32 / BOARD_H as f32).round() as u32;
+/// Everything within `RIM_PX` of the outline's edge, darkened: how thick a cart's wall is at the
+/// size an open cart is drawn. Past the rim it is the colour it was, so a shell's plastic is
+/// still that plastic and a board's substrate still that substrate — only the wall casts.
+fn rim_shade(face: &mut CartFace, depth: &[u8]) {
+    for i in 0..(face.w * face.h) as usize {
+        if face.rgba[i * 4 + 3] == 0 {
+            continue;
+        }
+        let k = 0.42 + 0.58 * (depth[i] as f32 / RIM_PX).min(1.0);
+        if k >= 1.0 {
+            continue;
+        }
+        for c in 0..3 {
+            face.rgba[i * 4 + c] = (face.rgba[i * 4 + c] as f32 * k).round() as u8;
+        }
     }
-    (pw, ph)
 }
 
 /// A board, drawn: substrate, copper traces ending in pads, an edge connector along the bottom,
-/// the mask ROM that carries the game, and the silkscreen outline of the socket the core sits in.
+/// the silkscreen outline of the socket the core sits in, and the fingers along its bottom edge.
 ///
 /// Drawn rather than rastered from art, and drawn **at the size it is asked for** — because that
 /// size is the whole of the trouble this replaces. The art was one machine's board, the Advance's,
@@ -102,7 +101,12 @@ fn pcb_size(w: u32, h: u32) -> (u32, u32) {
 /// Nintendo cart opened on an Advance board with Advance traces on it, and a Game Boy one opened
 /// on the same board pulled tall enough to bow every pad on it. This keeps its own proportions at
 /// whatever size it is given, so a portrait cart gets a portrait board and a wide one a wide board.
-fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
+///
+/// `mask` is the shell's own outline, and the board is cut to it: the substrate is filled as a
+/// rectangle because a rectangle is what is cheap to fill, and the cart's shape is what trims it.
+/// So the board's edge is the cart's edge — which is the whole of what "the board is the cart's
+/// size" means, and why a portrait cart no longer shows plastic above and below its board.
+fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32, mask: &[u8]) -> CartFace {
     let mut face = CartFace {
         rgba: vec![0; (w * h * 4) as usize],
         w,
@@ -112,7 +116,6 @@ fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
     // not be the same green as one out of a blue one.
     let base = mix(SUBSTRATE, shell, 0.16);
     box_fill(&mut face, 0, 0, w as i32, h as i32, base, 255);
-    box_line(&mut face, 2, 2, w as i32 - 2, h as i32 - 2, SILK, 255);
 
     // Where the socket is, which is where every trace on this board is going.
     let s = w as f32 / BOARD_W as f32;
@@ -154,6 +157,12 @@ fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
     // The socket: its outline in silkscreen, so the chip reads as seated in something rather than
     // floating over the board, and so the pads its traces end in have somewhere to arrive.
     box_line(&mut face, sx - 5, sy - 5, sx + sw + 5, sy + sh + 5, SILK, 255);
+
+    // Cut to the cart's outline: the board reaches the edge everywhere the shell does, and the
+    // notches and corners a machine's cart has are notches and corners its board has too.
+    for i in 0..(w * h) as usize {
+        face.rgba[i * 4 + 3] = face.rgba[i * 4 + 3].min(mask[i]);
+    }
     face
 }
 
@@ -284,9 +293,11 @@ const NAME_BIG_MIN_PX: f32 = 15.0;
 pub const NAME_W: u32 = 190;
 pub const NAME_H: u32 = 48;
 pub const NAME_TRAVEL: f32 = 150.0;
-/// The chip's size: the board's, now that it has it to itself.
-pub const CORE_W: u32 = 150;
-pub const CORE_H: u32 = 104;
+/// The chip's size, and it is **the board's**: one chip and it has the board to itself, so it is
+/// as large as the board can carry — over half its width, and the fingers and their traces below
+/// it are the only other thing the board is carrying.
+pub const CORE_W: u32 = 200;
+pub const CORE_H: u32 = 138;
 const SOCKET_INK: [u8; 3] = [0xee, 0xf5, 0xe6];
 const CHIP_INK: [u8; 3] = [0xf2, 0xf2, 0xf2];
 
