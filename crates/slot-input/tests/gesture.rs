@@ -1,7 +1,7 @@
 use slot_input::RawEvent::{Down, Up};
 use slot_input::{
-    Action::*, Btn, Btn::*, Gestures, RawEvent, COLOR_HOLD_MS, MENU_HOLD_MS, POWER_HOLD_MS,
-    SELECT_CHORD_MS, SELECT_TAP_MS, VOLUME_REPEAT_DELAY_MS, VOLUME_REPEAT_MS,
+    Action::*, Btn, Btn::*, Gestures, RawEvent, COLOR_HOLD_MS, MASK_HOLD_MS, MENU_HOLD_MS,
+    POWER_HOLD_MS, SELECT_CHORD_MS, SELECT_TAP_MS, VOLUME_REPEAT_DELAY_MS, VOLUME_REPEAT_MS,
 };
 
 #[test]
@@ -593,4 +593,135 @@ fn the_y_button_still_works_after_a_chord() {
         );
         assert_eq!(g.feed(Up(Y), 5040), vec![GbaUp(Y)]);
     }
+}
+
+/// And the same two halves on the other dial: SELECT+X tapped steps the machine's ring of screen
+/// looks, SELECT+X held lays the whole ring out on the board. This is the pair every one of the
+/// tests above re-run against `X`, because the two chords are the same gesture wearing two hats —
+/// and because a deferred press is the one place a chord keeps state across two edges, so whatever
+/// goes wrong on one of them goes wrong on both.
+const X_HOLD: u64 = MASK_HOLD_MS;
+
+#[test]
+fn a_select_x_hold_opens_the_aperture_board() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    assert!(g.feed(Down(X), 10).is_empty()); // deferred: the press could still be a tap
+    assert!(g.tick(10 + X_HOLD - 1).is_empty());
+    assert_eq!(
+        g.tick(10 + X_HOLD),
+        vec![MaskHold],
+        "the hold is delivered at the threshold, while the key is still down"
+    );
+    // And the release owes nothing: the board it opened is up, and B is what puts it away.
+    assert!(g.feed(Up(X), 10 + X_HOLD + 200).is_empty());
+    assert!(g.feed(Up(Select), 10 + X_HOLD + 210).is_empty());
+}
+
+#[test]
+fn a_select_x_tap_steps_the_ring() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    assert!(g.feed(Down(X), 10).is_empty());
+    assert_eq!(
+        g.feed(Up(X), 60),
+        vec![MaskCycle],
+        "a tap is the walk, delivered on the release because the press could still have grown"
+    );
+    // The threshold must not reach back for a press that is already over.
+    assert!(g.tick(10 + X_HOLD * 4).is_empty());
+    assert!(g.feed(Up(Select), 70).is_empty());
+}
+
+#[test]
+fn the_two_halves_of_select_x_are_mutually_exclusive() {
+    // The hold, watched all the way to the end of the press: a walk would show up here.
+    let mut g = Gestures::new();
+    let mut out = Vec::new();
+    out.extend(g.feed(Down(Select), 0));
+    out.extend(g.feed(Down(X), 10));
+    out.extend(g.tick(10 + X_HOLD));
+    out.extend(g.feed(Up(X), 10 + X_HOLD + 50));
+    out.extend(g.feed(Up(Select), 10 + X_HOLD + 60));
+    assert_eq!(out, vec![MaskHold], "the hold also stepped the ring");
+}
+
+#[test]
+fn x_released_just_short_of_the_threshold_steps() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(X), 10);
+    assert!(g.tick(10 + X_HOLD - 1).is_empty());
+    assert_eq!(g.feed(Up(X), 10 + X_HOLD - 1), vec![MaskCycle]);
+}
+
+#[test]
+fn the_board_opens_once_per_press_not_once_per_tick() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(X), 10);
+    let mut opens = 0;
+    for t in 10..10 + X_HOLD * 5 {
+        opens += g.tick(t).iter().filter(|a| **a == MaskHold).count();
+    }
+    assert_eq!(opens, 1, "the threshold is an edge, not a level");
+}
+
+#[test]
+fn a_second_press_of_x_arms_its_own_hold() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(X), 10);
+    assert_eq!(g.tick(10 + X_HOLD), vec![MaskHold]);
+    g.feed(Up(X), 10 + X_HOLD + 50);
+    g.feed(Up(Select), 10 + X_HOLD + 60);
+    // The next press is a fresh gesture, and this one is a tap: the fired flag from the last press
+    // must not turn it into a second hold.
+    g.feed(Down(Select), 1000);
+    g.feed(Down(X), 1010);
+    assert!(g.tick(1010 + X_HOLD - 1).is_empty(), "the flag was left set");
+    assert_eq!(g.feed(Up(X), 1010 + X_HOLD - 1), vec![MaskCycle]);
+}
+
+#[test]
+fn a_select_released_under_a_held_x_owes_nothing() {
+    // SELECT let go first, with X still down and the board already open. The chord's own release
+    // handling has to survive SELECT going away underneath it.
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(X), 10);
+    assert_eq!(g.tick(10 + X_HOLD), vec![MaskHold]);
+    assert!(g.feed(Up(Select), 10 + X_HOLD + 20).is_empty());
+    assert!(g.feed(Up(X), 10 + X_HOLD + 400).is_empty(), "the hold also stepped");
+}
+
+/// And with no SELECT down, X is the game's again — held or tapped, because there is no chord here
+/// for the hold half to belong to. The chord takes the key for as long as SELECT is down, and not
+/// a moment longer.
+#[test]
+fn x_held_without_select_opens_nothing() {
+    let mut g = Gestures::new();
+    assert_eq!(g.feed(Down(X), 0), vec![GbaDown(X)]);
+    assert_eq!(g.feed(Up(X), 40), vec![GbaUp(X)]);
+    // ...and holding it is not a hold, because there is no chord to be the hold half of.
+    assert!(g.tick(X_HOLD * 3).is_empty());
+    assert_eq!(g.feed(Down(X), 2000), vec![GbaDown(X)]);
+    assert_eq!(g.feed(Up(X), 2000 + X_HOLD * 3), vec![GbaUp(X)]);
+}
+
+/// The sweepaftermath: neither key disturbs the other, which is the pair working on the same two
+/// counters`x_at`/`y_at` and the easiest thing to get wrong when a third deferred chord is added.
+#[test]
+fn a_hold_of_one_key_does_not_fire_the_others_panel() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(X), 10);
+    assert_eq!(g.tick(10 + X_HOLD), vec![MaskHold]);
+    g.feed(Up(X), 10 + X_HOLD + 10);
+    g.feed(Down(Y), 10 + X_HOLD + 20);
+    assert_eq!(
+        g.tick(10 + X_HOLD + 20 + Y_HOLD),
+        vec![ColorHold],
+        "the board's own hold was still armed"
+    );
 }

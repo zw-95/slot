@@ -154,10 +154,6 @@ fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32, mask: &[u8]) -> CartFa
         disc(&mut face, tx, sy + sh, 2.0, PAD, 255);
     }
 
-    // The socket: its outline in silkscreen, so the chip reads as seated in something rather than
-    // floating over the board, and so the pads its traces end in have somewhere to arrive.
-    box_line(&mut face, sx - 5, sy - 5, sx + sw + 5, sy + sh + 5, SILK, 255);
-
     // Cut to the cart's outline: the board reaches the edge everywhere the shell does, and the
     // notches and corners a machine's cart has are notches and corners its board has too.
     for i in 0..(w * h) as usize {
@@ -499,22 +495,6 @@ fn box_fill(
             dot(face, x, y, colour, alpha);
         }
     }
-}
-
-/// The outline of a box, one pixel wide: silkscreen, and the socket the core sits in.
-fn box_line(
-    face: &mut CartFace,
-    x0: i32,
-    y0: i32,
-    x1: i32,
-    y1: i32,
-    colour: [u8; 3],
-    alpha: u8,
-) {
-    box_fill(face, x0, y0, x1, y0 + 1, colour, alpha);
-    box_fill(face, x0, y1 - 1, x1, y1, colour, alpha);
-    box_fill(face, x0, y0, x0 + 1, y1, colour, alpha);
-    box_fill(face, x1 - 1, y0, x1, y1, colour, alpha);
 }
 
 /// A filled disc: a pad on a board, and the dot that says which way round a chip goes.

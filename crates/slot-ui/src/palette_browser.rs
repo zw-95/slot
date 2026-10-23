@@ -134,6 +134,28 @@ impl Swatch {
         }
     }
 
+    /// A cell painted with **the aperture itself**: one band for each of the mask's nine points,
+    /// which is what the table is — a source pixel drawn as three panel pixels across and three
+    /// down, some lit and some not, and on an LCD mask each of the three in a row wearing a
+    /// different primary, which is why the cell comes out in stripes of colour rather than grey.
+    ///
+    /// What the board is for is telling one look from another, and this is the only picture that
+    /// does: a swatch of the *result* would be nine cells of much the same picture, because most
+    /// of what these masks do is visible at three pixels and not at sixty.
+    pub fn mask(table: [[[u8; 3]; 3]; 3]) -> Self {
+        let mut stops = [[0u8; 3]; MAX_STOPS];
+        for r in 0..3 {
+            for c in 0..3 {
+                stops[r * 3 + c] = table[r][c];
+            }
+        }
+        Self {
+            stops,
+            n: 9,
+            cols: 3,
+        }
+    }
+
     /// The demo chart: every hue in `SWEEP` and then every step in `TONE`, each one handed to
     /// `f` — which is the grade, applied to it exactly as the picture is applied to. The caller
     /// owns the transform; this owns what a picture is made of.

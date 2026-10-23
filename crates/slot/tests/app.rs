@@ -1636,3 +1636,87 @@ fn arrows_pressed_while_the_cart_waits_move_nothing() {
         "the cart opened with gpSP's name on it"
     );
 }
+
+/// SELECT+X **held** lays the machine's whole ring of screen looks out. Walked it, the key steps
+/// through them one press at a time, and seven looks cannot be held in the head that way — which is
+/// the whole of why the key does both.
+#[test]
+fn holding_the_mask_key_lays_the_whole_ring_out() {
+    let mut a = playing("Emerald");
+    assert!(
+        a.aperture_browser().is_none(),
+        "the board was up before it was asked for"
+    );
+    a.apply(Action::MaskHold);
+    // Opened **on the look already being worn** — LCD 50, which is what `display.txt` says until
+    // something else has been saved — so A can be pressed straight away and lose nothing.
+    assert_eq!(
+        a.aperture_browser(),
+        Some(2),
+        "the board did not open on the look in hand"
+    );
+    assert_eq!(a.aperture_page(), Some(0), "the board opened on a later page");
+    // A boardful at a time, six of the seven, named in ring order.
+    assert_eq!(
+        a.aperture_names(),
+        ["OFF", "LCD 25", "LCD 50", "LCD 75", "LCD 100", "SCAN 50"]
+    );
+}
+
+/// The shoulders turn the page, and the caret comes back to hand where it can: seven looks at six
+/// to a board leaves one row over, which is why the page and the caret are two numbers here.
+#[test]
+fn the_shoulders_turn_the_boards_page() {
+    let mut a = playing("Emerald");
+    a.apply(Action::MaskHold);
+    assert_eq!(a.aperture_page(), Some(0));
+    a.apply(Action::GbaDown(Btn::R1));
+    assert_eq!(a.aperture_page(), Some(1), "R did not turn the page");
+    // The short page: SCAN 100 alone in it, which is the whole of the ring's second half.
+    assert_eq!(a.aperture_names(), ["SCAN 100"]);
+    assert_eq!(
+        a.aperture_browser(),
+        Some(0),
+        "the caret did not come back onto a page shorter than it was"
+    );
+    a.apply(Action::GbaDown(Btn::L1));
+    assert_eq!(a.aperture_page(), Some(0), "L did not turn it back");
+    assert_eq!(a.aperture_names()[0], "OFF");
+}
+
+/// A look taken off the board is worn, and the board goes away with the choice.
+#[test]
+fn a_look_taken_off_the_board_is_worn() {
+    let mut a = playing("Emerald");
+    a.apply(Action::MaskHold);
+    a.apply(Action::GbaDown(Btn::R1)); // the short page, and SCAN 100 is the only cell on it
+    a.apply(Action::GbaDown(Btn::A));
+    assert_eq!(a.mask_mode(), 6, "A did not wear the look under the caret");
+    assert!(a.aperture_browser().is_none(), "the board stayed up after A");
+}
+
+/// B puts the board away wearing what it was wearing when the board came up: looking is not
+/// choosing, and walking the caret is not either.
+#[test]
+fn b_puts_the_board_away_and_wears_nothing_new() {
+    let mut a = playing("Emerald");
+    a.apply(Action::MaskHold);
+    a.apply(Action::GbaDown(Btn::Right));
+    a.apply(Action::GbaDown(Btn::B));
+    assert!(a.aperture_browser().is_none(), "the board stayed up after B");
+    assert_eq!(a.mask_mode(), 2, "B changed the look anyway");
+}
+
+/// The board draws over the game and stops drawing once it is gone.
+#[test]
+fn the_board_is_drawn_over_the_paused_game() {
+    let mut a = playing("Emerald");
+    let before = frame(&a).len();
+    a.apply(Action::MaskHold);
+    a.update(0.016);
+    let up = frame(&a).len();
+    assert!(up > before, "the board drew nothing over the game");
+    a.apply(Action::GbaDown(Btn::B));
+    a.update(0.016);
+    assert!(frame(&a).len() < up, "the board outlived B");
+}

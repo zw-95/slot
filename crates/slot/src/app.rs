@@ -334,6 +334,12 @@ fn about_first_y() -> f32 {
 /// bottom edge. Drawn here rather than baked into the hint's own face, because it belongs to
 /// the screen and not to the card — the card is 660 across, this is all 720.
 const HINT_BAR_INK: [f32; 4] = [0.055, 0.05, 0.045, 1.0];
+
+/// How many looks the aperture board sets out at a time: **two rows of three**. An Advance's ring
+/// is seven long, so the board is two pages and L and R have something to turn — the whole of why
+/// it is not nine, which would have been one page and no reason for the shoulders to be on the
+/// board at all.
+const APERTURE_PER_PAGE: usize = 6;
 /// The bar's lit top edge: a few hairlines fading upward, which is as close as a list of flat
 /// rects comes to a glow. Faint on purpose — it is a rim light, not a light.
 const HINT_GLOW_STEPS: u32 = 8;
@@ -762,7 +768,15 @@ impl DisplayFilter {
         if flat {
             return Self::FLAT_MASK;
         }
-        match self.mask_mode {
+        self.preset_mask(self.mask_mode)
+    }
+
+    /// The aperture table one `preset` wears, whether or not it is the one in hand.
+    ///
+    /// Split out of `applied_mask` because the board needs it of every look on its ring, not only
+    /// of the one that is up: the seven cells are these seven tables, drawn side by side.
+    fn preset_mask(&self, preset: u8) -> [[[u8; 3]; 3]; 3] {
+        match preset {
             0 => Self::FLAT_MASK,
             1 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.25),
             2 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.50),
@@ -770,6 +784,22 @@ impl DisplayFilter {
             4 => self.lcd3x,
             5 => lerp_mask(&Self::FLAT_MASK, &Self::SCANLINE_MASK, 0.50),
             _ => Self::SCANLINE_MASK,
+        }
+    }
+
+    /// What a preset is called, which is what the board's cells are named with. Plain English rather
+    /// than the term the mechanism is known by — LCD3x at half strength — because the cell is a
+    /// picture of the thing and does not have room to explain it: `LCD 50` next to `LCD 100` says
+    /// what the difference between them is, and `SCAN 50` says it is the same idea in rows.
+    fn preset_name(preset: u8) -> &'static str {
+        match preset {
+            0 => "OFF",
+            1 => "LCD 25",
+            2 => "LCD 50",
+            3 => "LCD 75",
+            4 => "LCD 100",
+            5 => "SCAN 50",
+            _ => "SCAN 100",
         }
     }
     /// Colour correction rides under the mask, and what it *is* depends on the machine.
@@ -1260,6 +1290,23 @@ pub struct App {
     /// The entry under the caret, for the tables whose cells carry no names of their own. The
     /// Game Boy's reading, and the only one it has ever had.
     pal_name: Option<(TexId, u32, u32)>,
+    /// The aperture board: which cell of the machine's own ring of screen looks is under its
+    /// caret, and `None` while it is shut. Opened by a **hold** of the mask key, which tapped is
+    /// the same press walking the ring one look along.
+    ///
+    /// One number rather than a page and a cursor the way the palette browser has it, because the
+    /// ring is seven long and not three hundred: there is no second answer here for a copied page
+    /// to get out of step with.
+    aperture: Option<usize>,
+    /// Which page of the ring that board is showing. Split from the caret the way `pal_page` is,
+    /// because a turn of the page has to leave the caret on the cell it was on rather than moving
+    /// it: the ring is seven long and a page six, so stepping one number by six would walk off the
+    /// end instead of onto the next row.
+    aperture_page: usize,
+    /// The names of the looks on the board's own page, one face per cell in ring order, as the
+    /// frontend rasterised them. Empty while it is shut, and empty for the frame between the board
+    /// opening and the faces arriving — an unnamed cell rather than a wrong one.
+    aperture_names: Vec<(TexId, u32, u32)>,
     /// The audio latency profile, chosen on the shelf with SELECT+VOL. Read from
     /// `System/audio.txt` at boot and written back whenever it changes.
     audio: Profile,
@@ -1417,6 +1464,9 @@ impl App {
             pal_page: 0,
             pal_cursor: None,
             pal_names: Vec::new(),
+            aperture: None,
+            aperture_page: 0,
+            aperture_names: Vec::new(),
             pal_name: None,
         }
     }
@@ -2742,6 +2792,15 @@ impl App {
                 _ => return self.palette_browser_input(action),
             }
         }
+        // And the aperture board owns them in turn: it is the same modal over the same paused game,
+        // and never up at the same time as the palette browser — one key opened whichever it is.
+        if self.aperture.is_some() {
+            match action {
+                Action::LidClose => return self.doze(),
+                Action::LidOpen => return self.wake(),
+                _ => return self.aperture_browser_input(action),
+            }
+        }
         // The lid, the light and the sound belong to the device rather than to whatever is
         // on screen, so they are taken before the phase gets a look at the action.
         match action {
@@ -2909,6 +2968,11 @@ impl App {
                     self.overlay_next()
                 }
                 Action::MaskCycle => self.cycle_mask(),
+                // The long half of the same key, and the answer to what walking a ring cannot do:
+                // held, SELECT+X lays the whole ring out — every look this machine can wear — and
+                // the arrows and shoulders move around it. **Tapped it still steps**, so one key
+                // keeps both ways of finding a look. See `slot_input::gesture::MASK_HOLD_MS`.
+                Action::MaskHold => self.open_aperture_browser(),
                 Action::ColorCycle => self.cycle_cc(),
                 // The long half of the same key. Held, SELECT+Y opens the browser; tapped, it
                 // walks the page. Both machines want it: a Game Boy's table is hundreds long and
@@ -3621,6 +3685,7 @@ impl App {
             Phase::Playing { .. } => {
                 self.push_game(out);
                 self.draw_palette_browser(out);
+                self.draw_aperture_browser(out);
             }
             // The paused game stays underneath, covered by the screenshot the switcher
             // draws over the whole screen.
@@ -5045,6 +5110,206 @@ impl App {
             foot: self.pal_name,
         };
         slot_ui::draw_palette_browser(&view, out);
+    }
+
+    /// The hold half of the mask key: the board, opened on the look that is actually up.
+    ///
+    /// The same press tapped walks the ring, which is what makes one key do both. It answers why a
+    /// walk needs a board beside it: seven looks cannot be held in the head while they are stepped
+    /// through one press at a time, and comparing two of them means going round again to get back to
+    /// the first.
+    ///
+    /// Refused rather than ignored on a Game Boy and a Game Boy Color: their mask key belongs to
+    /// their overlay art instead — SELECT+X there walks three models of the machine's own case — so
+    /// a board of apertures would be offering looks that machine does not wear. Refused, so the hold
+    /// still reads as answered.
+    fn open_aperture_browser(&mut self) {
+        if self.aperture.is_some() {
+            return;
+        }
+        if !matches!(self.phase, Phase::Playing { .. }) {
+            return;
+        }
+        if matches!(self.current_machine(), System::Gb | System::Gbc) {
+            self.refuse();
+            return;
+        }
+        let ring = DisplayFilter::mask_ring(self.current_machine());
+        let at = ring
+            .iter()
+            .position(|p| *p == self.display.mask_mode)
+            .unwrap_or(0);
+        // Opened **on the look that is up**, the way the palette browser opens on its own entry:
+        // what the caret is for is marking the one already chosen, so the board can be put away
+        // with A and lose nothing.
+        self.aperture_page = at / APERTURE_PER_PAGE;
+        self.aperture = Some(at - self.aperture_page * APERTURE_PER_PAGE);
+    }
+
+    fn close_aperture_browser(&mut self) {
+        self.aperture = None;
+    }
+
+    /// How many entries the board's table has: the machine's own ring, which is what a machine can
+    /// wear and nothing more — an Advance's seven looks, a Super Nintendo's three.
+    fn board_total(&self) -> usize {
+        DisplayFilter::mask_ring(self.current_machine()).len()
+    }
+
+    /// The board owns every button on the game's side while it is up, exactly as the palette
+    /// browser does — the same keys meaning the same things on the same panel, so nothing about
+    /// one has to be unlearned to use the other. Arrows ring inside the ring, **L and R turn the
+    /// page**, A wears the look under the caret and B leaves without one.
+    ///
+    /// The caret rings inside the page rather than stopping at its edges, for the reason the palette
+    /// browser's does: the page is what bounds it and L and R are the way out, so there is nowhere
+    /// in here the user can lose the caret and have to find it again.
+    fn aperture_browser_input(&mut self, action: Action) {
+        let Some(cursor) = self.aperture else {
+            return;
+        };
+        let total = self.board_total();
+        match action {
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
+                self.aperture = Some(slot_store::step_cursor(
+                    self.aperture_page,
+                    cursor,
+                    -1,
+                    total,
+                    APERTURE_PER_PAGE,
+                ));
+            }
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => {
+                self.aperture = Some(slot_store::step_cursor(
+                    self.aperture_page,
+                    cursor,
+                    1,
+                    total,
+                    APERTURE_PER_PAGE,
+                ));
+            }
+            Action::GbaDown(Btn::Up) => {
+                self.aperture = Some(slot_store::step_cursor(
+                    self.aperture_page,
+                    cursor,
+                    -(slot_ui::PALETTE_COLS as isize),
+                    total,
+                    APERTURE_PER_PAGE,
+                ));
+            }
+            Action::GbaDown(Btn::Down) => {
+                self.aperture = Some(slot_store::step_cursor(
+                    self.aperture_page,
+                    cursor,
+                    slot_ui::PALETTE_COLS as isize,
+                    total,
+                    APERTURE_PER_PAGE,
+                ));
+            }
+            // A page at a time, and the caret keeps its column when it can: the page it lands on
+            // may be the short one, so a caret out past its end is brought back rather than lost.
+            Action::GbaDown(Btn::L1) => self.turn_board(-1),
+            Action::GbaDown(Btn::R1) => self.turn_board(1),
+            Action::GbaDown(Btn::A) => {
+                let ring = DisplayFilter::mask_ring(self.current_machine());
+                let at = slot_store::index_of(self.aperture_page, cursor, total, APERTURE_PER_PAGE);
+                self.display.mask_mode = ring[at.min(total - 1)];
+                if let Some(root) = &self.root {
+                    crate::root::write_display_modes(root, self.display.mask_mode, self.display.cc);
+                }
+                self.close_aperture_browser();
+            }
+            Action::GbaDown(Btn::B) => self.close_aperture_browser(),
+            _ => {}
+        }
+    }
+
+    /// One page turned, and the caret left where it can be: the columns it had, and the last cell
+    /// of a short page when they have run out. Nothing here stops at an end — the pages are a ring,
+    /// because a board with somewhere the shoulders do nothing is a board with a dead key on it.
+    fn turn_board(&mut self, delta: isize) {
+        let Some(cursor) = self.aperture else {
+            return;
+        };
+        let total = self.board_total();
+        self.aperture_page = slot_store::step_page(self.aperture_page, delta, total, APERTURE_PER_PAGE);
+        let n = slot_store::len_on(self.aperture_page, total, APERTURE_PER_PAGE);
+        self.aperture = Some(cursor.min(n.saturating_sub(1)));
+    }
+
+    /// The board over the paused game: **the machine's whole ring of screen looks at once**, each
+    /// cell a picture of the aperture that look would lay over the picture, the one under the caret
+    /// ringed. It walks into the palette browser's own panel rather than growing one of its own —
+    /// same panel, same pips, same place the grid sits — because the two are the same question put
+    /// to two dials, and knowing one is knowing the other.
+    fn draw_aperture_browser(&self, out: &mut Vec<Draw>) {
+        let Some(cursor) = self.aperture else {
+            return;
+        };
+        let ring = DisplayFilter::mask_ring(self.current_machine());
+        let total = ring.len();
+        let page = self.aperture_page;
+        let base = (page * APERTURE_PER_PAGE).min(total);
+        let n = slot_store::len_on(page, total, APERTURE_PER_PAGE);
+        let swatches: Vec<slot_ui::PaletteSwatch> = (base..base + n)
+            .map(|i| slot_ui::PaletteSwatch::mask(self.display.preset_mask(ring[i.min(total - 1)])))
+            .collect();
+        let view = slot_ui::PaletteView {
+            page,
+            cursor: cursor.min(n.saturating_sub(1)),
+            pages: slot_ui::palette_pages(total, APERTURE_PER_PAGE),
+            rows: slot_ui::palette_rows(APERTURE_PER_PAGE),
+            swatches: &swatches,
+            names: &self.aperture_names,
+            foot: None,
+        };
+        slot_ui::draw_palette_browser(&view, out);
+    }
+
+    /// Which of the machine's looks is being worn, which is the number `display.txt` keeps. Written
+    /// from two places now — the board, and the walk that taps the same key — and read from one.
+    pub fn mask_mode(&self) -> u8 {
+        self.display.mask_mode
+    }
+
+    /// Which cell of the machine's ring the board has under its caret, and `None` while it is shut:
+    /// the same reading `palette_browser` gives of its own caret, for the same caller.
+    pub fn aperture_browser(&self) -> Option<usize> {
+        self.aperture
+    }
+
+    /// Which **page** of that ring the board is showing, `None` while it is shut.
+    pub fn aperture_page(&self) -> Option<usize> {
+        self.aperture.map(|_| self.aperture_page)
+    }
+
+    /// What the board's cells are called, keyed on the machine and the page that is up — `None`
+    /// while it is shut. **Key rather than names**, exactly as `palette_names_key` has it: the
+    /// frontend rebuilds the faces when this moves and at no other time, so a caret walking around
+    /// inside a page costs nothing at all, and only a turn of the page rasterises six words.
+    pub fn aperture_names_key(&self) -> Option<(System, usize)> {
+        self.aperture.map(|_| (self.current_machine(), self.aperture_page))
+    }
+
+    /// The names on that page, in table order, one per cell — the words the frontend is to rasterise
+    /// for `aperture_names_key`.
+    pub fn aperture_names(&self) -> Vec<String> {
+        let Some(_) = self.aperture else {
+            return Vec::new();
+        };
+        let ring = DisplayFilter::mask_ring(self.current_machine());
+        let total = ring.len();
+        let page = self.aperture_page;
+        let base = (page * APERTURE_PER_PAGE).min(total);
+        let n = slot_store::len_on(page, total, APERTURE_PER_PAGE);
+        (0..n)
+            .map(|i| DisplayFilter::preset_name(ring[(base + i).min(total - 1)]).to_string())
+            .collect()
+    }
+
+    /// The faces the frontend built for that page, in the same order.
+    pub(crate) fn set_aperture_names(&mut self, faces: Vec<(TexId, u32, u32)>) {
+        self.aperture_names = faces;
     }
 
     /// The master switch behind SELECT+A's second press: flips the lot on or off at once.

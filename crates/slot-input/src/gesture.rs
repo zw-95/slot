@@ -10,6 +10,13 @@ pub const SELECT_CHORD_MS: Millis = 600;
 /// enough that a user who means it does not have to wait for it.
 pub const COLOR_HOLD_MS: Millis = 550;
 
+/// The same threshold for SELECT+X, whose hold opens the aperture board instead. **The same
+/// number**, because the two are the same gesture read off the same hand: one hold length to
+/// learn, whichever of the two panels it is that comes up. It is its own constant rather than a
+/// use of `COLOR_HOLD_MS` only so the two panels can be told apart in the code that waits on
+/// them — if one of the two ever needs to feel different, this is the line that moves.
+pub const MASK_HOLD_MS: Millis = 550;
+
 /// How long a delivered tap stays down. Press and release in one batch net out to nothing,
 /// because the mask is set and cleared before the core reads it.
 pub const SELECT_TAP_MS: Millis = 50;
@@ -82,7 +89,17 @@ pub enum Action {
     /// a Game Boy Color, and the aperture table on an Advance, the one machine that ships no art.
     /// `App`'s Phase::Playing is the fork — this only names the chord that reaches it. It is the
     /// **only** key that does it: `SELECT+R2` used to be a second one and is gone.
+    ///
+    /// Delivered **on release**, because the press is also half of a hold — see `MaskHold`. A tap
+    /// is therefore a step and a hold is a panel, decided by how long the key stayed down, and
+    /// neither of the two fires anything the other already said.
     MaskCycle,
+    /// The **hold** half of that same press: SELECT+X held opens the aperture board, which lays
+    /// the whole ring out — every look the machine can wear, side by side — instead of stepping
+    /// through it one press at a time. Delivered at the threshold with the key still down, exactly
+    /// as `ColorHold` opens the palette browser: **the two panels are the same answer to the same
+    /// question asked of two different dials**, and a user who has learned one has learned both.
+    MaskHold,
     /// Cycle the in-game colour correction (GRAYSCALE / AGB-001 / NDS) on SELECT+Y,
     /// and the Game Boy's palette from the same key — a tap walks the page of palettes in hand.
     ColorCycle,
@@ -157,11 +174,15 @@ pub struct Gestures {
     ff_latching_press: bool,
     r2_last_release: Option<Millis>,
     rewinding: bool,
-    /// SELECT+Y is the one chord that is two gestures on one press, so it is the one chord whose
+    /// SELECT+Y is one of two chords that are two gestures on one press, so it is one of two whose
     /// press is not spent on the way down: the Y is remembered here and the release decides. The
     /// hold is delivered from `tick`, while the key is still down, exactly as the POWER hold is.
     y_at: Option<Millis>,
     y_hold_fired: bool,
+    /// SELECT+X, for the same reason: tapped it steps the ring, held it opens the board, and which
+    /// of the two a press was is not knowable until either `tick` or the release says so.
+    x_at: Option<Millis>,
+    x_hold_fired: bool,
 }
 
 /// Whether a held key owes a step at `now`. The wait before the first is longer than the gap
@@ -225,6 +246,15 @@ impl Gestures {
             if !self.y_hold_fired && now.saturating_sub(d) >= COLOR_HOLD_MS {
                 self.y_hold_fired = true;
                 out.push(Action::ColorHold);
+            }
+        }
+        // The second half of SELECT+X, and the same deferral: nothing was emitted on the way down,
+        // so a hold is the only thing that can open the board and a release that beats it is the
+        // walk instead.
+        if let Some(d) = self.x_at {
+            if !self.x_hold_fired && now.saturating_sub(d) >= MASK_HOLD_MS {
+                self.x_hold_fired = true;
+                out.push(Action::MaskHold);
             }
         }
         // Held volume runs the level. Not while the pair has fired: that press was a mute,
@@ -301,6 +331,14 @@ impl Gestures {
                         self.y_hold_fired = false;
                         return Vec::new();
                     }
+                    // SELECT+X is deferred for exactly the same reason and in exactly the same
+                    // way: a tap steps the ring and a hold opens the board, and nothing here knows
+                    // yet whether this press is going to end.
+                    if b == Btn::X {
+                        self.x_at = Some(now);
+                        self.x_hold_fired = false;
+                        return Vec::new();
+                    }
                     return vec![action];
                 }
                 vec![Action::GbaDown(b)]
@@ -355,6 +393,20 @@ impl Gestures {
                         Vec::new()
                     } else {
                         vec![Action::ColorCycle]
+                    };
+                }
+                // SELECT+X, settling the same way: a press too short to be a hold is the walk, and
+                // one that already opened the board owes nothing on its way back up.
+                if b == Btn::X && self.x_at.is_some() {
+                    if let Some((bit, _)) = chord(b) {
+                        self.chord_held &= !bit;
+                    }
+                    self.x_at = None;
+                    let held = std::mem::take(&mut self.x_hold_fired);
+                    return if held {
+                        Vec::new()
+                    } else {
+                        vec![Action::MaskCycle]
                     };
                 }
                 if let Some((bit, _)) = chord(b) {

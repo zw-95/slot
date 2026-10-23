@@ -104,6 +104,12 @@ pub struct Frontend {
     /// and at no other time, so a caret moving inside a page mints nothing.
     palette_paged: Option<(System, usize)>,
     palette_named: Option<String>,
+    /// The aperture board's row of names, and the page they were last built for. Its own pool and
+    /// its own key rather than sharing the palette browser's: **the two boards are never up at
+    /// once**, and either way a pool shared between them would be resized every time the user
+    /// opened the other one.
+    aperture_texes: Vec<Option<TexId>>,
+    aperture_paged: Option<(System, usize)>,
     /// Whether the first frame's uptime has been written to `boot.log`. One line, once, so the
     /// log says how long the device took to reach the shelf and which base it did it on.
     frame_logged: bool,
@@ -176,6 +182,8 @@ impl Frontend {
             palette_tex: None,
             palette_paged: None,
             palette_named: None,
+            aperture_texes: Vec::new(),
+            aperture_paged: None,
             frame_logged: false,
         }
     }
@@ -981,6 +989,12 @@ impl Frontend {
             &mut self.palette_tex,
             &mut self.palette_named,
         );
+        sync_aperture_names(
+            self.session.app_mut(),
+            compositor,
+            &mut self.aperture_texes,
+            &mut self.aperture_paged,
+        );
         sync_overlay(self.session.app_mut(), compositor);
         // The screen reflection: handed the overlay texture as its zone mask when the overlay
         // up is a reflective one, `None` otherwise. Set every frame with the rest of the state.
@@ -1296,6 +1310,42 @@ fn sync_palette_names(
         faces.push((id, w, h));
     }
     app.set_palette_names(faces);
+}
+
+/// The aperture board's row of names: one face per cell, so every look on the panel says what it
+/// is — `OFF`, `LCD 25`, `SCAN 100` — rather than leaving seven pictures to be told apart by eye
+/// alone.
+///
+/// The same arrangement as `sync_palette_names`, and the same cost: the key is the page, so a turn
+/// of the page rasterises and every frame inside one is a comparison. The faces come from a pool
+/// sized once, since every name goes into a box the width of a cell.
+fn sync_aperture_names(
+    app: &mut App,
+    compositor: &mut Compositor,
+    pool: &mut Vec<Option<TexId>>,
+    shown: &mut Option<(System, usize)>,
+) {
+    let key = app.aperture_names_key();
+    if *shown == key {
+        return;
+    }
+    *shown = key;
+    if key.is_none() {
+        app.set_aperture_names(Vec::new());
+        return;
+    }
+    let (w, h) = (palette_cell_w(), palette_name_h());
+    let names = app.aperture_names();
+    let mut faces = Vec::with_capacity(names.len());
+    for (i, name) in names.iter().enumerate() {
+        let face = palette_name_face(name, w, h);
+        while pool.len() <= i {
+            pool.push(None);
+        }
+        let id = upload_rgba(compositor, &mut pool[i], w, h, &face.rgba);
+        faces.push((id, w, h));
+    }
+    app.set_aperture_names(faces);
 }
 
 /// The palette browser's one line of type: the name of the entry under the caret, for the tables
