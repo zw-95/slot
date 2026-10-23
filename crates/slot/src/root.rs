@@ -306,12 +306,24 @@ pub fn color_correction(root: &Path) -> Option<[[f32; 3]; 3]> {
 /// and then silently replaced. `tests/display.rs` now walks the whole ring through the file.
 pub const MASK_STATES: usize = 7;
 
+/// How many fits the file may name, clamped exactly as `MASK_STATES` is. The ring itself lives
+/// in `DisplayFilter::FITS` on the other side of the crate boundary, and this is the count the
+/// file is read against — the two agree because there is one ring, and `tests/display.rs` walks
+/// all of them through the file the way it walks the mask's.
+pub const FIT_STATES: u16 = 3;
+
 /// The display modes a card asks for: the Advance's aperture preset, then one colour slot per
-/// machine — `mask cc_gba cc_gb cc_gbc cc_sfc cc_fc`.
+/// machine, then how the picture is fitted to the panel —
+/// `mask cc_gba cc_gb cc_gbc cc_sfc cc_fc fit`.
 ///
-/// Both are read as *indices* rather than as names, so every list has to clamp: an out-of-range
-/// `cc` is corrected by `DisplayFilter::new`, and an out-of-range `mask` here.
-pub fn display_modes(root: &Path) -> (u8, [u16; 5]) {
+/// All three are read as *indices* rather than as names, so every list has to clamp: an
+/// out-of-range `cc` is corrected by `DisplayFilter::new`, and an out-of-range `mask` or `fit`
+/// here.
+///
+/// The fit is **last**, and the file grew by a number at the end rather than by a new format:
+/// a card whose file has six numbers on it never chose a fit, and what it is owed is the one
+/// the panel was built around, which is the first of the three.
+pub fn display_modes(root: &Path) -> (u8, [u16; 5], u8) {
     let text = std::fs::read_to_string(root.join("System/display.txt")).ok();
     let vals: Vec<u16> = text
         .map(|t| {
@@ -347,14 +359,24 @@ pub fn display_modes(root: &Path) -> (u8, [u16; 5]) {
         // was chosen for every machine, and that is still what it means.
         [one, one, one, one, one]
     };
-    (mask, cc)
+    // The fit, the newest number in the file and the only one a card may not have: one that does
+    // not is a card that never pressed SELECT+B, and whole source pixels is what it has been
+    // showing all along.
+    // Clamped like the mask, and against its own ring's count: a file edited on a PC that says
+    // there is a fourth fit comes back to the last of the three, not to whichever number it
+    // carried.
+    let fit = vals.get(6).copied().unwrap_or(0).min(FIT_STATES - 1) as u8;
+    (mask, cc, fit)
 }
 
 /// Persist the display modes. Best effort: a read only card simply keeps the default.
-pub fn write_display_modes(root: &Path, mask: u8, cc: [u16; 5]) {
+pub fn write_display_modes(root: &Path, mask: u8, cc: [u16; 5], fit: u8) {
     let _ = std::fs::write(
         root.join("System/display.txt"),
-        format!("{mask} {} {} {} {} {}", cc[0], cc[1], cc[2], cc[3], cc[4]),
+        format!(
+            "{mask} {} {} {} {} {} {fit}",
+            cc[0], cc[1], cc[2], cc[3], cc[4]
+        ),
     );
 }
 
@@ -384,11 +406,11 @@ pub fn migrate_palette(root: &Path) {
     if marker.exists() {
         return;
     }
-    let (mask, mut cc) = display_modes(root);
+    let (mask, mut cc, fit) = display_modes(root);
     if let Some(mapped) = GB_LEGACY.get(cc[1] as usize) {
         cc[1] = *mapped;
     }
-    write_display_modes(root, mask, cc);
+    write_display_modes(root, mask, cc, fit);
     let _ = std::fs::write(&marker, "palette.v2\n");
 }
 
@@ -420,7 +442,7 @@ pub fn migrate_display_modes(root: &Path) {
     if marker.exists() {
         return;
     }
-    let (mask, mut cc) = display_modes(root);
+    let (mask, mut cc, fit) = display_modes(root);
     // Every slot that is a colour grade: the Advance's, the Color's and the Super Nintendo's.
     // GB slot (1) is a palette index, not a grade, and is left alone.
     for slot in [0usize, 2usize, 3usize] {
@@ -428,7 +450,7 @@ pub fn migrate_display_modes(root: &Path) {
             cc[slot] = *mapped;
         }
     }
-    write_display_modes(root, mask, cc);
+    write_display_modes(root, mask, cc, fit);
     let _ = std::fs::write(&marker, "display.v2\n");
 }
 

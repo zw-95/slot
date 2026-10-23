@@ -464,6 +464,16 @@ impl Frontend {
         let dot = core_dot_face();
         let dot = compositor.create_texture(dot.w, dot.h, &dot.rgba);
         self.session.app_mut().set_core_dot_face(dot);
+        // The board of screen fits' three names, at boot like the power menu's rows: the three
+        // are a fact of the program and not of the card, so there is nothing to re-rasterise.
+        let fit_names = App::fit_names()
+            .iter()
+            .map(|name| {
+                let f = palette_name_face(name, palette_cell_w(), palette_name_h());
+                (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h)
+            })
+            .collect();
+        self.session.app_mut().set_fit_names(fit_names);
         // Every action the picker takes, the way out first and the choice last, as the
         // switcher's legend is ordered.
         let legend = [
@@ -918,6 +928,9 @@ impl Frontend {
         compositor.set_blue_light(self.session.app().blue_light());
         compositor.set_shake(self.session.app().screen_shake());
         compositor.set_screen_power(self.session.app().screen_power());
+        // How the picture is fitted to the panel, every frame like the rest: SELECT+B takes the
+        // next of the three and the board of them wears one outright.
+        compositor.set_fit(self.session.app().display_fit());
         // The card's display filter, every frame so a SELECT+X (that machine's own screen look)
         // or SELECT+Y (colour) press lands on the next one.
         compositor.set_panel_mask(&self.session.app().display_mask());

@@ -2,6 +2,7 @@ use slot_input::RawEvent::{Down, Up};
 use slot_input::{
     Action::*, Btn, Btn::*, Gestures, RawEvent, COLOR_HOLD_MS, MASK_HOLD_MS, MENU_HOLD_MS,
     POWER_HOLD_MS, SELECT_CHORD_MS, SELECT_TAP_MS, VOLUME_REPEAT_DELAY_MS, VOLUME_REPEAT_MS,
+    ZOOM_HOLD_MS,
 };
 
 #[test]
@@ -724,4 +725,136 @@ fn a_hold_of_one_key_does_not_fire_the_others_panel() {
         vec![ColorHold],
         "the board's own hold was still armed"
     );
+}
+
+/// And the third dial, on the third deferred chord: SELECT+B tapped takes the next way of fitting
+/// the picture to the panel, SELECT+B held opens the board of the three.
+///
+/// B is the one of the four face buttons a game is most likely to want for itself, which is the
+/// whole of why the tests below are the X and Y ones over again: the press is spent on nothing
+/// while SELECT is down, and it has to come back to the game the moment SELECT is not.
+const B_HOLD: u64 = ZOOM_HOLD_MS;
+
+#[test]
+fn a_select_b_hold_opens_the_board_of_fits() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    assert!(g.feed(Down(B), 10).is_empty()); // deferred: the press could still be a tap
+    assert!(g.tick(10 + B_HOLD - 1).is_empty());
+    assert_eq!(
+        g.tick(10 + B_HOLD),
+        vec![ZoomHold],
+        "the hold is delivered at the threshold, while the key is still down"
+    );
+    // And the release owes nothing: the board it opened is up, and B is what puts it away — the
+    // same B, which is why the press is swallowed rather than handed back on the way up.
+    assert!(g.feed(Up(B), 10 + B_HOLD + 200).is_empty());
+    assert!(g.feed(Up(Select), 10 + B_HOLD + 210).is_empty());
+}
+
+#[test]
+fn a_select_b_tap_takes_the_next_fit() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    assert!(g.feed(Down(B), 10).is_empty());
+    assert_eq!(
+        g.feed(Up(B), 60),
+        vec![ZoomCycle],
+        "a tap is the step, delivered on the release because the press could still have grown"
+    );
+    // The threshold must not reach back for a press that is already over.
+    assert!(g.tick(10 + B_HOLD * 4).is_empty());
+    assert!(g.feed(Up(Select), 70).is_empty());
+}
+
+#[test]
+fn the_two_halves_of_select_b_are_mutually_exclusive() {
+    let mut g = Gestures::new();
+    let mut out = Vec::new();
+    out.extend(g.feed(Down(Select), 0));
+    out.extend(g.feed(Down(B), 10));
+    out.extend(g.tick(10 + B_HOLD));
+    out.extend(g.tick(10 + B_HOLD * 10));
+    out.extend(g.feed(Up(B), 10 + B_HOLD * 10 + 10));
+    out.extend(g.feed(Up(Select), 10 + B_HOLD * 10 + 20));
+    assert_eq!(out, vec![ZoomHold], "the hold also stepped the ring");
+}
+
+#[test]
+fn b_released_just_short_of_the_threshold_steps() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(B), 10);
+    assert!(g.tick(10 + B_HOLD - 1).is_empty());
+    assert_eq!(g.feed(Up(B), 10 + B_HOLD - 1), vec![ZoomCycle]);
+}
+
+#[test]
+fn the_board_of_fits_opens_once_per_press_not_once_per_tick() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(B), 10);
+    let mut opens = 0;
+    for t in 10..10 + B_HOLD * 5 {
+        opens += g.tick(t).iter().filter(|a| **a == ZoomHold).count();
+    }
+    assert_eq!(opens, 1, "the threshold is an edge, not a level");
+}
+
+/// The one that matters most on this key, and the reason it was the last of the four to be taken:
+/// a bare B is the game's B, and a chord that kept it would be a key the user cannot press in a
+/// game they are playing.
+#[test]
+fn b_without_select_is_still_the_games_b_held_or_tapped() {
+    let mut g = Gestures::new();
+    assert_eq!(g.feed(Down(B), 0), vec![GbaDown(B)]);
+    assert_eq!(g.feed(Up(B), 40), vec![GbaUp(B)]);
+    // ...and holding it is not a hold, because there is no chord to be the hold half of.
+    assert!(g.tick(B_HOLD * 3).is_empty());
+    assert_eq!(g.feed(Down(B), 2000), vec![GbaDown(B)]);
+    assert_eq!(g.feed(Up(B), 2000 + B_HOLD * 3), vec![GbaUp(B)]);
+}
+
+#[test]
+fn the_b_button_still_works_after_a_chord() {
+    for (label, hold) in [("held", true), ("tapped", false)] {
+        let mut g = Gestures::new();
+        g.feed(Down(Select), 0);
+        g.feed(Down(B), 10);
+        if hold {
+            g.tick(10 + B_HOLD);
+        }
+        g.feed(Up(B), 10 + B_HOLD + 50);
+        g.feed(Up(Select), 10 + B_HOLD + 60);
+        assert_eq!(
+            g.feed(Down(B), 5000),
+            vec![GbaDown(B)],
+            "a bare B after the {label} chord was not the game's"
+        );
+        assert_eq!(g.feed(Up(B), 5040), vec![GbaUp(B)]);
+    }
+}
+
+/// A third deferred chord on the same two counters as the other two: none of the three may open
+/// another's panel.
+#[test]
+fn the_three_deferred_chords_do_not_fire_each_other() {
+    let mut g = Gestures::new();
+    g.feed(Down(Select), 0);
+    g.feed(Down(B), 10);
+    assert_eq!(g.tick(10 + B_HOLD), vec![ZoomHold]);
+    g.feed(Up(B), 10 + B_HOLD + 10);
+    for (btn, want) in [(X, MaskHold), (Y, ColorHold)] {
+        let mut g = Gestures::new();
+        g.feed(Down(Select), 0);
+        g.feed(Down(B), 10);
+        assert_eq!(g.tick(10 + B_HOLD), vec![ZoomHold]);
+        g.feed(Up(B), 10 + B_HOLD + 10);
+        g.feed(Down(btn), 10 + B_HOLD + 20);
+        assert_eq!(
+            g.tick(10 + B_HOLD + 20 + B_HOLD),
+            vec![want],
+            "{btn:?}'s hold was not armed after B's"
+        );
+    }
 }

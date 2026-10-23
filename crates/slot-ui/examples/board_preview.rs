@@ -7,8 +7,8 @@
 
 use slot_store::{Cart, Core, System};
 use slot_ui::{
-    board_face, chip_face, core_dot_face, core_name_face, CORE_DOT, CORE_DOT_DIM, CORE_DOT_GAP,
-    CORE_DOT_LIFT,
+    board_at, board_face, chip_face, core_dot_face, core_name_face, CORE_DOT, CORE_DOT_DIM,
+    CORE_DOT_GAP, CORE_DOT_LIFT, OUT_H, OUT_W,
 };
 
 fn cart(stem: &str, code: &str, ext: &str) -> Cart {
@@ -100,6 +100,45 @@ fn paste_a(
     }
 }
 
+/// The panel's own ground: a board is looked at against it, because where the board sits on the
+/// panel is half of what the drawing is.
+const PANEL_GROUND: [u8; 3] = [0x14, 0x14, 0x18];
+
+/// `src` onto `dst`, scaled to `w` by `h` — the board's own face is one size and the panel
+/// draws it at another.
+fn paste_scaled(
+    dst: &mut [u8],
+    dw: u32,
+    dh: u32,
+    src: &[u8],
+    sw: u32,
+    sh: u32,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+) {
+    for dy in 0..h as i32 {
+        for dx in 0..w as i32 {
+            let (px, py) = (x as i32 + dx, y as i32 + dy);
+            if px < 0 || py < 0 || px >= dw as i32 || py >= dh as i32 {
+                continue;
+            }
+            let sx = ((dx as f32 * sw as f32 / w) as u32).min(sw - 1);
+            let sy = ((dy as f32 * sh as f32 / h) as u32).min(sh - 1);
+            let s = ((sy * sw + sx) * 4) as usize;
+            let a = src[s + 3] as f32 / 255.0;
+            if a == 0.0 {
+                continue;
+            }
+            let d = ((py as u32 * dw + px as u32) * 4) as usize;
+            for c in 0..3 {
+                dst[d + c] = (src[s + c] as f32 * a + dst[d + c] as f32 * (1.0 - a)).round() as u8;
+            }
+        }
+    }
+}
+
 fn main() {
     let out = std::env::args()
         .nth(1)
@@ -183,5 +222,18 @@ fn main() {
             }
         }
         write(&rgba, face.w, face.h, &format!("{out}/opened_{system:?}.png"));
+        // And the whole panel, with the open cart on it where the panel puts it. A board is one
+        // shape per machine and the panel is one shape for all of them, so this is the drawing
+        // that shows whether a board sits in the middle of the panel or off in a corner of it.
+        let mut panel = vec![0u8; (OUT_W * OUT_H * 4) as usize];
+        for px in panel.chunks_exact_mut(4) {
+            px[..3].copy_from_slice(&PANEL_GROUND);
+            px[3] = 255;
+        }
+        let at = board_at(1.0, system);
+        paste_scaled(
+            &mut panel, OUT_W, OUT_H, &rgba, face.w, face.h, at.x, at.y, at.w, at.h,
+        );
+        write(&panel, OUT_W, OUT_H, &format!("{out}/panel_{system:?}.png"));
     }
 }

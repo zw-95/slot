@@ -1,10 +1,11 @@
 use slot_store::{Cart, Core, System};
 use slot_ui::{
-    board_at, board_face, chip_face, chip_shadow_face, lid_at, lift_of, on_board, padded,
-    shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed, BOARD_H, BOARD_W, CART_H,
-    CORE_DOT, DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H,
+    board_at, board_face, board_rest, chip_face, chip_shadow_face, lid_at, lift_of, on_board,
+    padded, shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed, BOARD_H, BOARD_W,
+    CART_H, CORE_DOT, DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H,
     SOCKET_W, TURN_PAD,
 };
+use slot_ui::{OUT_H, OUT_W};
 
 fn cart(stem: &str, code: &str) -> Cart {
     Cart {
@@ -149,6 +150,33 @@ fn the_open_cart_starts_as_the_shelf_cart_and_lands_where_the_mockup_has_it() {
         }
     );
     assert_eq!(board_at(1.7, System::Gba), board_at(1.0, System::Gba), "an overshoot kept growing");
+}
+
+/// The boards are not all the same shape, and a board put at the Advance's corner is a board
+/// sitting down and to the left of the panel's middle — which is what a Game Boy cart did while
+/// every landscape machine's cart opened in the middle. Whichever machine's cart it is, the
+/// board is centred on the panel and on the same line as every other machine's.
+#[test]
+fn every_board_opens_centred_whatever_shape_it_is() {
+    // The line every board is centred on is the Advance's, which is the one the mockup placed.
+    let advance = board_rest(System::Gba);
+    let mid = advance.y + advance.h / 2.0;
+    for system in [System::Gba, System::Gb, System::Gbc, System::Sfc, System::Fc] {
+        let b = board_at(1.0, system);
+        let (cx, cy) = (b.x + b.w / 2.0, b.y + b.h / 2.0);
+        assert!(
+            (cx - OUT_W as f32 / 2.0).abs() < 0.6,
+            "{system:?}'s board is {cx} across, not the panel's {:.1}",
+            OUT_W as f32 / 2.0
+        );
+        assert!(
+            (cy - mid).abs() < 0.6,
+            "{system:?}'s board is centred on {cy}, not on the board line's {mid}"
+        );
+        // And inside the panel: a portrait board that hung off the top or the bottom was the
+        // other half of the same complaint.
+        assert!(b.y >= 0.0 && b.y + b.h <= OUT_H as f32, "{system:?}'s board is off the panel");
+    }
 }
 
 #[test]

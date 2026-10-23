@@ -99,6 +99,8 @@ uniform float u_grid_scan;
 // 这是 RetroArch 手持着色器（nds-color / lcd1x_nds）的通行做法，直接乘编码值会把
 // 「半彩」压暗、把单色背光冲淡。
 uniform float u_cc_gamma;
+// 遮罩开关：1.0 = 画（整数倍），0.0 = 完全不画（等比铺满 / 全屏拉伸）。
+uniform float u_mask_on;
 varying vec2 v_uv;
 // 4×4 有序抖动（Bayer）。两次 2×2 用算术叠出来，避开 GLSL ES 1.00 没有的位运算与数组索引。
 float Bayer2(vec2 a) {
@@ -138,8 +140,11 @@ void main() {
             c = mix(c, u_grid, u_grid_mix);
         }
     }
-    // 面板遮罩照旧在编码空间乘（顺序与旧版等价：矩阵与遮罩都是乘法，可交换）。
-    vec3 rgb = c * texture2D(u_mask, v_uv * u_src).rgb;
+    // 面板遮罩在编码空间乘（顺序与旧版等价：矩阵与遮罩都是乘法，可交换）。
+    // u_mask_on 由 CPU 侧按 fit 推送：遮罩是「每个源像素一组 RGB 三条」，这句话只在
+    // 整数倍缩放下成立，等比铺满与全屏拉伸时三色组会横跨源像素的边界，出来的是彩色的
+    // 拖影而不是网格 —— 干脆不画，见 pipeline 的 draw_source。
+    vec3 rgb = c * mix(vec3(1.0), texture2D(u_mask, v_uv * u_src).rgb, u_mask_on);
     FRAG_COLOR = vec4(rgb * u_bright, 1.0);
 }
 "#;

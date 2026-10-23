@@ -3,7 +3,7 @@ use crate::power::{screen_brightness, screen_rect_in};
 use crate::quad::Quad;
 use crate::shaders::{GAME_FRAG, RECT_VERT};
 use crate::surface::{GfxError, OUT_H, OUT_W};
-use crate::system::{System, GBA_SRC_H, GBA_SRC_W};
+use crate::system::{Fit, System, GBA_SRC_H, GBA_SRC_W};
 
 /// The GBA's frame, which is what these two meant when there was one machine. Anything that
 /// wants a source size should ask `System` for the one it is drawing.
@@ -14,7 +14,11 @@ pub const SRC_H: u32 = GBA_SRC_H;
 const IDENTITY_CC: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
 
 pub struct GamePass {
-    prog: gl::types::GLuint,
+prog: gl::types::GLuint,
+/// How the frame is fitted to the panel: whole source pixels, the picture's own shape grown
+/// to the panel's edges, or the panel's shape. The first is what there was before there was
+/// a choice.
+fit: Fit,
     /// The frame texture: one, allocated for exactly the frame that is up.
     ///
     /// One per machine was right while there were two machines — two together are 240 KiB,
@@ -66,6 +70,10 @@ pub struct GamePass {
     u_grid: gl::types::GLint,
     u_grid_mix: gl::types::GLint,
     u_grid_scan: gl::types::GLint,
+    /// Whether the 3x3 mask is drawn at all. It is one RGB triad per *source* pixel — a statement
+    /// about a whole number of panel pixels under each of them — so it has a switch, and the fit
+    /// is what throws it: see `System::whole`.
+    u_mask_on: gl::types::GLint,
     /// A compositor with nobody driving it is a screen that is on.
     power: f32,
 }
@@ -111,6 +119,7 @@ impl GamePass {
             u_grid,
             u_grid_mix,
             u_grid_scan,
+            u_mask_on,
         );
         unsafe {
             // What is fixed for the life of the program: which texture unit carries what, and
@@ -146,6 +155,8 @@ impl GamePass {
             gl::Uniform1f(u_grid_mix, 0.0);
             u_grid_scan = crate::gl::uniform_location(prog, "u_grid_scan");
             gl::Uniform1f(u_grid_scan, 0.0);
+            u_mask_on = crate::gl::uniform_location(prog, "u_mask_on");
+            gl::Uniform1f(u_mask_on, 1.0);
             // Off until a palette arrives; the matrix path is what runs by default.
             gl::Uniform1f(u_pal_on, 0.0);
             // The source size, primed for the machine `active` starts on. `set_system` is a no-op
@@ -165,6 +176,7 @@ impl GamePass {
             tex_w: GBA_SRC_W,
             tex_h: GBA_SRC_H,
             active: System::Gba,
+            fit: Fit::Integer,
             mask,
             u_rect,
             u_bright,
@@ -178,6 +190,7 @@ impl GamePass {
             u_grid,
             u_grid_mix,
             u_grid_scan,
+            u_mask_on,
             power: 1.0,
         };
         pass.set_system(System::Gba);
@@ -407,14 +420,30 @@ impl GamePass {
         self.draw_source(tex, quad);
     }
 
+    /// Which of the three ways the picture is fitted to the panel. Nothing here is per frame, so
+    /// this is set when the choice is made and not pushed.
+    ///
+    /// The lattice is drawn only while the fit is the whole-number one: see `System::whole`.
+    pub fn set_fit(&mut self, fit: Fit) {
+        self.fit = fit;
+    }
+
     fn draw_source(&self, tex: gl::types::GLuint, quad: &Quad) {
         // The strike and bloom is worked against the picture's own window, not the frame: a
         // Game Boy coming up inside the panel opens inside the window its picture occupies.
-        let (x, y, w, h) = screen_rect_in(self.active.screen_base(), self.power);
+        let (x, y, w, h) = screen_rect_in(self.active.screen_rect(self.fit), self.power);
         unsafe {
             gl::UseProgram(self.prog);
             gl::Uniform4f(self.u_rect, x, y, w, h);
             gl::Uniform1f(self.u_bright, screen_brightness(self.power));
+            // The mask rides on the fit: a whole number of panel pixels per source pixel is the
+            // only scale its triads mean anything at, and at 2.7 of them a triad lands across a
+            // pixel's edge — smeared rows of colour rather than a lattice. Stand it down and let
+            // the picture through clean; the grade keeps doing its work either way.
+            gl::Uniform1f(
+                self.u_mask_on,
+                if System::whole(self.fit) { 1.0 } else { 0.0 },
+            );
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, tex);
             gl::ActiveTexture(gl::TEXTURE1);

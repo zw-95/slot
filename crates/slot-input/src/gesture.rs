@@ -17,6 +17,11 @@ pub const COLOR_HOLD_MS: Millis = 550;
 /// them — if one of the two ever needs to feel different, this is the line that moves.
 pub const MASK_HOLD_MS: Millis = 550;
 
+/// The same threshold again for SELECT+B, whose hold opens the board of screen fits. **The same
+/// number as the other two**, and for the reason `MASK_HOLD_MS` gives: one hold length to learn,
+/// whichever of the three boards comes up.
+pub const ZOOM_HOLD_MS: Millis = 550;
+
 /// How long a delivered tap stays down. Press and release in one batch net out to nothing,
 /// because the mask is set and cleared before the core reads it.
 pub const SELECT_TAP_MS: Millis = 50;
@@ -111,6 +116,18 @@ pub enum Action {
     /// Toggle the cart's cheat list on SELECT+A. The list lives on the card, so this only flips
     /// it on or off; what is in it is edited on a PC.
     CheatToggle,
+    /// SELECT+B: the next way of fitting the picture to the panel — whole source pixels, the
+    /// picture's own shape grown to the panel's edges, or the panel's own shape — and round again
+    /// to the first from the last.
+    ///
+    /// Delivered **on release**, being the tap half of a press whose other half is a hold, exactly
+    /// as `MaskCycle` and `ColorCycle` are.
+    ZoomCycle,
+    /// The hold half of that same press: SELECT+B held opens the board of fits, the third panel
+    /// of the same shape as the other two, laid out the same way and answered with the same keys.
+    /// Three fits is few enough to walk, and the board is there because the walk is: it is what
+    /// says which of the three is up without pressing the key to find out.
+    ZoomHold,
     /// Step the audio profile (stable / balanced / strict) on SELECT+VOL+. Emitted on every
     /// screen, like the other chords: this file is blind to which one is up, and it is the app
     /// that decides where it lands. It lands on the shelf, because applying a profile reopens
@@ -183,6 +200,10 @@ pub struct Gestures {
     /// of the two a press was is not knowable until either `tick` or the release says so.
     x_at: Option<Millis>,
     x_hold_fired: bool,
+    /// SELECT+B, the third of the three. Tapped it takes the next fit, held it opens the board of
+    /// them, and nothing here knows yet which of the two this press is going to be.
+    b_at: Option<Millis>,
+    b_hold_fired: bool,
 }
 
 /// Whether a held key owes a step at `now`. The wait before the first is longer than the gap
@@ -255,6 +276,14 @@ impl Gestures {
             if !self.x_hold_fired && now.saturating_sub(d) >= MASK_HOLD_MS {
                 self.x_hold_fired = true;
                 out.push(Action::MaskHold);
+            }
+        }
+        // The second half of SELECT+B, deferred in the same way and for the same reason: the board
+        // of fits is the only thing that can open it, and a release that beats it is the step.
+        if let Some(d) = self.b_at {
+            if !self.b_hold_fired && now.saturating_sub(d) >= ZOOM_HOLD_MS {
+                self.b_hold_fired = true;
+                out.push(Action::ZoomHold);
             }
         }
         // Held volume runs the level. Not while the pair has fired: that press was a mute,
@@ -339,6 +368,13 @@ impl Gestures {
                         self.x_hold_fired = false;
                         return Vec::new();
                     }
+                    // SELECT+B, deferred for the same reason as the two above: the press is two
+                    // gestures and only the release or the threshold says which.
+                    if b == Btn::B {
+                        self.b_at = Some(now);
+                        self.b_hold_fired = false;
+                        return Vec::new();
+                    }
                     return vec![action];
                 }
                 vec![Action::GbaDown(b)]
@@ -407,6 +443,20 @@ impl Gestures {
                         Vec::new()
                     } else {
                         vec![Action::MaskCycle]
+                    };
+                }
+                // SELECT+B, settling the same way: too short to be a hold is the step round the
+                // ring, and one that already opened the board owes nothing on its way up.
+                if b == Btn::B && self.b_at.is_some() {
+                    if let Some((bit, _)) = chord(b) {
+                        self.chord_held &= !bit;
+                    }
+                    self.b_at = None;
+                    let held = std::mem::take(&mut self.b_hold_fired);
+                    return if held {
+                        Vec::new()
+                    } else {
+                        vec![Action::ZoomCycle]
                     };
                 }
                 if let Some((bit, _)) = chord(b) {
@@ -605,18 +655,23 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::X => (64, Action::MaskCycle),
         Btn::Y => (128, Action::ColorCycle),
         Btn::A => (256, Action::CheatToggle),
+        // B was the one free face button and is not any more: SELECT+B is the screen's fit, a
+        // tap taking the next one and a hold opening the board of them. The action in this row
+        // is never delivered — the press is deferred the way SELECT+X's and SELECT+Y's are, and
+        // what comes out is `ZoomCycle` on the release or `ZoomHold` at the threshold.
+        Btn::B => (4096, Action::ZoomCycle),
         Btn::VolUp => (512, Action::AudioProfileNext),
         Btn::VolDown => (1024, Action::AudioProfilePrev),
         // The one the table left over that is worth taking: START is the one the shelf stopped
         // using when the letter-view toggle went, and it is the only free button left that already
         // carries the meaning "how the shelf is shown".
         Btn::Start => (2048, Action::ModeToggle),
-        // **B, L2 and R2 are free.** They were placeholders and are not any more: the shelf cycle
+        // **L2 and R2 are free.** They were placeholders and are not any more: the shelf cycle
         // sat on SELECT+B and SELECT+L2 while it was being designed (it is a hold of Y now), and
         // SELECT+R2 was the second key to the overlay ring until `SELECT+X` became the one key
         // that means "the screen's own look" on every machine — on a Game Boy the two did exactly
         // the same thing, and a duplicate that only appears on one of the three is worse than no
-        // key at all. A bare B, L2 or R2 is still the game's, chord key or not.
+        // key at all. A bare L2 or R2 is still the game's.
         _ => return None,
     })
 }

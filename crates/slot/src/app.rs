@@ -1,6 +1,6 @@
 use std::path::{Path, PathBuf};
 
-use slot_gfx::{System as ScreenSystem, OUT_H, OUT_W};
+use slot_gfx::{Fit, System as ScreenSystem, OUT_H, OUT_W};
 use slot_input::{Action, Btn, MUTE_CHORD_MS};
 use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
 use slot_retro::LinkChannel;
@@ -569,6 +569,28 @@ struct DisplayFilter {
     /// table, which is past 255 entries and will only grow. The two colour machines' slots still
     /// hold 0..=6; the width is shared because the three are read as one array.
     cc: [u16; 5],
+    /// How the picture is fitted to the panel, which SELECT+B walks and the board of fits shows.
+    ///
+    /// **One choice for every machine**, unlike the colour's five: it is a statement about the
+    /// panel and the eye rather than about the machine in the slot, and a player who asks for the
+    /// picture to fill the screen is not asking it of the Advance alone.
+    fit: Fit,
+}
+
+impl DisplayFilter {
+    /// The three fits, in the order the key walks them and the board shows them.
+    pub const FITS: [Fit; 3] = Fit::ALL;
+
+    /// What a fit is called on the board. The three are told apart by how much of the panel the
+    /// picture takes, so that is what the names say: the whole-number one is the count of panel
+    /// pixels per source pixel it is built on, and the other two are what they do to the frame.
+    pub fn fit_name(fit: Fit) -> &'static str {
+        match fit {
+            Fit::Integer => "整数倍",
+            Fit::Fill => "等比铺满",
+            Fit::Full => "全屏拉伸",
+        }
+    }
 }
 
 /// How many machines have their own shelf and their own colour correction. The four the
@@ -743,6 +765,7 @@ impl DisplayFilter {
         nocolor_cc: [[f32; 3]; 3],
         mode: u8,
         cc: [u16; 5],
+        fit: u8,
     ) -> Self {
         Self {
             lcd3x,
@@ -760,6 +783,10 @@ impl DisplayFilter {
                 // The Family Computer, the same story on the fourth shelf.
                 cc[4].min(Self::CC_COUNT - 1),
             ],
+            // Clamped against the ring's own length, as every other index here is: a card that
+            // saved a fourth fit, or a file with no fit in it at all, comes back to the one the
+            // panel was built around.
+            fit: Self::FITS[(fit as usize).min(Self::FITS.len() - 1)],
         }
     }
     /// The aperture table for the machine in hand. The two machines with a screen bezel answer
@@ -1315,6 +1342,15 @@ pub struct App {
     /// frontend rasterised them. Empty while it is shut, and empty for the frame between the board
     /// opening and the faces arriving — an unnamed cell rather than a wrong one.
     aperture_names: Vec<(TexId, u32, u32)>,
+    /// The board of screen fits: which of the three is under its caret, and `None` while it is
+    /// shut. Opened by a **hold** of SELECT+B, which tapped is the same press taking the next fit.
+    ///
+    /// One number and no page, the way the aperture board has one: three fits are one page of
+    /// three and there is nothing to turn.
+    fit_board: Option<usize>,
+    /// The three fits' names, one face each in ring order, rasterised at boot like the power
+    /// menu's rows — the three never change, so there is nothing to re-rasterise.
+    fit_names: Vec<(TexId, u32, u32)>,
     /// The audio latency profile, chosen on the shelf with SELECT+VOL. Read from
     /// `System/audio.txt` at boot and written back whenever it changes.
     audio: Profile,
@@ -1467,6 +1503,7 @@ impl App {
                 DisplayFilter::DEFAULT_CC,
                 2,
                 [0, 0, 0, 0, 0],
+                0,
             ),
             // Page one, browser shut. `App::boot` moves the page onto whatever the card had
             // chosen, so the first tap of the palette key walks the fifteen around it.
@@ -1476,6 +1513,8 @@ impl App {
             aperture: None,
             aperture_page: 0,
             aperture_names: Vec::new(),
+            fit_board: None,
+            fit_names: Vec::new(),
             pal_name: None,
         }
     }
@@ -1515,8 +1554,8 @@ impl App {
         // marker so it happens exactly once per card.
         crate::root::migrate_palette(root);
         crate::root::migrate_display_modes(root);
-        let (mode, cc) = crate::root::display_modes(root);
-        app.display = DisplayFilter::new(lcd3x, nocolor_cc, mode, cc);
+        let (mode, cc, fit) = crate::root::display_modes(root);
+        app.display = DisplayFilter::new(lcd3x, nocolor_cc, mode, cc, fit);
         // The page the palette key walks starts on the entry the card left the Game Boy at, so
         // the first tap continues from that palette rather than from page one.
         app.pal_page = app.gb_palette() / slot_ui::PALETTE_PER_PAGE;
@@ -1779,9 +1818,46 @@ impl App {
     /// `System/display.txt`.
     fn cycle_mask(&mut self) {
         self.display.cycle_mask(self.current_machine());
+        self.write_display();
+    }
+
+    /// SELECT+B: the next way of fitting the picture to the panel, and round again to the first
+    /// from the last.
+    ///
+    /// A ring of three and not a toggle: the two fractional fits are both useful and neither is
+    /// "on", so a key that turned one of them off would leave no way to say which of the two is
+    /// wanted. Walking is also what the other two screen keys do, so the three answer the same
+    /// way under the same hand.
+    fn cycle_fit(&mut self) {
+        self.display.fit = self.display.fit.next();
+        self.write_display();
+    }
+
+    /// `System/display.txt`: the aperture, the five colour slots and the fit, written together
+    /// because they are one file and a write of one of them is a write of all.
+    fn write_display(&self) {
         if let Some(root) = &self.root {
-            crate::root::write_display_modes(root, self.display.mask_mode, self.display.cc);
+            crate::root::write_display_modes(
+                root,
+                self.display.mask_mode,
+                self.display.cc,
+                Self::fit_index(self.display.fit),
+            );
         }
+    }
+
+    /// Where the fit sits in `DisplayFilter::FITS`, which is the number the card keeps.
+    pub fn fit_index(fit: Fit) -> u8 {
+        DisplayFilter::FITS
+            .iter()
+            .position(|f| *f == fit)
+            .unwrap_or(0) as u8
+    }
+
+    /// Which of the three the picture is being drawn at. Read by the frontend every frame, as
+    /// the mask and the colour are.
+    pub fn display_fit(&self) -> Fit {
+        self.display.fit
     }
 
     /// SELECT+Y: advance the colour correction of the machine that is up, and persist all of
@@ -1823,9 +1899,7 @@ impl App {
             let next = slot_store::cycle_on_page(page, at, GRADES.len(), per);
             self.display.cc[slot] = next as u16;
         }
-        if let Some(root) = &self.root {
-            crate::root::write_display_modes(root, self.display.mask_mode, self.display.cc);
-        }
+        self.write_display();
     }
 
     /// How many grades one page of the colour browser shows. The Game Boy's table is fifteen to a
@@ -2819,6 +2893,16 @@ impl App {
                 _ => return self.aperture_browser_input(action),
             }
         }
+        // The board of fits is the fourth of the same modal, and the only one whose table is
+        // three long — short enough that the walk alone would do, and the board is there because
+        // the walk is: it says which of the three is up without pressing the key to find out.
+        if self.fit_board.is_some() {
+            match action {
+                Action::LidClose => return self.doze(),
+                Action::LidOpen => return self.wake(),
+                _ => return self.fit_board_input(action),
+            }
+        }
         // The lid, the light and the sound belong to the device rather than to whatever is
         // on screen, so they are taken before the phase gets a look at the action.
         match action {
@@ -2998,6 +3082,12 @@ impl App {
                 // two pages that a hold is the only way to compare side by side. The shelf has no
                 // picture on screen to recolour, so the hold lands nowhere else.
                 Action::ColorHold => self.open_palette_browser(),
+                // SELECT+B, and the third dial: tapped it takes the next way of fitting the
+                // picture to the panel, held it opens the board of the three. It is the same
+                // press doing two things the other two screen keys do, and it is answered on
+                // every machine — the fit is a statement about the panel, not about the game.
+                Action::ZoomCycle => self.cycle_fit(),
+                Action::ZoomHold => self.open_fit_board(),
                 // (SELECT+R2 used to land here as a second key to the overlay ring. It is gone
                 // from the chord table: on a Game Boy it did exactly what SELECT+X does, and on
                 // the other two machines it did nothing — see `slot_input::gesture::chord`.)
@@ -3704,6 +3794,7 @@ impl App {
                 self.push_game(out);
                 self.draw_palette_browser(out);
                 self.draw_aperture_browser(out);
+                self.draw_fit_board(out);
             }
             // The paused game stays underneath, covered by the screenshot the switcher
             // draws over the whole screen.
@@ -4694,6 +4785,7 @@ impl App {
         self.close_game_menu();
         self.close_cheat_menu();
         self.close_palette_browser();
+        self.close_fit_board();
         self.flush_eject(&cart);
         // The offer names a file in this cart's ring and a state only this cart's core can
         // read. Carried across the slot it would delete or load the wrong one.
@@ -4773,6 +4865,7 @@ impl App {
         self.close_game_menu();
         self.close_cheat_menu();
         self.close_palette_browser();
+        self.close_fit_board();
         // A shut lid is walking away, not choosing. Nothing is written and nothing animates:
         // waking comes back to a plain shelf.
         self.core_picker = None;
@@ -5094,9 +5187,7 @@ impl App {
             Action::GbaDown(Btn::A) => {
                 let picked = slot_store::index_of(self.pal_page, cursor, total, per);
                 self.display.cc[DisplayFilter::machine_slot(machine)] = picked as u16;
-                if let Some(root) = &self.root {
-                    crate::root::write_display_modes(root, self.display.mask_mode, self.display.cc);
-                }
+                self.write_display();
                 self.close_palette_browser();
             }
             Action::GbaDown(Btn::B) => self.close_palette_browser(),
@@ -5296,9 +5387,7 @@ impl App {
                 let ring = DisplayFilter::mask_ring(self.current_machine());
                 let at = slot_store::index_of(self.aperture_page, cursor, total, APERTURE_PER_PAGE);
                 self.display.mask_mode = ring[at.min(total - 1)];
-                if let Some(root) = &self.root {
-                    crate::root::write_display_modes(root, self.display.mask_mode, self.display.cc);
-                }
+                self.write_display();
                 self.close_aperture_browser();
             }
             Action::GbaDown(Btn::B) => self.close_aperture_browser(),
@@ -5346,6 +5435,102 @@ impl App {
             foot: None,
         };
         slot_ui::draw_palette_browser(&view, out);
+    }
+
+    /// The hold half of the fit key: the board, opened on the fit that is actually up.
+    ///
+    /// The same press tapped takes the next one, which is what makes one key do both — and it is
+    /// the same arrangement the other two screen keys have. Three is few enough to walk without
+    /// a board; the board is what says which of the three is up without walking to find out, and
+    /// what puts their names on them.
+    fn open_fit_board(&mut self) {
+        if self.fit_board.is_some() {
+            return;
+        }
+        if !matches!(self.phase, Phase::Playing { .. }) {
+            return;
+        }
+        // Opened **on the fit that is up**, the way the aperture board opens on its own look:
+        // the caret is there to mark the one already chosen, so the board can be put away with A
+        // and lose nothing.
+        self.fit_board = Some(Self::fit_index(self.display.fit) as usize);
+    }
+
+    fn close_fit_board(&mut self) {
+        self.fit_board = None;
+    }
+
+    /// The board owns every button on the game's side while it is up, exactly as the other two
+    /// do: the arrows move the caret, A wears the fit under it and B leaves without one. Up and
+    /// down ring too, because a dead key on a board is worse than a key that does the same thing
+    /// as the one beside it, and the three are one row.
+    fn fit_board_input(&mut self, action: Action) {
+        let Some(cursor) = self.fit_board else {
+            return;
+        };
+        let n = DisplayFilter::FITS.len();
+        match action {
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
+                self.fit_board = Some((cursor + n - 1) % n)
+            }
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => self.fit_board = Some((cursor + 1) % n),
+            Action::GbaDown(Btn::Up) => self.fit_board = Some((cursor + n - 1) % n),
+            Action::GbaDown(Btn::Down) => self.fit_board = Some((cursor + 1) % n),
+            Action::GbaDown(Btn::A) => {
+                self.display.fit = DisplayFilter::FITS[cursor.min(n - 1)];
+                self.write_display();
+                self.close_fit_board();
+            }
+            Action::GbaDown(Btn::B) => self.close_fit_board(),
+            _ => {}
+        }
+    }
+
+    /// The board over the paused game: the three fits side by side, **each cell a picture of the
+    /// panel with the picture on it** — how much of the panel it fills, and which way the black
+    /// runs. The one under the caret is the one that is up.
+    ///
+    /// It walks into the palette browser's own panel, as the aperture board does: same panel, same
+    /// place the grid sits, same keys. Three boards of one shape is three times the learning of
+    /// one, and this is the way there is only one to learn.
+    fn draw_fit_board(&self, out: &mut Vec<Draw>) {
+        let Some(cursor) = self.fit_board else {
+            return;
+        };
+        // The swatches are **this machine's** picture at each fit, which is the whole of what
+        // makes them different from one another: a Game Boy frame is short of the panel in both
+        // directions and an Advance one fills it, so "铺满" is a visible step on the first and
+        // nothing at all on the second.
+        let system = self.screen_system();
+        let swatches: Vec<slot_ui::PaletteSwatch> = DisplayFilter::FITS
+            .iter()
+            .map(|f| slot_ui::PaletteSwatch::window(system.screen_rect(*f)))
+            .collect();
+        let view = slot_ui::PaletteView {
+            page: 0,
+            cursor: cursor.min(DisplayFilter::FITS.len() - 1),
+            pages: 1,
+            rows: 1,
+            swatches: &swatches,
+            names: &self.fit_names,
+            foot: None,
+        };
+        slot_ui::draw_palette_browser(&view, out);
+    }
+
+    /// Which cell of the three the board has under its caret, and `None` while it is shut: the
+    /// same reading the other two boards give of themselves, for the same caller.
+    pub fn fit_board_cursor(&self) -> Option<usize> {
+        self.fit_board
+    }
+
+    /// The three fits' names, for the frontend to rasterise once at boot.
+    pub fn fit_names() -> [&'static str; 3] {
+        DisplayFilter::FITS.map(DisplayFilter::fit_name)
+    }
+
+    pub fn set_fit_names(&mut self, faces: Vec<(TexId, u32, u32)>) {
+        self.fit_names = faces;
     }
 
     /// Which of the machine's looks is being worn, which is the number `display.txt` keeps. Written

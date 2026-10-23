@@ -4,7 +4,7 @@ use crate::pipeline::GamePass;
 use crate::quad::Quad;
 use crate::shaders::{BLIT_FRAG, BLIT_VERT, BLUR_FRAG, RECT_VERT, REFLECT_FRAG};
 use crate::surface::{blit_rect, GfxError, Surface, OUT_H, OUT_W};
-use crate::system::{System, GB_SRC_H, GB_SRC_W};
+use crate::system::{Fit, System, GB_SRC_H, GB_SRC_W};
 
 /// Backdrop behind everything drawn into the offscreen target. Distinct from the black
 /// letterbox so the blit rect is visible even with nothing else on screen.
@@ -254,6 +254,12 @@ impl Compositor {
     /// goes in or the shelf changes machine — never per frame.
     pub fn set_system(&mut self, system: System) {
         self.game.set_system(system);
+    }
+
+    /// How the picture is fitted to the panel: whole source pixels, the picture's own shape at
+    /// the panel's edges, or the panel's own shape. See `System::screen_rect`.
+    pub fn set_fit(&mut self, fit: Fit) {
+        self.game.set_fit(fit);
     }
 
     pub fn upload_game(&mut self, xrgb8888: &[u8]) {

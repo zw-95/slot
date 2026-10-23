@@ -357,15 +357,34 @@ pub fn shelf_cart(system: slot_store::System) -> Placed {
 }
 
 /// The back half: standing where the shelf stood it through the slide, then growing to its rest.
+///
+/// Centred on the board's own rest, and **on its own size** — see `board_rest`. It used to be
+/// put at `BOARD_X, BOARD_Y` whatever it measured, which is where an Advance board belongs and
+/// nowhere else: a portrait board is narrower and taller than the Advance's, so a corner pinned
+/// to the Advance's put it down and to the left of the middle of the panel.
 pub fn board_at(progress: f32, system: slot_store::System) -> Placed {
+    lerp(shelf_cart(system), board_rest(system), lift_of(progress))
+}
+
+/// Where the open cart rests: **centred**, at whatever size this machine's board is.
+///
+/// Centred rather than pinned, because the boards are not the same shape. The Advance's is
+/// `BOARD_W` by `BOARD_H` and the Game Boy's is a portrait board capped by height, and a
+/// rectangle put at one corner reads as belonging to that corner — which is what put the
+/// portrait machines' boards down and to the left of the panel's middle while every landscape
+/// one sat in the middle of it.
+pub fn board_rest(system: slot_store::System) -> Placed {
     let (w, h) = board_size(system);
-    let rest = Placed {
-        x: BOARD_X,
-        y: BOARD_Y,
+    Placed {
+        x: (OUT_W as f32 - w as f32) / 2.0,
+        // The Advance's own rest, kept as a **centre line** rather than a top edge: `BOARD_Y`
+        // is where a `BOARD_H`-tall board goes, and every other board is centred on the line
+        // that puts it, so a landscape machine's board does not move and a portrait one
+        // neither hangs nor climbs.
+        y: BOARD_Y + (BOARD_H as f32 - h as f32) / 2.0,
         w: w as f32,
         h: h as f32,
-    };
-    lerp(shelf_cart(system), rest, lift_of(progress))
+    }
 }
 
 /// The front half and its turn: slid up off the back, then lifted from there to its rest. The

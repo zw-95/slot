@@ -173,6 +173,41 @@ impl Swatch {
         }
     }
 
+    /// A cell painted as **the panel itself**: the part of it the picture fills lit, and the
+    /// letterbox round it dark.
+    ///
+    /// The board of screen fits is the only table whose entries are not colours, and a fit is not
+    /// something a strip of shades can say. What tells two of them apart is how much of the panel
+    /// the picture takes and which way the black runs, which is a picture of the panel — so that
+    /// is what the cell is. `rect` is the picture's window in panel pixels, the one
+    /// `slot_gfx::System::screen_rect` hands out for the machine and the fit in question.
+    ///
+    /// Four by four, the whole of `MAX_STOPS`, which is coarse: a fit that leaves two pixels of
+    /// letterbox down each side reads as none. It is coarse on purpose — a cell is a few dozen
+    /// pixels across, and a grid fine enough to show two pixels of black is a grid whose cells
+    /// are the black.
+    pub fn window(rect: (f32, f32, f32, f32)) -> Self {
+        const N: usize = 4;
+        const LIT: [u8; 3] = [0xd8, 0xd8, 0xd8];
+        const LETTERBOX: [u8; 3] = [0x18, 0x18, 0x18];
+        let (x, y, w, h) = rect;
+        let mut stops = [[0u8; 3]; MAX_STOPS];
+        for row in 0..N {
+            for col in 0..N {
+                // The middle of this band, in panel pixels: what the band is standing for.
+                let px = (col as f32 + 0.5) * OUT_W as f32 / N as f32;
+                let py = (row as f32 + 0.5) * OUT_H as f32 / N as f32;
+                let inside = px >= x && px < x + w && py >= y && py < y + h;
+                stops[row * N + col] = if inside { LIT } else { LETTERBOX };
+            }
+        }
+        Self {
+            stops,
+            n: N * N,
+            cols: N,
+        }
+    }
+
     /// The stops themselves, in reading order.
     pub fn stops(&self) -> &[[u8; 3]] {
         &self.stops[..self.n]
