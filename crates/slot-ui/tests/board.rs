@@ -87,19 +87,6 @@ fn the_marking_is_drawn_and_stays_on_the_chip() {
     }
 }
 
-/// The coin cell is bare metal. Board unit (204, 38) lands at panel pixel (316, 59) of the face;
-/// within 9 px of it is only the cell's own fill, so dark pixels there are print.
-#[test]
-fn the_cell_carries_no_print() {
-    let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
-    let dark = (50..69)
-        .flat_map(|y| (307..326).map(move |x| (x, y)))
-        .filter(|&(x, y)| (x as i32 - 316).pow(2) + (y as i32 - 59).pow(2) <= 81)
-        .filter(|&(x, y)| rgb(&face, x, y)[0] < 150)
-        .count();
-    assert_eq!(dark, 0, "the cell still has {dark} dark pixels of print");
-}
-
 /// Rasterised at the size it is shown at, since that is the only size a face is sharp at.
 #[test]
 fn the_board_is_the_size_it_is_shown_at() {
@@ -108,33 +95,45 @@ fn the_board_is_the_size_it_is_shown_at() {
     assert_eq!((BOARD_W, BOARD_H), (372, 209));
 }
 
-/// The back of the cart is the same plastic as its front on the shelf. The wall at board unit
-/// (9, 45) is clear of the clips, the floor and every shadow.
+/// The back of the cart is the same plastic as its front on the shelf. On an Advance board the
+/// board art fills the shell, so the plastic shows on a portrait cart instead — a Game Boy's
+/// board is capped by its shell's height, and the shell's own plastic shows above and below it.
+/// Board pixel (126, 37) is in the strip above a Game Boy's board, clear of the rim's darkening.
 #[test]
 fn the_back_shell_is_the_carts_own_plastic() {
-    let emerald = board_face(&cart(EMERALD, "BPEE"), System::Gba);
+    let emerald = board_face(&cart(EMERALD, "BPEE"), System::Gb);
     assert!(
-        near(rgb(&emerald, 14, 70), shell_for("BPEE").colour),
+        near(rgb(&emerald, 126, 37), shell_for("BPEE").colour),
         "Emerald's wall is {:?}",
-        rgb(&emerald, 14, 70)
+        rgb(&emerald, 126, 37)
     );
-    let unknown = board_face(&cart("Homebrew", ""), System::Gba);
+    let unknown = board_face(&cart("Homebrew", ""), System::Gb);
     assert!(
-        near(rgb(&unknown, 14, 70), DEFAULT_SHELL.colour),
+        near(rgb(&unknown, 126, 37), DEFAULT_SHELL.colour),
         "an unknown cart's wall is {:?}",
-        rgb(&unknown, 14, 70)
+        rgb(&unknown, 126, 37)
     );
 }
 
-/// A board that failed to parse comes back transparent and every other test here would pass on
-/// nothing. Board unit (200, 70) is bare solder mask.
+/// A board that failed to draw would come back transparent and every other test here would pass
+/// on nothing. Board pixel (250, 180) is bare substrate — right of where the traces stop, above
+/// the edge connector, below the socket and clear of the ROM.
 #[test]
 fn the_board_itself_is_drawn() {
     let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
+    // The substrate, pulled a sixteenth of the way to the cart's own plastic.
+    let shell = shell_for("BPEE").colour;
+    let base: [u8; 3] = [0x1e, 0x53, 0x36]
+        .iter()
+        .zip(shell)
+        .map(|(&x, y)| (x as f32 * 0.84 + y as f32 * 0.16).round() as u8)
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
     assert!(
-        near(rgb(&face, 310, 108), [0x3a, 0x9a, 0x3c]),
+        near(rgb(&face, 250, 180), base),
         "the board is {:?}",
-        rgb(&face, 310, 108)
+        rgb(&face, 250, 180)
     );
 }
 

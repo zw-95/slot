@@ -1,4 +1,5 @@
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::{Mutex, OnceLock};
 
 use slot_store::System;
 
@@ -51,30 +52,55 @@ fn index(system: System) -> usize {
     }
 }
 
-/// Everything one machine's shell needs: shaped, depth-mapped, detailed. Rasterised once, at
-/// the first face that asks for it, at that machine's own face size.
+/// Everything one machine's shell needs: shaped, depth-mapped, detailed, at one size.
 struct Masks {
     mask: Vec<u8>,
     depth: Vec<u8>,
     detail: Vec<u8>,
 }
 
-static MASKS: [OnceLock<Masks>; 4] = [const { OnceLock::new() }; 4];
-
+/// Keyed on machine **and size**. A machine's shell is drawn at one size in this program and at
+/// several in the tests, and a cache keyed on the machine alone kept whichever size rasterised
+/// first: every face built on it afterwards was shorter than its own `w`×`h` said it was, and
+/// read past its end. On the device the size never varies, so nothing crashed out there — but
+/// ten cart tests died in that gap, and the cache is the reason.
 fn masks(system: System, w: u32, h: u32) -> &'static Masks {
-    MASKS[index(system)].get_or_init(|| {
-        let mask =
-            rasterise_svg(outline(system), w, h).unwrap_or_else(|| vec![255; (w * h) as usize]);
-        let depth = depth_map(&mask, w as usize, h as usize);
-        let detail =
-            rasterise_svg(detail(system), w, h).unwrap_or_else(|| vec![0; (w * h) as usize]);
-        Masks { mask, depth, detail }
-    })
+    static CACHE: OnceLock<Mutex<HashMap<(usize, u32, u32), &'static Masks>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let key = (index(system), w, h);
+    let mut map = cache.lock().unwrap();
+    if let Some(&m) = map.get(&key) {
+        return m;
+    }
+    let mask =
+        rasterise_svg(outline(system), w, h).unwrap_or_else(|| vec![255; (w * h) as usize]);
+    let depth = depth_map(&mask, w as usize, h as usize);
+    let detail =
+        rasterise_svg(detail(system), w, h).unwrap_or_else(|| vec![0; (w * h) as usize]);
+    let m: &'static Masks = Box::leak(Box::new(Masks { mask, depth, detail }));
+    map.insert(key, m);
+    m
 }
 
 /// Coverage of the cart outline, one byte per pixel, row major.
 pub fn silhouette(system: System, w: u32, h: u32) -> &'static [u8] {
     &masks(system, w, h).mask
+}
+
+/// The outline and its depth map, rasterised fresh at whatever size is asked, and cached by
+/// nobody.
+///
+/// The shelf's cart faces go through `silhouette`, which keeps one raster per machine at the
+/// cart-face size. The picker's board is a **different** size, and borrowing that cache for it is
+/// how a board came out wearing a cart-sized depth map: the cache kept whichever size asked
+/// first, and the face built on the shorter buffer read past its end — the panic ten cart tests
+/// died in, unseen for as long as nothing ever ran. So the board rasterises its own, every time:
+/// it is built once per cart at most, and resvg is fast.
+pub(crate) fn shell_at(system: System, w: u32, h: u32) -> (Vec<u8>, Vec<u8>) {
+    let mask =
+        rasterise_svg(outline(system), w, h).unwrap_or_else(|| vec![255; (w * h) as usize]);
+    let depth = depth_map(&mask, w as usize, h as usize);
+    (mask, depth)
 }
 
 /// Every cart of a machine is the same shape, so the mask is rasterised once per machine and

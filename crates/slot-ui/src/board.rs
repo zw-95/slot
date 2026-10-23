@@ -1,8 +1,10 @@
-//! The core picker's open cart: the back half of the shell with the board in it, rasterised
-//! per cart because the shell is that cart's plastic and the ROM carries that cart's name.
+//! The core picker's open cart: the back half of the shell with the board in it, drawn per cart
+//! because the shell is that cart's plastic and the ROM carries that cart's name.
 //!
-//! Drawn from `board.svg` and not from rects: the notch round the centre post, the patterned
-//! legs and contacts and the 45° traces are drawings, not a layout.
+//! Drawn here in pixels and not rastered from art, which is the change: the art was one machine's
+//! board, and stretching it to every other machine's shape is what put an Advance board inside a
+//! Super Nintendo cart. A board is drawn at the size it is asked for now, so a portrait cart gets
+//! a portrait board and each machine's own shape gets its own traces.
 
 use slot_gfx::OUT_W;
 use slot_store::{Cart, Core};
@@ -15,7 +17,7 @@ use crate::slot_chrome::ease;
 use crate::text;
 use slot_store::clean_label;
 
-const BOARD_SVG: &str = include_str!("../assets/board.svg");
+
 
 /// The cart's 240×135 at 1.55×, the size the open cart is shown at. Sharp only at its own size.
 pub const BOARD_W: u32 = 372;
@@ -27,10 +29,7 @@ pub const ROM_Y: u32 = 48;
 pub const ROM_W: u32 = 71;
 pub const ROM_H: u32 = 90;
 
-/// The placeholders `board.svg` paints its shell parts in.
-const PLASTIC: &str = "#ff00ff";
-const FLOOR: &str = "#800080";
-const DEEP: &str = "#400040";
+
 
 /// Words to a line on the ROM, and lines to the chip. Counted in characters rather than
 /// measured, so the split is a fact about the name and the tests can state it; the fitter
@@ -111,25 +110,18 @@ pub fn board_face(cart: &Cart, system: slot_store::System) -> CartFace {
     // rather than stretched to fill it: a portrait shell is nearly half again as tall as the
     // board is, and pulling the art to that shape would bow its traces and oval its pads.
     let (pw, ph) = pcb_size(w, h);
-    let svg = BOARD_SVG
-        .replace(DEEP, &hex(shade(shell.colour, 0.35)))
-        .replace(FLOOR, &hex(shade(shell.colour, 0.62)))
-        .replace(PLASTIC, &hex(shell.colour));
-    let pcb = CartFace {
-        rgba: art::render_svg(&svg, pw, ph)
-            .unwrap_or_else(|| vec![0; (pw * ph * 4) as usize]),
-        w: pw,
-        h: ph,
-    };
+    let pcb = pcb_face(shell.colour, pw, ph, system as u32);
     let (px, py) = ((w - pw) / 2, (h - ph) / 2);
     over(&mut face, &pcb, px, py);
-    // The ROM's marking travels with the board it is printed on, at the board's own scale.
+    // The ROM's marking travels with the board it is printed on, at the board's own scale, onto
+    // the package the board drew for it.
     let s = pw as f32 / BOARD_W as f32;
+    let (rx, ry, _, _) = rom_at(pw);
     over(
         &mut face,
         &rom_marking_face(&cart.stem, s),
-        px + (ROM_X as f32 * s).round() as u32,
-        py + (ROM_Y as f32 * s).round() as u32,
+        px + rx as u32,
+        py + ry as u32,
     );
     face
 }
@@ -137,8 +129,10 @@ pub fn board_face(cart: &Cart, system: slot_store::System) -> CartFace {
 /// The shell's back half: the machine's outline in this cart's plastic, darkened — it is the
 /// inside of a shell that has just been taken apart — with its thickness showing at the rim.
 fn back_shell(system: slot_store::System, shell: [u8; 3], w: u32, h: u32) -> CartFace {
-    let mask = crate::silhouette::silhouette(system, w, h);
-    let depth = crate::silhouette::cart_depth(system, w, h);
+    // Its own raster, not the shelf's cached one: that cache keeps a single size per machine, and
+    // the board's is not it. See `silhouette::shell_at`.
+    let (mask, depth) = crate::silhouette::shell_at(system, w, h);
+    let depth = &depth;
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     for i in 0..(w * h) as usize {
         let a = mask[i];
@@ -171,6 +165,95 @@ fn pcb_size(w: u32, h: u32) -> (u32, u32) {
         pw = (ph as f32 * BOARD_W as f32 / BOARD_H as f32).round() as u32;
     }
     (pw, ph)
+}
+
+/// A board, drawn: substrate, copper traces ending in pads, an edge connector along the bottom,
+/// the mask ROM that carries the game, and the silkscreen outline of the socket the core sits in.
+///
+/// Drawn rather than rastered from art, and drawn **at the size it is asked for** — because that
+/// size is the whole of the trouble this replaces. The art was one machine's board, the Advance's,
+/// and every other machine's cart came apart to show it stretched to that cart's shape: a Super
+/// Nintendo cart opened on an Advance board with Advance traces on it, and a Game Boy one opened
+/// on the same board pulled tall enough to bow every pad on it. This keeps its own proportions at
+/// whatever size it is given, so a portrait cart gets a portrait board and a wide one a wide board.
+fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
+    let mut face = CartFace {
+        rgba: vec![0; (w * h * 4) as usize],
+        w,
+        h,
+    };
+    // Substrate, pulled a little toward this cart's own plastic: a board out of a red cart should
+    // not be the same green as one out of a blue one.
+    let base = mix(SUBSTRATE, shell, 0.16);
+    box_fill(&mut face, 0, 0, w as i32, h as i32, base, 255);
+    box_line(&mut face, 2, 2, w as i32 - 2, h as i32 - 2, SILK, 255);
+
+    // Copper: traces on a grid, each ending in a pad, coming in from the left and down from the
+    // top and stopping short of the middle where the socket is.
+    let ink = mix(COPPER, base, 0.30);
+    // Seeded on the machine, so two machines sharing a board size still get boards that do not
+    // read as the same drawing: the Super Nintendo's row is the Advance's, and its board should
+    // not look like the Advance's with a different ROM on it.
+    let mut k = 0;
+    let mut y = 9;
+    while y < h as i32 - 14 {
+        let x1 = (w as f32 * (0.16 + 0.20 * wobble(k, 7 + machine))) as i32;
+        hline(&mut face, 7, x1, y, ink, 255);
+        disc(&mut face, x1, y, 2.5, PAD, 255);
+        k += 1;
+        y += 15;
+    }
+    let mut x = 9;
+    while x < w as i32 - 14 {
+        let y1 = (h as f32 * (0.18 + 0.26 * wobble(k, 11 + machine))) as i32;
+        vline(&mut face, x, 7, y1, ink, 255);
+        disc(&mut face, x, y1, 2.5, PAD, 255);
+        k += 1;
+        x += 15;
+    }
+
+    // The edge connector: gold fingers along the bottom, which is the end that goes in first.
+    let gy = h as i32 - 10;
+    let mut fx = 7;
+    while fx < w as i32 - 7 {
+        box_fill(&mut face, fx, gy, fx + 5, h as i32 - 3, GOLD, 255);
+        fx += 9;
+    }
+
+    // The mask ROM, in the top corner away from the socket: a black package with pins down both
+    // long sides, and the game's marking inked onto it by the caller. It sat where the board art
+    // had it, which is under the middle of the board now that the core sits there — the chip was
+    // drawing straight over the game's own name.
+    let (rx, ry, rw, rh) = rom_at(w);
+    for i in 0..8 {
+        let py = ry + 4 + i * (rh - 8) / 8;
+        box_fill(&mut face, rx - 5, py, rx, py + 4, PIN, 255);
+        box_fill(&mut face, rx + rw, py, rx + rw + 5, py + 4, PIN, 255);
+    }
+    round_box(&mut face, rx, ry, rx + rw, ry + rh, 3, ROM_BODY, 255);
+
+    // The socket: its outline in silkscreen, so the chip reads as seated in something rather than
+    // floating over the traces.
+    let s = w as f32 / BOARD_W as f32;
+    let (sw, sh) = ((CORE_W as f32 * s) as i32, (CORE_H as f32 * s) as i32);
+    box_line(
+        &mut face,
+        (w as i32 - sw) / 2 - 5,
+        (h as i32 - sh) / 2 - 5,
+        (w as i32 - sw) / 2 + sw + 5,
+        (h as i32 - sh) / 2 + sh + 5,
+        SILK,
+        255,
+    );
+    face
+}
+
+/// Where the mask ROM sits on a board `w` wide: the top corner, clear of the socket the core
+/// sits in at the middle, at the ROM's own size scaled to the board's.
+fn rom_at(w: u32) -> (i32, i32, i32, i32) {
+    let s = w as f32 / BOARD_W as f32;
+    let (rw, rh) = ((ROM_W as f32 * s) as i32, (ROM_H as f32 * s) as i32);
+    (w as i32 - rw - 8, 10, rw, rh)
 }
 
 /// How many pixels in from the rim the shell's wall stops darkening it.
@@ -227,16 +310,11 @@ fn over(dst: &mut CartFace, src: &CartFace, x: u32, y: u32) {
     }
 }
 
-fn hex(c: [u8; 3]) -> String {
-    format!("#{:02x}{:02x}{:02x}", c[0], c[1], c[2])
-}
-
 fn shade(c: [u8; 3], f: f32) -> [u8; 3] {
     c.map(|v| (v as f32 * f).round().clamp(0.0, 255.0) as u8)
 }
 
 const SOCKET_SVG: &str = include_str!("../assets/socket.svg");
-const CHIP_SVG: &str = include_str!("../assets/chip.svg");
 
 /// Where the open cart rests.
 pub const BOARD_X: f32 = 174.0;
@@ -463,6 +541,135 @@ pub fn socket_face(core: Core) -> CartFace {
     face
 }
 
+/// The board's colours, and the chip's: a board is green with copper on it, and a chip is black
+/// with tin legs. These are what the drawing below is made of, so that there is one place to
+/// change what a board looks like.
+const SUBSTRATE: [u8; 3] = [0x1e, 0x53, 0x36];
+const COPPER: [u8; 3] = [0xc8, 0x9a, 0x4a];
+const PAD: [u8; 3] = [0xd8, 0xb4, 0x66];
+const GOLD: [u8; 3] = [0xd4, 0xa8, 0x3c];
+const SILK: [u8; 3] = [0xe8, 0xf0, 0xe4];
+const PIN: [u8; 3] = [0xb8, 0xbc, 0xb6];
+const ROM_BODY: [u8; 3] = [0x18, 0x18, 0x1b];
+const CHIP_BODY: [u8; 3] = [0x22, 0x24, 0x28];
+
+/// `a` pulled `t` of the way to `b`.
+fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
+    a.iter()
+        .zip(b)
+        .map(|(&x, y)| ((x as f32 * (1.0 - t) + y as f32 * t).round() as u8))
+        .collect::<Vec<u8>>()
+        .try_into()
+        .unwrap()
+}
+
+/// One pixel, if it lands on the face.
+fn dot(face: &mut CartFace, x: i32, y: i32, colour: [u8; 3], alpha: u8) {
+    if x < 0 || y < 0 || x >= face.w as i32 || y >= face.h as i32 {
+        return;
+    }
+    let at = ((y as u32 * face.w + x as u32) * 4) as usize;
+    face.rgba[at..at + 3].copy_from_slice(&colour);
+    face.rgba[at + 3] = alpha;
+}
+
+/// A filled box, clipped to the face. Half-open, as every box here is: `x1` and `y1` are one past.
+fn box_fill(
+    face: &mut CartFace,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    colour: [u8; 3],
+    alpha: u8,
+) {
+    for y in y0.max(0)..y1.min(face.h as i32) {
+        for x in x0.max(0)..x1.min(face.w as i32) {
+            dot(face, x, y, colour, alpha);
+        }
+    }
+}
+
+/// The outline of a box, one pixel wide: silkscreen, and the socket the core sits in.
+fn box_line(
+    face: &mut CartFace,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    colour: [u8; 3],
+    alpha: u8,
+) {
+    box_fill(face, x0, y0, x1, y0 + 1, colour, alpha);
+    box_fill(face, x0, y1 - 1, x1, y1, colour, alpha);
+    box_fill(face, x0, y0, x0 + 1, y1, colour, alpha);
+    box_fill(face, x1 - 1, y0, x1, y1, colour, alpha);
+}
+
+/// A filled disc: a pad on a board, and the dot that says which way round a chip goes.
+fn disc(face: &mut CartFace, cx: i32, cy: i32, r: f32, colour: [u8; 3], alpha: u8) {
+    let rr = r * r;
+    for y in (cy - r.ceil() as i32)..=(cy + r.ceil() as i32) {
+        for x in (cx - r.ceil() as i32)..=(cx + r.ceil() as i32) {
+            let (dx, dy) = (x - cx, y - cy);
+            if (dx * dx + dy * dy) as f32 <= rr {
+                dot(face, x, y, colour, alpha);
+            }
+        }
+    }
+}
+
+/// A box with its corners rounded, which is what a chip and a ROM package are.
+fn round_box(
+    face: &mut CartFace,
+    x0: i32,
+    y0: i32,
+    x1: i32,
+    y1: i32,
+    r: i32,
+    colour: [u8; 3],
+    alpha: u8,
+) {
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let cx = if x < x0 + r {
+                x0 + r
+            } else if x >= x1 - r {
+                x1 - r - 1
+            } else {
+                x
+            };
+            let cy = if y < y0 + r {
+                y0 + r
+            } else if y >= y1 - r {
+                y1 - r - 1
+            } else {
+                y
+            };
+            let (dx, dy) = (x - cx, y - cy);
+            if dx * dx + dy * dy <= r * r {
+                dot(face, x, y, colour, alpha);
+            }
+        }
+    }
+}
+
+/// A row and a column, which between them are every trace on the board.
+fn hline(face: &mut CartFace, x0: i32, x1: i32, y: i32, colour: [u8; 3], alpha: u8) {
+    box_fill(face, x0, y, x1, y + 1, colour, alpha);
+}
+
+fn vline(face: &mut CartFace, x: i32, y0: i32, y1: i32, colour: [u8; 3], alpha: u8) {
+    box_fill(face, x, y0, x + 1, y1, colour, alpha);
+}
+
+/// A steady "random" in `0..=1` from two integers: the same board every time for the same cart,
+/// and no state to carry.
+fn wobble(k: u32, salt: u32) -> f32 {
+    let x = k.wrapping_mul(2_654_435_761) ^ salt.wrapping_mul(40_503);
+    ((x >> 16) & 0xff) as f32 / 255.0
+}
+
 /// The one chip the open cart shows, and now the only thing on the board besides the name.
 ///
 /// **Unnamed**, which is the change: the name used to be inked into the chip, and a name that
@@ -470,19 +677,38 @@ pub fn socket_face(core: Core) -> CartFace {
 /// core changes it is the name that travels and the chip under it that stays — the same chip,
 /// whichever of them is in hand.
 ///
+/// Drawn, not rastered from art: a body, legs down all four sides, a lit top and left edge, and
+/// the dot that says which way round it goes. What it is not is a picture of one machine's chip,
+/// which is what it was — the same Advance chip whatever cart had been opened.
+///
 /// Far bigger than a socket's chip was: three sockets shared the board between them and one chip
 /// has it to itself. Padded, because it is drawn turned when the board refuses a press.
 pub fn chip_face(_core: Core) -> CartFace {
-    let rgba = art::render_svg(CHIP_SVG, CORE_W, CORE_H)
-        .unwrap_or_else(|| vec![0; (CORE_W * CORE_H * 4) as usize]);
-    padded(
-        &CartFace {
-            rgba,
-            w: CORE_W,
-            h: CORE_H,
-        },
-        TURN_PAD,
-    )
+    let mut face = CartFace {
+        rgba: vec![0; (CORE_W * CORE_H * 4) as usize],
+        w: CORE_W,
+        h: CORE_H,
+    };
+    // The body in from the edge, with room for legs all round it.
+    let (bx, by, bw, bh) = (16, 14, CORE_W as i32 - 32, CORE_H as i32 - 28);
+    // Legs first, so the body covers their inner ends: they come out from under the chip.
+    for i in 0..8 {
+        let x = bx + i * bw / 8 + 1;
+        box_fill(&mut face, x, by - 8, x + 6, by + 2, PIN, 255);
+        box_fill(&mut face, x, by + bh - 2, x + 6, by + bh + 8, PIN, 255);
+    }
+    for i in 0..5 {
+        let y = by + i * bh / 5 + 1;
+        box_fill(&mut face, bx - 8, y, bx + 2, y + 6, PIN, 255);
+        box_fill(&mut face, bx + bw - 2, y, bx + bw + 8, y + 6, PIN, 255);
+    }
+    round_box(&mut face, bx, by, bx + bw, by + bh, 5, CHIP_BODY, 255);
+    // Lit along the top and the left, which is the whole of what makes it a chip and not a rect.
+    let lit = shade(CHIP_BODY, 1.9);
+    hline(&mut face, bx + 5, bx + bw - 5, by + 1, lit, 255);
+    vline(&mut face, bx + 1, by + 5, by + bh - 5, lit, 255);
+    disc(&mut face, bx + 11, by + 11, 3.0, SILK, 255);
+    padded(&face, TURN_PAD)
 }
 
 /// A core's name on nothing, wide enough for the longest of them and centred in that width so
