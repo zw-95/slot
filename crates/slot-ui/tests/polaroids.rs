@@ -1,5 +1,6 @@
 use std::path::Path;
 
+use slot_gfx::System;
 use slot_power::{Battery, Charge};
 use slot_store::StateEntry;
 use slot_ui::{
@@ -76,7 +77,12 @@ fn a_stamp_ahead_of_the_clock_does_not_read_as_a_lifetime_ago() {
 /// has to fill the screen, or the switcher shows the paused game through the hole.
 #[test]
 fn an_entry_whose_thumbnail_is_missing_still_has_a_face() {
-    let face = photo_face(&entry(Path::new("/nonexistent"), "2026-08-09_14-32-05"));
+    let face = photo_face(
+        &entry(Path::new("/nonexistent"), "2026-08-09_14-32-05"),
+        System::Gba,
+    );
+    // No picture at all, so the machine's own frame: on the Advance that is the same 240x160 a
+    // picture from it would have been.
     assert_eq!((face.w, face.h), (PHOTO_W, PHOTO_H));
     assert!(
         face.rgba.chunks_exact(4).all(|p| p[3] == 255),
@@ -91,7 +97,7 @@ fn the_photo_fills_the_face_and_keeps_its_colours() {
     let d = tempfile::tempdir().expect("tempdir");
     let e = entry(d.path(), "2026-08-09_14-32-05");
     write_png(&e.thumb, PHOTO_W, PHOTO_H, [0xd0, 0x40, 0x20]);
-    let face = photo_face(&e);
+    let face = photo_face(&e, System::Gba);
     for (x, y) in [
         (0, 0),
         (PHOTO_W / 2, PHOTO_H / 2),
@@ -99,6 +105,28 @@ fn the_photo_fills_the_face_and_keeps_its_colours() {
     ] {
         assert_eq!(pixel(&face, x, y), [0xd0, 0x40, 0x20], "at {x},{y}");
     }
+}
+
+/// A shot saved from another machine comes back at that machine's size, not the Advance's.
+/// Cropped to 240x160 and then drawn over 512x448 — the Super Nintendo's rectangle, which is
+/// the shape of neither — the switcher showed a frame stretched out of recognition instead of
+/// the one that was paused.
+#[test]
+fn a_face_is_the_size_the_shot_was_saved() {
+    let d = tempfile::tempdir().expect("tempdir");
+    let e = entry(d.path(), "2026-08-09_14-32-05");
+    write_png(&e.thumb, 256, 224, [0x20, 0x80, 0xd0]);
+    let face = photo_face(&e, System::Sfc);
+    assert_eq!(
+        (face.w, face.h),
+        (256, 224),
+        "the Super Nintendo's own frame, and not one shape"
+    );
+    assert_eq!(
+        pixel(&face, 255, 223),
+        [0x20, 0x80, 0xd0],
+        "its last pixel is its own, so nothing was cropped off the bottom"
+    );
 }
 
 /// The row is walked, not wrapped, and the ends hold. Wrapping would let a flick past the

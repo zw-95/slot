@@ -3,6 +3,18 @@ use std::path::Path;
 /// Decodes `path` and returns RGBA scaled to cover `w` by `h`, centre cropped. Cover rather
 /// than fit, because a letterboxed face would break the shelf's one-set look, and cropping
 /// beats squashing box art. Any decode failure is `None`; the caller draws a label instead.
+/// Decodes `path` and hands the pixels back at the size they were written. For the one caller
+/// that is going to draw them at that size: a screenshot is a still of the panel, and the
+/// panel's shape is the machine's, so there is nothing to crop it to and nothing to letterbox
+/// it inside. `cover` is the other half, and the one everything else wants.
+pub fn open(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+    let (src, sw, sh) = decode(path)?;
+    if sw == 0 || sh == 0 {
+        return None;
+    }
+    Some((src, sw, sh))
+}
+
 pub fn cover(path: &Path, w: u32, h: u32) -> Option<Vec<u8>> {
     let (src, sw, sh) = decode(path)?;
     if sw == 0 || sh == 0 {

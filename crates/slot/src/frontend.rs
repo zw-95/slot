@@ -1064,7 +1064,14 @@ fn sync_switcher(app: &mut App, compositor: &mut Compositor, texes: Faces, state
     if !state.open {
         state.open = true;
         state.titled = None;
-        let faces: Vec<_> = app.polaroid_entries().iter().map(photo_face).collect();
+        // Against the machine that is up, which is the machine every one of these shots was
+        // taken on and the one whose rectangle they are about to be drawn over.
+        let system = app.screen_system();
+        let faces: Vec<_> = app
+            .polaroid_entries()
+            .iter()
+            .map(|e| photo_face(e, system))
+            .collect();
         let ids = faces
             .iter()
             .enumerate()

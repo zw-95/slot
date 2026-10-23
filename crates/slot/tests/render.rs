@@ -4,7 +4,7 @@ use std::path::Path;
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
 use slot::thumb;
-use slot_gfx::{lcd3x_mask, Compositor, Draw, HeadlessSurface, OUT_W, SRC_H, SRC_W};
+use slot_gfx::{lcd3x_mask, Compositor, Draw, HeadlessSurface, System, OUT_W, SRC_H, SRC_W};
 use slot_retro::{ButtonMask, MockCore, RetroCore};
 use slot_store::{Core, StateRing};
 use slot_ui::{photo_face, Polaroids, Printed};
@@ -100,7 +100,9 @@ fn a_saved_frame_arrives_intact_on_its_screenshot() {
         .expect("push");
     let entries = ring.list().expect("list");
 
-    let face = photo_face(&entries[0]);
+    // The machine the screenshots were taken on: a frame saved from a Game Boy Advance is read
+    // back at 240x160, which is the size this file writes its mock frames at.
+    let face = photo_face(&entries[0], System::Gba);
     let tex = c.create_texture(face.w, face.h, &face.rgba);
     c.begin_frame();
     c.draw_list(&[Draw::Tex {
@@ -140,7 +142,7 @@ fn the_switcher_magnifies_its_screenshot_without_resampling_it() {
     .expect("push");
     let entries = ring.list().expect("list");
 
-    let face = photo_face(&entries[0]);
+    let face = photo_face(&entries[0], System::Gba);
     let tex = c.create_texture_nearest(face.w, face.h, &face.rgba);
     let mut switcher = Polaroids::new(entries);
     switcher.set_faces(vec![tex]);

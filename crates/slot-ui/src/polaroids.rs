@@ -1,4 +1,4 @@
-use slot_gfx::{Draw, TexId, OUT_H, OUT_W};
+use slot_gfx::{Draw, System, TexId, OUT_H, OUT_W};
 use slot_power::Battery;
 use slot_store::{parse_stamp, StateEntry};
 
@@ -11,9 +11,9 @@ use crate::plate::{
 };
 use crate::status::{draw_printed, Printed};
 
-/// The screenshot is the screen. 240x160 scales to 720x480 at exactly 3x, the same integer
-/// scale the game runs at, so the switcher shows the frame that was paused rather than a
-/// resample of it.
+/// A Game Boy Advance frame, which is what a screenshot is on the machine this switcher was
+/// written for. Kept as the size a test writes a stand-in picture at — the real thing is
+/// whatever size the frame was when it was saved, and `photo_face` reads that off the file.
 pub const PHOTO_W: u32 = 240;
 pub const PHOTO_H: u32 = 160;
 
@@ -47,22 +47,33 @@ pub struct PhotoFace {
     pub h: u32,
 }
 
-/// The screenshot alone, at its own size. The chrome is a draw list, so nothing is baked
-/// into the picture and the 3x upscale stays exact.
-pub fn photo_face(entry: &StateEntry) -> PhotoFace {
-    let rgba = art::cover(&entry.thumb, PHOTO_W, PHOTO_H).unwrap_or_else(|| {
-        std::iter::repeat_n(
-            [BLANK[0], BLANK[1], BLANK[2], 255],
-            (PHOTO_W * PHOTO_H) as usize,
-        )
-        .flatten()
-        .collect()
-    });
-    PhotoFace {
-        rgba,
-        w: PHOTO_W,
-        h: PHOTO_H,
-    }
+/// The screenshot alone, at the size it was saved.
+///
+/// Not cropped to one shape: the shot is drawn through the game pass, over the same rect and
+/// with the same `u_src` the live frame uses, so a face of any other size is laid across a
+/// rectangle measured for a different one — which stretches it. A Super Nintendo's 256x224
+/// forced into the Advance's 240x160 was both cropped and resampled, and then drawn over
+/// 512x448, which is the shape of neither.
+///
+/// Screenshots are written at the frame's own size (`thumb::png` in the worker), so reading
+/// that size off the file is both right and the only thing that lines up. `system` is only
+/// needed for the entries that have no picture at all, and a blank of the machine's own frame
+/// keeps the mask tiling and the plate still while the eye is over one.
+pub fn photo_face(entry: &StateEntry, system: System) -> PhotoFace {
+    let (rgba, w, h) = match art::open(&entry.thumb) {
+        Some(face) => face,
+        None => (
+            std::iter::repeat_n(
+                [BLANK[0], BLANK[1], BLANK[2], 255],
+                (system.src_w() * system.src_h()) as usize,
+            )
+            .flatten()
+            .collect(),
+            system.src_w(),
+            system.src_h(),
+        ),
+    };
+    PhotoFace { rgba, w, h }
 }
 
 /// The ring, one screenshot at a time. Opening pauses the game; `A` loads the selection and
