@@ -111,14 +111,45 @@ pub fn open_core_for(
     //
     // gpSP's one option (`gpsp_serial`) is read at `retro_load_game`, so it stays in
     // `apply_core_options`.
+    // Every Game Boy core is asked for the same two things, each in its own words: give the
+    // machine's monochrome games a greyscale picture, and do not draw a border of your own
+    // around it.
+    //
+    // The first because SLOT's colour correction — GRAYSCALE, AGB-001, NDS — is what decides
+    // how a Game Boy game looks, and it can only do that if what it is given is monochrome.
+    // Every one of these cores otherwise picks a palette of its own for a plain DMG cart and
+    // hands back a picture already coloured, which the correction then lies on top of.
+    // The second because SLOT draws that bezel itself, for every Game Boy cart alike; a core
+    // that draws its own Super Game Boy border puts a second frame around the first.
     let initial_options: Vec<(&str, &str)> = match core {
-        Core::Mgba => vec![("mgba_sgb_borders", "OFF"), ("mgba_gb_colors", "Grayscale")],
+        Core::Mgba | Core::MgbaRumble => vec![
+            ("mgba_sgb_borders", "OFF"),
+            ("mgba_gb_colors", "Grayscale"),
+        ],
+        // `internal` so a plain Game Boy cart takes the palette named below rather than
+        // whatever this core thinks suits it, and `GBC - Grayscale` as that palette: the
+        // greyscale preset out of the Game Boy Color's own built-in set.
+        Core::Gambatte => vec![
+            ("gambatte_gb_colorization", "internal"),
+            ("gambatte_gb_internal_palette", "GBC - Grayscale"),
+        ],
+        Core::SameBoy => vec![
+            ("sameboy_mono_palette", "greyscale"),
+            ("sameboy_border", "Disabled"),
+        ],
+        // `B/W` is Gearboy's own name for its black-and-white palette.
+        Core::Gearboy => vec![("gearboy_palette", "B/W")],
+        // VBA-M runs the Advance as well, where this is a no-op: only a Super Game Boy cart
+        // would have a border to show.
+        Core::Vbam => vec![("vbam_showborders", "disabled")],
         // None of the others is asked for anything before `retro_load_game`: gpSP's one option
         // is read there, and every Super Nintendo core's own defaults are the ones a Super
         // Nintendo wants. Options are named per core, so "nothing to set" is the honest
         // answer rather than a placeholder — and an option pasted in here would be silently
         // ignored by every core that does not spell it the same way.
         Core::Gpsp
+        | Core::VbaNext
+        | Core::MednafenGba
         | Core::Supafaust
         | Core::Snes9x2005Plus
         | Core::Snes9x2005

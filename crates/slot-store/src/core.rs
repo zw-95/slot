@@ -18,6 +18,22 @@ pub enum Core {
     #[default]
     Mgba,
     Gpsp,
+    /// Gambatte. muOS's own default for the Game Boy and Game Boy Color, and therefore this
+    /// one's: an accurate core that has been the answer for those two machines for years.
+    Gambatte,
+    /// SameBoy, the one that emulates the boot ROMs and gets the CGB's colour right.
+    SameBoy,
+    /// Gearboy: small, and the least accurate of the Game Boy cores here.
+    Gearboy,
+    /// VBA-M, the old VisualBoyAdvance. Runs the Game Boy carts as well as the Advance ones,
+    /// which is why it appears on three machines' lists and not one.
+    Vbam,
+    /// `vba_next`, VBA-M's lighter fork.
+    VbaNext,
+    /// Mednafen's Game Boy Advance core.
+    MednafenGba,
+    /// mGBA built with the rumble patches. Same emulator, with a motor in it.
+    MgbaRumble,
     /// Mednafen's Super Nintendo core, the `mednafen_supafaust` libretro build.
     Supafaust,
     /// Snes9x's 2005 branch, the one that grew accuracy patches. Cheap enough for this
@@ -56,9 +72,16 @@ impl Core {
     /// `migrate_states` walks this rather than spelling the variant list out a second time,
     /// so a third core added here does not also have to be remembered at every call site
     /// that needs to tell a core's own directory apart from a cart's.
-    pub const ALL: [Core; 15] = [
+    pub const ALL: [Core; 22] = [
         Core::Mgba,
         Core::Gpsp,
+        Core::Gambatte,
+        Core::SameBoy,
+        Core::Gearboy,
+        Core::Vbam,
+        Core::VbaNext,
+        Core::MednafenGba,
+        Core::MgbaRumble,
         Core::Supafaust,
         Core::Snes9x2005Plus,
         Core::Snes9x2010,
@@ -78,6 +101,13 @@ impl Core {
         match self {
             Core::Mgba => "mgba",
             Core::Gpsp => "gpsp",
+            Core::Gambatte => "gambatte",
+            Core::SameBoy => "sameboy",
+            Core::Gearboy => "gearboy",
+            Core::Vbam => "vbam",
+            Core::VbaNext => "vba_next",
+            Core::MednafenGba => "mednafen_gba",
+            Core::MgbaRumble => "mgba_rumble",
             // The libretro name, because that is what it is called on every other frontend
             // and what the `.so` on the card is called. `text` is the player's name for it.
             Core::Supafaust => "mednafen_supafaust",
@@ -108,6 +138,13 @@ impl Core {
         match self {
             Core::Mgba => "mGBA",
             Core::Gpsp => "gpSP",
+            Core::Gambatte => "Gambatte",
+            Core::SameBoy => "SameBoy",
+            Core::Gearboy => "Gearboy",
+            Core::Vbam => "VBA-M",
+            Core::VbaNext => "VBA Next",
+            Core::MednafenGba => "Beetle GBA",
+            Core::MgbaRumble => "mGBA Rumble",
             // Not the libretro name: that is `mednafen_supafaust`, which is a name from the
             // build system, and what the picker is putting on a panel is the emulator.
             Core::Supafaust => "Supafaust",
@@ -130,6 +167,13 @@ impl Core {
         match s.trim().to_ascii_lowercase().as_str() {
             "mgba" => Some(Core::Mgba),
             "gpsp" => Some(Core::Gpsp),
+            "gambatte" => Some(Core::Gambatte),
+            "sameboy" | "same_boy" => Some(Core::SameBoy),
+            "gearboy" => Some(Core::Gearboy),
+            "vbam" | "vba-m" => Some(Core::Vbam),
+            "vba_next" | "vbanext" => Some(Core::VbaNext),
+            "mednafen_gba" | "beetle_gba" | "beetle gba" => Some(Core::MednafenGba),
+            "mgba_rumble" | "mgbarumble" => Some(Core::MgbaRumble),
             // The libretro name, and the short one a hand is likelier to type.
             "mednafen_supafaust" | "supafaust" => Some(Core::Supafaust),
             "snes9x2005_plus" | "snes9x2005plus" => Some(Core::Snes9x2005Plus),
@@ -157,8 +201,32 @@ impl System {
     /// with a single socket on it is a question that can only be refused.
     pub fn cores(self) -> &'static [Core] {
         match self {
-            System::Gba => &[Core::Mgba, Core::Gpsp],
-            System::Gb | System::Gbc => &[Core::Mgba],
+            System::Gba => &[
+                // muOS's default for the Advance, and the one core here that has run on this
+                // device for as long as the device has run anything.
+                Core::Mgba,
+                // Second, and the only other core on this list that earns its place rather than
+                // merely being available: gpSP carries the serial hardware mGBA's libretro build
+                // does not, so two Advance carts can only talk to each other through this one.
+                // Picking anything else and then starting a link is a link that never opens.
+                Core::Gpsp,
+                Core::Vbam,
+                Core::VbaNext,
+                Core::MednafenGba,
+                Core::MgbaRumble,
+            ],
+            System::Gb | System::Gbc => &[
+                // muOS's default for both of these, and so now this one's: `default = gambatte`
+                // in that archive's `global.ini`. It takes mGBA's place, mGBA having been the
+                // only core these machines had rather than the best one for them — and it is
+                // asked for a greyscale base the same way mGBA is, so the colour correction
+                // still has a monochrome picture to work from.
+                Core::Gambatte,
+                Core::Mgba,
+                Core::SameBoy,
+                Core::Gearboy,
+                Core::Vbam,
+            ],
             // Thirteen, which is every Super Nintendo core muOS ships, and in the order a
             // player should meet them rather than the order the archives list them: the one
             // that has been tested first, then the accurate-but-cheap Snes9x branches, then the

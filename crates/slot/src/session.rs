@@ -544,12 +544,12 @@ impl Session {
         // instruction, and the machine's own default answers instead.
         let core = slot_store::core_for(&self.root, system, stem);
         self.app.set_core(core);
-        // An SGB-enhanced GB/GBC cart would draw mGBA's Super Game Boy border, which SLOT
-        // already covers with its own bezel — so it is disabled at core open (see
-        // `open_core_for`). Note it here so a hand debugging "why is this cart framed
-        // differently" can see the real cause in the log.
+        // An SGB-enhanced GB/GBC cart would draw the core's own Super Game Boy border, which
+        // SLOT already covers with its own bezel — so it is turned off at core open, whichever
+        // core this cart is being run by (see `open_core_for`). Note it here so a hand
+        // debugging "why is this cart framed differently" can see the real cause in the log.
         if matches!(system, System::Gb | System::Gbc) && slot_store::sgb_enhanced(&rom) {
-            eprintln!("slot: {stem} is SGB-enhanced; mGBA Super Game Boy border disabled");
+            eprintln!("slot: {stem} is SGB-enhanced; the core's Super Game Boy border is off");
         }
         // A clean start skips the state, it does not delete it: the file stays on the card
         // for the next tap to resume from.

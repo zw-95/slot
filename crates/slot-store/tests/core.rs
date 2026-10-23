@@ -100,8 +100,8 @@ fn a_bare_stem_is_still_the_advances() {
 fn a_core_the_machine_cannot_run_is_not_an_answer() {
     let d = root_with(Some("SFC/Contra = mgba\nGB/Contra = gpsp\nGBC/Contra = gpsp\n"));
     assert_eq!(core_for(d.path(), System::Sfc, "Contra"), System::Sfc.default_core());
-    assert_eq!(core_for(d.path(), System::Gb, "Contra"), Core::Mgba);
-    assert_eq!(core_for(d.path(), System::Gbc, "Contra"), Core::Mgba);
+    assert_eq!(core_for(d.path(), System::Gb, "Contra"), System::Gb.default_core());
+    assert_eq!(core_for(d.path(), System::Gbc, "Contra"), System::Gbc.default_core());
 }
 
 #[test]
@@ -119,10 +119,15 @@ fn every_machine_offers_at_least_one_core_and_its_first_is_its_default() {
             cores[0]
         );
     }
-    // The picker is sockets to hop between, and one socket is not a choice.
-    assert_eq!(System::Gb.cores().len(), 1);
-    assert!(System::Gba.cores().len() >= 2);
-    assert!(System::Sfc.cores().len() >= 2);
+    // The picker is sockets to hop between, and one socket is not a choice. Every machine has
+    // more than one now, so no cart on the shelf is refused a picker — the last machine to
+    // have only one was the Game Boy, which had mGBA and nothing else to be asked about.
+    for system in [System::Gba, System::Gb, System::Gbc, System::Sfc] {
+        assert!(
+            system.cores().len() >= 2,
+            "{system:?} has nothing to choose between"
+        );
+    }
 }
 
 /// A machine's default is the one muOS ships as its own for that machine, read out of the
@@ -133,6 +138,8 @@ fn every_machine_offers_at_least_one_core_and_its_first_is_its_default() {
 fn a_machines_default_is_the_one_muos_ships() {
     assert_eq!(System::Sfc.default_core(), Core::Snes9x);
     assert_eq!(System::Gba.default_core(), Core::Mgba);
+    assert_eq!(System::Gb.default_core(), Core::Gambatte);
+    assert_eq!(System::Gbc.default_core(), Core::Gambatte);
     // And it is the first of what the machine offers, which is what `default_core` is.
     assert_eq!(System::Sfc.default_core(), System::Sfc.cores()[0]);
 }

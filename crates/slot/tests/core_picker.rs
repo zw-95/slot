@@ -300,9 +300,13 @@ fn opening_on_a_core_at_the_end_brings_the_window_to_it() {
 /// does not open the board for it at all.
 #[test]
 fn one_core_is_not_a_choice() {
-    let cores = System::Gb.cores();
+    // Spelled out rather than taken off a machine: every machine on the card offers more than
+    // one now, so the one-socket board has to be made by hand. It is still a shape a machine
+    // could have — the Game Boy had it until this week — and the picker still has to refuse
+    // rather than wrap.
+    let cores = [Core::Mgba];
     assert_eq!(cores.len(), 1);
-    let mut p = CorePicker::open(cores[0], cores, 0);
+    let mut p = CorePicker::open(cores[0], &cores, 0);
     p.start(0);
     assert_eq!(p.press(Press::Right, 100), Outcome::Refused);
     assert_eq!(p.press(Press::Left, 200), Outcome::Refused);
