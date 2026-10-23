@@ -4042,10 +4042,6 @@ impl App {
         let board = board_at(progress, system);
         let zoom = board_zoom(board);
         let ready = self.core_faces_ready();
-        // A card that supplies its own board has the chips drawn into the art, so there is
-        // nothing for the picker to place: no sockets, no chip, and no shadow for a chip that
-        // is not coming across. What is left of the picker on such a card is the two lamps.
-        let own_board = slot_ui::board_art().is_some();
 
         if ready {
             // Opaque from the first frame, and the sockets and the chip with it: the back half
@@ -4060,101 +4056,69 @@ impl App {
                     alpha: 1.0,
                 });
             }
-            // The card's board carries its own chips, so the lamps are the whole of what the
-            // picker adds: the one the cursor is over lit orange, the other out, and the lit one
-            // green once the choice has been made and the picker is on its way out. Nothing is
-            // baked into the board texture, because the state changes every press.
-            if let Some(art) = slot_ui::board_art() {
-                // How far along the machine's own list the core in hand is: a card that drew its
-                // own board drew a lamp per place on it, and this is the one that is lit.
-                let here = picker.index();
-                let done = picker.closing();
-                for (i, lamp) in art.lamps.iter().enumerate() {
-                    let colour = if i == here {
-                        if done {
-                            [0.18, 0.76, 0.37, 1.0]
-                        } else {
-                            [1.0, 0.55, 0.10, 1.0]
-                        }
-                    } else {
-                        // Out, but not invisible: against the board's own plastic a dark lamp
-                        // reads as a hole rather than as a lamp that is off.
-                        [0.62, 0.62, 0.65, 1.0]
-                    };
-                    out.push(Draw::Rect {
-                        x: board.x + lamp.x * board.w,
-                        y: board.y + lamp.y * board.h,
-                        w: lamp.w * board.w,
-                        h: lamp.h * board.h,
-                        colour,
-                    });
-                }
-            }
-            // The sockets are the **built-in** board's, and only its: a card that drew its own
-            // board drew its chips into it as well, so placing these on top leaves empty
-            // positions standing over a finished board — the picker's own furniture printed over
-            // somebody else's drawing. The chip below is gated for the same reason and always
-            // was; this loop was not, which is the pair of leftovers the player saw.
             // The chip, and the whole of what the board is for. What core is in hand is written
             // on the chip rather than shown by which socket it is standing in, so there is one
-            // chip and it sits in the middle of the board — the same chip whichever core it is,
-            // which is why it never flies anywhere and never needs a stand-in in flight.
+            // chip and it sits **in the middle of the board** — the same chip whichever core it
+            // is, which is why it never flies anywhere and never needs a stand-in in flight.
+            //
+            // There is no way off this path and there used to be: a card carrying a `board.png`
+            // of its own had its chip drawn into the picture, so the picker drew a lamp instead
+            // and drew neither chip nor name at all — the cart opened, and nothing on it said
+            // which core was seated. That road is closed; see `board_face`.
             let chip = picker.chip(now);
-            if !own_board {
-                let (cw, ch) = (CORE_W as f32 * zoom, CORE_H as f32 * zoom);
-                let body = Placed {
-                    x: board.x + (board.w - cw) / 2.0 + chip.shake,
-                    y: board.y + (board.h - ch) / 2.0,
-                    w: cw,
-                    h: ch,
-                };
-                // The chip, and it is the same chip whichever core is in hand: a press changes
-                // the name on it and nothing about the chip itself.
-                if let Some(tex) = self.core_chip_face {
-                    // Grown into the transparent border the face carries, so the padding is
-                    // part of the draw and not a chip drawn too small.
-                    let at = grown(body, TURN_PAD as f32 * zoom);
-                    out.push(Draw::Tex {
-                        x: at.x.round(),
-                        y: at.y.round(),
-                        w: at.w,
-                        h: at.h,
-                        tex,
-                        alpha: 1.0,
-                    });
+            let (cw, ch) = (CORE_W as f32 * zoom, CORE_H as f32 * zoom);
+            let body = Placed {
+                x: board.x + (board.w - cw) / 2.0 + chip.shake,
+                y: board.y + (board.h - ch) / 2.0,
+                w: cw,
+                h: ch,
+            };
+            // The chip, and it is the same chip whichever core is in hand: a press changes
+            // the name on it and nothing about the chip itself.
+            if let Some(tex) = self.core_chip_face {
+                // Grown into the transparent border the face carries, so the padding is
+                // part of the draw and not a chip drawn too small.
+                let at = grown(body, TURN_PAD as f32 * zoom);
+                out.push(Draw::Tex {
+                    x: at.x.round(),
+                    y: at.y.round(),
+                    w: at.w,
+                    h: at.h,
+                    tex,
+                    alpha: 1.0,
+                });
+            }
+            // And the name on it. One name while nothing is changing, and two while it is:
+            // the one being left goes out the way the hand went, and the one being arrived
+            // at comes in from the other side.
+            let (nw, nh) = (NAME_W as f32 * zoom, NAME_H as f32 * zoom);
+            let nx = board.x + (board.w - nw) / 2.0 + chip.shake;
+            let ny = body.y + (ch - nh) / 2.0;
+            match chip.swap {
+                Some(swap) => {
+                    let (out_x, out_a, in_x, in_a) = swap_pose(&swap);
+                    self.draw_core_name(
+                        swap.from,
+                        nx + out_x * NAME_TRAVEL * zoom,
+                        ny,
+                        nw,
+                        nh,
+                        out_a,
+                        out,
+                    );
+                    self.draw_core_name(
+                        swap.to,
+                        nx + in_x * NAME_TRAVEL * zoom,
+                        ny,
+                        nw,
+                        nh,
+                        in_a,
+                        out,
+                    );
                 }
-                // And the name on it. One name while nothing is changing, and two while it is:
-                // the one being left goes out the way the hand went, and the one being arrived
-                // at comes in from the other side.
-                let (nw, nh) = (NAME_W as f32 * zoom, NAME_H as f32 * zoom);
-                let nx = board.x + (board.w - nw) / 2.0 + chip.shake;
-                let ny = body.y + (ch - nh) / 2.0;
-                match chip.swap {
-                    Some(swap) => {
-                        let (out_x, out_a, in_x, in_a) = swap_pose(&swap);
-                        self.draw_core_name(
-                            swap.from,
-                            nx + out_x * NAME_TRAVEL * zoom,
-                            ny,
-                            nw,
-                            nh,
-                            out_a,
-                            out,
-                        );
-                        self.draw_core_name(
-                            swap.to,
-                            nx + in_x * NAME_TRAVEL * zoom,
-                            ny,
-                            nw,
-                            nh,
-                            in_a,
-                            out,
-                        );
-                    }
-                    None => {
-                        if let Some(core) = chip.seated {
-                            self.draw_core_name(core, nx, ny, nw, nh, 1.0, out);
-                        }
+                None => {
+                    if let Some(core) = chip.seated {
+                        self.draw_core_name(core, nx, ny, nw, nh, 1.0, out);
                     }
                 }
             }

@@ -91,17 +91,15 @@ pub fn rom_marking_face(stem: &str, scale: f32) -> CartFace {
     face
 }
 
+/// The board a cart carries, and the shell it sits in.
+///
+/// Always the drawing below, and never a card's `board.png`. There was one — a card could supply
+/// its own board, with its chips drawn in and magenta marks for the code to fill — and it is gone
+/// for the same reason the rest of the art went: it was one machine's board, the Advance's, and
+/// every other machine's cart opened on it stretched to that cart's shape. Worse, a card that had
+/// one had **no** chip and no name drawn over it at all, the drawing having put the core's place
+/// into the art instead, so the picker opened showing a board with nothing on it to change.
 pub fn board_face(cart: &Cart, system: slot_store::System) -> CartFace {
-    // The card's own board, if it supplied one. Its chips are drawn into the art and its lamps
-    // are magenta for the code to fill, so none of what follows applies: no shell-coloured
-    // placeholders to paint and no ROM line to ink, because the card has already drawn both.
-    if let Some(art) = crate::cart_art::board_art() {
-        return CartFace {
-            rgba: art.rgba.clone(),
-            w: art.w,
-            h: art.h,
-        };
-    }
     let shell = shell_for(&cart.code);
     let (w, h) = board_size(system);
     // The back half of the shell, in this cart's own plastic and this machine's own shape.
@@ -557,7 +555,7 @@ const CHIP_BODY: [u8; 3] = [0x22, 0x24, 0x28];
 fn mix(a: [u8; 3], b: [u8; 3], t: f32) -> [u8; 3] {
     a.iter()
         .zip(b)
-        .map(|(&x, y)| ((x as f32 * (1.0 - t) + y as f32 * t).round() as u8))
+        .map(|(&x, y)| (x as f32 * (1.0 - t) + y as f32 * t).round() as u8)
         .collect::<Vec<u8>>()
         .try_into()
         .unwrap()

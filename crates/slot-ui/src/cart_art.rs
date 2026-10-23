@@ -65,25 +65,6 @@ pub struct Art {
     recess: [u8; 3],
 }
 
-/// One of the board's lamps: where it sits on the board, as a share of the board. The card
-/// draws them as magenta and the code fills them — one per socket, left to right, so index 0 is
-/// the mGBA socket and 1 the gpSP one, which is the order `Chip::across` counts in.
-pub struct Lamp {
-    pub x: f32,
-    pub y: f32,
-    pub w: f32,
-    pub h: f32,
-}
-
-/// The card's own board, for the view that opens a cart to change its core. The chips are drawn
-/// into it, so the only thing the code adds is the two lamps.
-pub struct BoardArt {
-    pub rgba: Vec<u8>,
-    pub w: u32,
-    pub h: u32,
-    pub lamps: Vec<Lamp>,
-}
-
 #[derive(Default)]
 pub struct CartArt {
     gb: Option<Art>,
@@ -93,7 +74,6 @@ pub struct CartArt {
     /// shell it shares with the Advance — same landscape shape — so a card that starts filing
     /// SFC games looks finished before anybody draws anything for it.
     sfc: Option<Art>,
-    board: Option<BoardArt>,
 }
 
 static ART: OnceLock<CartArt> = OnceLock::new();
@@ -122,72 +102,7 @@ pub fn load(root: &Path) -> CartArt {
         gbc: read(&dir.join("cart_gbc.png")),
         gba: read(&dir.join("cart_gba.png")),
         sfc: read(&dir.join("cart_sfc.png")),
-        board: read_board(&dir.join("board_gba.png")),
     }
-}
-
-/// The card's board, if it supplied one.
-pub fn board_art() -> Option<&'static BoardArt> {
-    ART.get()?.board.as_ref()
-}
-
-fn read_board(path: &Path) -> Option<BoardArt> {
-    let (rgba, w, h) = art::decode_rgba(path)?;
-    if w < 8 || h < 8 || rgba.len() < (w * h * 4) as usize {
-        return None;
-    }
-    let lamps = find_lamps(&rgba, w, h);
-    Some(BoardArt {
-        rgba,
-        w,
-        h,
-        lamps,
-    })
-}
-
-/// The magenta marks on the board, grouped into blocks and ordered left to right. Split on the
-/// columns that carry no mark at all, which is enough for lamps set into separate chips and
-/// avoids a flood fill for what is, at most, a handful of rectangles.
-fn find_lamps(rgba: &[u8], w: u32, h: u32) -> Vec<Lamp> {
-    let marked = |x: u32, y: u32| is_mark(&rgba[((y * w + x) * 4) as usize..][..4]);
-    let mut columns = vec![false; w as usize];
-    for y in 0..h {
-        for x in 0..w {
-            if marked(x, y) {
-                columns[x as usize] = true;
-            }
-        }
-    }
-    let mut out = Vec::new();
-    let mut run: Option<u32> = None;
-    for x in 0..=w {
-        let on = x < w && columns[x as usize];
-        match (run, on) {
-            (None, true) => run = Some(x),
-            (Some(x0), false) => {
-                let (mut y0, mut y1) = (u32::MAX, 0u32);
-                for y in 0..h {
-                    for xx in x0..x {
-                        if marked(xx, y) {
-                            y0 = y0.min(y);
-                            y1 = y1.max(y);
-                        }
-                    }
-                }
-                if y0 <= y1 {
-                    out.push(Lamp {
-                        x: x0 as f32 / w as f32,
-                        y: y0 as f32 / h as f32,
-                        w: (x - x0) as f32 / w as f32,
-                        h: (y1 - y0 + 1) as f32 / h as f32,
-                    });
-                }
-                run = None;
-            }
-            _ => {}
-        }
-    }
-    out
 }
 
 /// What the card has, for the startup log: a card with art that was refused has nothing else to
@@ -195,17 +110,13 @@ fn find_lamps(rgba: &[u8], w: u32, h: u32) -> Vec<Lamp> {
 pub fn summary() -> String {
     match ART.get() {
         None => "none".to_string(),
-        Some(all) => [("gb", &all.gb), ("gbc", &all.gbc), ("gba", &all.gba)]
+        Some(all) => [("gb", &all.gb), ("gbc", &all.gbc), ("gba", &all.gba), ("sfc", &all.sfc)]
             .iter()
             .map(|(name, art)| match art {
                 Some(a) if a.label.is_some() => format!("{name} {}x{}+label", a.w, a.h),
                 Some(a) => format!("{name} {}x{}", a.w, a.h),
                 None => format!("{name} -"),
             })
-            .chain(std::iter::once(match &all.board {
-                Some(b) => format!("board {}x{} {} lamps", b.w, b.h, b.lamps.len()),
-                None => "board -".to_string(),
-            }))
             .collect::<Vec<_>>()
             .join(" "),
     }
@@ -283,9 +194,6 @@ fn read(path: &Path) -> Option<Art> {
     })
 }
 
-fn is_mark(p: &[u8]) -> bool {
-    p[3] > 0 && p[0] > MARK_R && p[1] < MARK_G && p[2] > MARK_B
-}
 
 fn find_label(rgba: &[u8], w: u32, h: u32) -> Option<Label> {
     let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
@@ -313,6 +221,12 @@ fn find_label(rgba: &[u8], w: u32, h: u32) -> Option<Label> {
         }
     }
     Some(Label { x0, y0, x1, y1, mask })
+}
+
+/// The magenta the card paints where the label slot is. Board art had marks in this colour too,
+/// for the lamps the picker used to fill; that is gone, and this is the label's alone.
+fn is_mark(p: &[u8]) -> bool {
+    p[3] > 0 && p[0] > MARK_R && p[1] < MARK_G && p[2] > MARK_B
 }
 
 /// The shell's own brightness, ignoring the label slot.
