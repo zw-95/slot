@@ -252,6 +252,12 @@ impl EmuHandle {
         self.frames.latest()
     }
 
+    /// The same frame without taking it off the wire — see `Frames::peek`. This is how a board
+    /// that wants to show the game that is up gets a look at it without starving the screen.
+    pub fn peek_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
+        self.frames.peek()
+    }
+
     pub fn set_speed(&self, speed: Speed) {
         self.shared.speed.store(speed as u8, Ordering::Relaxed);
     }

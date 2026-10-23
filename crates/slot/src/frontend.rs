@@ -91,6 +91,15 @@ pub struct Frontend {
     /// The undo cap's label, which changes with what is on offer.
     undo_tex: Option<TexId>,
     switcher: Switcher,
+    /// The board of screen fits' three cells, one texture each and reused every time it opens.
+    fit_thumb_texes: Vec<Option<TexId>>,
+    /// Which frame those three were minted from, so they are minted once per opening and not once
+    /// per frame.
+    fit_thumb_key: Option<u64>,
+    /// The board of looks' cells, one texture per cell on the page that is up.
+    aperture_thumb_texes: Vec<Option<TexId>>,
+    /// Which frame and which page those were minted from.
+    aperture_thumb_key: Option<u64>,
     clocks: Clocks,
     about: AboutFace,
     /// The palette browser's names. A page is read one of two ways and the fields are that pair:
@@ -176,6 +185,10 @@ impl Frontend {
             core_built: None,
             undo_tex: None,
             switcher: Switcher::default(),
+            fit_thumb_texes: Vec::new(),
+            fit_thumb_key: None,
+            aperture_thumb_texes: Vec::new(),
+            aperture_thumb_key: None,
             clocks: Clocks::default(),
             about: AboutFace::default(),
             palette_texes: Vec::new(),
@@ -1019,6 +1032,21 @@ impl Frontend {
             &mut self.aperture_paged,
         );
         sync_overlay(self.session.app_mut(), compositor);
+        // The board of fits asks the renderer for the frame that is up, and the renderer is the
+        // only thing that can hand it over — so the answer is given here, between passes.
+        sync_shot(&mut self.session);
+        sync_fit_thumbs(
+            self.session.app_mut(),
+            compositor,
+            &mut self.fit_thumb_texes,
+            &mut self.fit_thumb_key,
+        );
+        sync_aperture_thumbs(
+            self.session.app_mut(),
+            compositor,
+            &mut self.aperture_thumb_texes,
+            &mut self.aperture_thumb_key,
+        );
         // The screen reflection: handed the overlay texture as its zone mask when the overlay
         // up is a reflective one, `None` otherwise. Set every frame with the rest of the state.
         compositor.set_reflection(if self.session.app().overlay_reflects() {
@@ -1342,6 +1370,79 @@ fn sync_palette_names(
 /// The same arrangement as `sync_palette_names`, and the same cost: the key is the page, so a turn
 /// of the page rasterises and every frame inside one is a comparison. The faces come from a pool
 /// sized once, since every name goes into a box the width of a cell.
+/// The frame a board asked to see.
+///
+/// A board that shows what a choice does to the picture has to show the picture that is up, and
+/// the frame belongs to the renderer: `Frames::latest` hands it over and only the render path may
+/// take it, so this asks for a **copy** (`peek`) instead. One copy per opening, which is nothing
+/// next to a frame dropped.
+fn sync_shot(session: &mut Session) {
+    if !session.app().want_shot() {
+        return;
+    }
+    if let Some((buf, w, h)) = session.peek_frame() {
+        session.app_mut().set_shot(buf, w, h);
+    }
+}
+
+/// The board of screen fits' three cells: the frame that is up, on the panel at each fit.
+///
+/// Minted when the board opens and when the frame under it changes, and at no other time — three
+/// scalings of a 240x160 frame is not work to do on the frame loop.
+/// The board of looks' cells, which are of the page that is up and of the frame under it.
+fn sync_aperture_thumbs(
+    app: &mut App,
+    compositor: &mut Compositor,
+    pool: &mut Vec<Option<TexId>>,
+    key: &mut Option<u64>,
+) {
+    let want = app.aperture_thumb_key();
+    if let Some(ids) = sync_thumbs(want, || app.aperture_thumb_faces(), compositor, pool, key) {
+        app.set_aperture_thumbs(ids);
+    }
+}
+
+fn sync_fit_thumbs(
+    app: &mut App,
+    compositor: &mut Compositor,
+    pool: &mut Vec<Option<TexId>>,
+    key: &mut Option<u64>,
+) {
+    let want = app.fit_thumb_key();
+    if let Some(ids) = sync_thumbs(want, || app.fit_thumb_faces(), compositor, pool, key) {
+        app.set_fit_thumbs(ids);
+    }
+}
+
+/// The two boards whose cells are pictures share this: mint them when the key changes, into the
+/// pool's own slots so the pool stops growing after the first opening, and hand back nothing at
+/// all when there is nothing to mint — a cell falls back to its swatch rather than going black.
+///
+/// `None` back means nothing changed and the caller should leave the app alone; `Some` — even an
+/// empty one — is the new row of cells.
+fn sync_thumbs(
+    want: Option<u64>,
+    faces: impl FnOnce() -> Option<Vec<slot_ui::CartFace>>,
+    compositor: &mut Compositor,
+    pool: &mut Vec<Option<TexId>>,
+    key: &mut Option<u64>,
+) -> Option<Vec<(TexId, u32, u32)>> {
+    if *key == want {
+        return None;
+    }
+    *key = want;
+    let faces = want.and_then(|_| faces()).unwrap_or_default();
+    while pool.len() < faces.len() {
+        pool.push(None);
+    }
+    let mut ids = Vec::with_capacity(faces.len());
+    for (i, face) in faces.iter().enumerate() {
+        let id = upload_rgba(compositor, &mut pool[i], face.w, face.h, &face.rgba);
+        ids.push((id, face.w, face.h));
+    }
+    Some(ids)
+}
+
 fn sync_aperture_names(
     app: &mut App,
     compositor: &mut Compositor,

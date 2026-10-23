@@ -100,6 +100,28 @@ impl Frames {
         })
     }
 
+    /// The frame on the wire, **copied rather than taken**: `xrgb8888`, and the size the core
+    /// actually produced.
+    ///
+    /// `latest` hands the buffer over and is the render path's alone — it takes one frame a frame
+    /// and a second taker would starve the screen. Anything that only wants to *look* at the
+    /// picture has to pay for a copy instead, which is why this exists: the board of screen fits
+    /// shows what each fit does to the game that is up, and it is opened once per press, so one
+    /// copy of 240x160 per opening is nothing next to a frame dropped.
+    pub fn peek(&self) -> Option<(Vec<u8>, u32, u32)> {
+        let i = self.lock();
+        let buf = i.ready.as_ref()?;
+        let (w, h) = i.ready_dims;
+        if w == 0 || h == 0 {
+            return None;
+        }
+        let n = (w as usize) * (h as usize) * 4;
+        if buf.len() < n {
+            return None;
+        }
+        Some((buf[..n].to_vec(), w, h))
+    }
+
     /// Non consuming. The only safe way to ask whether a frame is waiting.
     pub fn is_ready(&self) -> bool {
         self.lock().ready.is_some()

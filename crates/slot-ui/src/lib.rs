@@ -25,6 +25,7 @@ mod slot_chrome;
 mod status;
 mod sticker;
 pub mod text;
+pub mod thumb;
 mod toast;
 
 pub use backdrop::{draw_backdrop, wallpaper_face};
@@ -63,8 +64,9 @@ pub use icon::{icon_box, icon_face, Icon};
 pub use letters::Letters;
 pub use palette::Mode;
 pub use palette_browser::{
-    cell_width as palette_cell_w, draw as draw_palette_browser, name_face as palette_name_face,
-    name_height as palette_name_h, pages_of as palette_pages, rows_of as palette_rows,
+    cell_height as palette_cell_h, cell_width as palette_cell_w, draw as draw_palette_browser,
+    name_face as palette_name_face, name_height as palette_name_h, pages_of as palette_pages,
+    rows_of as palette_rows,
     Swatch as PaletteSwatch, View as PaletteView, COLS as PALETTE_COLS, FOOT_PX as PALETTE_FOOT_PX,
     PER_PAGE as PALETTE_PER_PAGE, ROWS as PALETTE_ROWS, STOPS as PALETTE_STOPS,
 };

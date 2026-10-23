@@ -581,6 +581,11 @@ impl DisplayFilter {
     /// The three fits, in the order the key walks them and the board shows them.
     pub const FITS: [Fit; 3] = Fit::ALL;
 
+    /// The one preset that is **no look at all**: the mask left flat, the screen with nothing laid
+    /// over it. Every ring begins with it, and the board draws its cell black rather than as the
+    /// game unmasked — see `App::aperture_thumb_faces`.
+    pub const OFF: u8 = 0;
+
     /// What a fit is called on the board. The three are told apart by how much of the panel the
     /// picture takes, so that is what the names say: the whole-number one is the count of panel
     /// pixels per source pixel it is built on, and the other two are what they do to the frame.
@@ -1356,6 +1361,27 @@ pub struct App {
     /// The three fits' names, one face each in ring order, rasterised at boot like the power
     /// menu's rows — the three never change, so there is nothing to re-rasterise.
     fit_names: Vec<(TexId, u32, u32)>,
+    /// **The game that is up, as the boards show it**: one frame, RGBA at the size the core
+    /// produced, taken when a board opened and not before.
+    ///
+    /// "每次弹出菜单时，实时截取" — a board that shows what a choice does to the picture has to
+    /// show *this* picture, and a thumbnail of last week's game, or of nothing at all, would be a
+    /// board that lies about the choice it is offering. Taken off the wire without taking it off
+    /// the wire: see `Frames::peek`.
+    shot: Option<(Vec<u8>, u32, u32)>,
+    /// A board asking for one. The frame is the renderer's to hand out, so the app does not reach
+    /// for it — it leaves this up, and the frontend, which is the thing that has the frame, fills
+    /// it in on the next pass.
+    want_shot: bool,
+    /// How many shots have been taken. What the frontend keys the thumbnails off: a board opened
+    /// on a new frame is new thumbnails, and one opened twice on the same game is not.
+    shot_seq: u64,
+    /// The three fits' thumbnails: the frame that is up, on the panel at each fit. Empty until the
+    /// frontend has minted them, which is the frame after the board opens — see `View::thumbs`.
+    fit_thumbs: Vec<(TexId, u32, u32)>,
+    /// The board of looks' cells, one face per entry **on the page that is up**: the frame under
+    /// each of this machine's apertures. Empty for the same reason and with the same fallback.
+    aperture_thumbs: Vec<(TexId, u32, u32)>,
     /// The audio latency profile, chosen on the shelf with SELECT+VOL. Read from
     /// `System/audio.txt` at boot and written back whenever it changes.
     audio: Profile,
@@ -1521,6 +1547,11 @@ impl App {
             aperture_names: Vec::new(),
             fit_board: None,
             fit_names: Vec::new(),
+            shot: None,
+            want_shot: false,
+            shot_seq: 0,
+            fit_thumbs: Vec::new(),
+            aperture_thumbs: Vec::new(),
             pal_name: None,
         }
     }
@@ -5290,6 +5321,7 @@ impl App {
             rows: slot_ui::palette_rows(per),
             swatches: &swatches,
             names: &self.pal_names,
+            thumbs: &[],
             foot: self.pal_name,
         };
         slot_ui::draw_palette_browser(&view, out);
@@ -5327,10 +5359,18 @@ impl App {
         // with A and lose nothing.
         self.aperture_page = at / APERTURE_PER_PAGE;
         self.aperture = Some(at - self.aperture_page * APERTURE_PER_PAGE);
+        // And asking for the frame, because each cell is what this look does to the game that is
+        // up: the table under the caret, laid over this picture rather than over a swatch of the
+        // mask's own colours.
+        self.want_shot = true;
     }
 
     fn close_aperture_browser(&mut self) {
         self.aperture = None;
+        self.want_shot = false;
+        // The cells go with it, for the reason the fit board's do: they are of a frame that has
+        // moved on, and the next opening takes its own.
+        self.aperture_thumbs.clear();
     }
 
     /// How many entries the board's table has: the machine's own ring, which is what a machine can
@@ -5442,6 +5482,7 @@ impl App {
             rows: slot_ui::palette_rows(APERTURE_PER_PAGE),
             swatches: &swatches,
             names: &self.aperture_names,
+            thumbs: &self.aperture_thumbs,
             foot: None,
         };
         slot_ui::draw_palette_browser(&view, out);
@@ -5464,10 +5505,135 @@ impl App {
         // the caret is there to mark the one already chosen, so the board can be put away with A
         // and lose nothing.
         self.fit_board = Some(Self::fit_index(self.display.fit) as usize);
+        // And asking for the frame, because the board's three cells are the game that is up at
+        // each fit — a board that showed last week's picture would be lying about the choice.
+        self.want_shot = true;
     }
 
     fn close_fit_board(&mut self) {
         self.fit_board = None;
+        self.want_shot = false;
+        // The thumbnails go with it: they are of a frame that has moved on, and the next opening
+        // takes its own.
+        self.fit_thumbs.clear();
+    }
+
+    /// Whether a board is waiting on the frame that is up. The frontend answers with `set_shot`.
+    pub fn want_shot(&self) -> bool {
+        self.want_shot
+    }
+
+    /// The frame that is up, for the frontend to hand over. `xrgb8888`, which is libretro's frame
+    /// buffer and the same thing the renderer takes — the app cannot take it itself without
+    /// starving the screen, so the frontend, which owns the render pass, copies it.
+    pub fn set_shot(&mut self, xrgb: Vec<u8>, w: u32, h: u32) {
+        self.want_shot = false;
+        self.shot_seq += 1;
+        // `xrgb8888` is little endian, so its bytes arrive B, G, R, X. The panels want RGBA.
+        let n = (w as usize) * (h as usize);
+        if w == 0 || h == 0 || xrgb.len() < n * 4 {
+            self.shot = None;
+            return;
+        }
+        let mut rgba = vec![0u8; n * 4];
+        for p in 0..n {
+            rgba[p * 4] = xrgb[p * 4 + 2];
+            rgba[p * 4 + 1] = xrgb[p * 4 + 1];
+            rgba[p * 4 + 2] = xrgb[p * 4];
+            rgba[p * 4 + 3] = 255;
+        }
+        self.shot = Some((rgba, w, h));
+        self.fit_thumbs.clear();
+    }
+
+    /// What the board's thumbnails are made of, which is how the frontend knows to mint them:
+    /// `None` while there is nothing to draw, and a new number for every new frame.
+    pub fn fit_thumb_key(&self) -> Option<u64> {
+        match (self.fit_board, self.shot.as_ref()) {
+            (Some(_), Some(_)) => Some(self.shot_seq),
+            _ => None,
+        }
+    }
+
+    /// The aperture board's cells: the frame that is up **under each look this machine can
+    /// wear**, in the order the ring has them and only for the page that is up.
+    ///
+    /// What the board is for is telling one look from another, and a swatch of the mask's own
+    /// nine colours says what the mask is made of rather than what it does to a picture. The game
+    /// that is up is the picture it will be laid over, so that is what the cell shows — and the
+    /// one entry with no look at all (`OFF`) is drawn black, because an unmasked picture is not a
+    /// look to choose and would otherwise be a cell saying nothing next to the ones that are.
+    pub fn aperture_thumb_faces(&self) -> Option<Vec<slot_ui::CartFace>> {
+        let _board = self.aperture?;
+        let (rgba, w, h) = self.shot.as_ref()?;
+        let ring = DisplayFilter::mask_ring(self.current_machine());
+        let total = ring.len();
+        let base = (self.aperture_page * APERTURE_PER_PAGE).min(total);
+        let n = slot_store::len_on(self.aperture_page, total, APERTURE_PER_PAGE);
+        let (cw, ch) = (
+            slot_ui::palette_cell_w(),
+            slot_ui::palette_cell_h(slot_ui::palette_rows(APERTURE_PER_PAGE), true),
+        );
+        Some(
+            (base..base + n)
+                .map(|i| {
+                    let preset = ring[i.min(total - 1)];
+                    if preset == DisplayFilter::OFF {
+                        slot_ui::thumb::off_thumb(cw, ch)
+                    } else {
+                        slot_ui::thumb::mask_thumb(
+                            Some((rgba, *w, *h)),
+                            self.display.preset_mask(preset),
+                            cw,
+                            ch,
+                        )
+                    }
+                })
+                .collect(),
+        )
+    }
+
+    /// What the aperture board's cells are made of: `None` while there is nothing to draw, and a
+    /// new number for every new frame **or a new page** — the cells are of the page that is up.
+    pub fn aperture_thumb_key(&self) -> Option<u64> {
+        match (self.aperture, self.shot.as_ref()) {
+            // The page is in the key as well as the caret: the cells are of the page that is up, so
+            // a page turned is a whole new row of them.
+            (Some(cursor), Some(_)) => {
+                Some(self.shot_seq * 4096 + self.aperture_page as u64 * 64 + cursor as u64)
+            }
+            _ => None,
+        }
+    }
+
+    pub fn set_aperture_thumbs(&mut self, thumbs: Vec<(TexId, u32, u32)>) {
+        self.aperture_thumbs = thumbs;
+    }
+
+    /// The three cells: the frame that is up, on the panel at each fit, at the size a cell is.
+    pub fn fit_thumb_faces(&self) -> Option<Vec<slot_ui::CartFace>> {
+        let _board = self.fit_board?;
+        let (rgba, w, h) = self.shot.as_ref()?;
+        let system = self.screen_system();
+        Some(
+            DisplayFilter::FITS
+                .iter()
+                .map(|fit| {
+                    slot_ui::thumb::panel_thumb(
+                        Some((rgba, *w, *h)),
+                        system.screen_rect(*fit),
+                        slot_ui::palette_cell_w(),
+                        // One row, and named — which is exactly the shape the board is drawn at,
+                        // so a thumbnail arrives at the size it is drawn at and is not stretched.
+                        slot_ui::palette_cell_h(1, true),
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub fn set_fit_thumbs(&mut self, thumbs: Vec<(TexId, u32, u32)>) {
+        self.fit_thumbs = thumbs;
     }
 
     /// The board owns every button on the game's side while it is up, exactly as the other two
@@ -5524,6 +5690,7 @@ impl App {
             swatches: &swatches,
             names: &self.fit_names,
             foot: None,
+            thumbs: &self.fit_thumbs,
         };
         slot_ui::draw_palette_browser(&view, out);
     }

@@ -128,6 +128,12 @@ impl Session {
         self.emu.as_ref().and_then(|e| e.latest_frame())
     }
 
+    /// The frame that is up, **copied**: for boards that want to show the game rather than draw
+    /// it. See `Frames::peek`.
+    pub fn peek_frame(&self) -> Option<(Vec<u8>, u32, u32)> {
+        self.emu.as_ref().and_then(|e| e.peek_frame())
+    }
+
     /// A cart in the slot is a core running, so this is also "is there a game layer".
     pub fn has_core(&self) -> bool {
         self.emu.is_some()

@@ -342,6 +342,13 @@ pub const fn name_height() -> u32 {
     NAME_H
 }
 
+/// A cell's height, for the same reason as its width: a thumbnail minted for one has to be minted
+/// at the size it will be drawn at, and the size is the panel's arithmetic rather than a number
+/// the caller can know. `named` is whether the cells carry names of their own — see `View::names`.
+pub fn cell_height(rows: usize, named: bool) -> u32 {
+    cell_h(rows, named).round() as u32
+}
+
 /// The height of a cell: whatever the panel has left once the names are paid for.
 ///
 /// `named` is whether the cells carry names of their own — see `View::names`. A named page fills:
@@ -428,6 +435,15 @@ pub struct View<'a> {
     /// The entry under the caret, for the pages that have no per-cell names. `None` when the
     /// cells carry their own, which is every colour machine.
     pub foot: Option<(TexId, u32, u32)>,
+    /// A cell's own **picture**, one face per entry and in the same order — empty for every table
+    /// but one.
+    ///
+    /// The board of screen fits is that one. Its entries are not colours: what tells them apart is
+    /// how much of the panel the picture takes and which way the black runs, and a swatch of
+    /// colours cannot say that. A cell that has a picture is drawn with it instead of its swatch,
+    /// and one that does not has its swatch — the board is up a frame before the frontend has
+    /// minted them, and a shape without a picture beats an empty cell.
+    pub thumbs: &'a [(TexId, u32, u32)],
 }
 
 impl View<'_> {
@@ -494,31 +510,46 @@ pub fn draw(v: &View, out: &mut Vec<Draw>) {
                 colour: opening(),
             });
         }
-        // One band a stop, laid edge to edge in the cell's own grid: the last column and the last
-        // row take whatever the arithmetic left over rather than their own share, so a cell can
-        // never end a pixel short. A Game Boy's four shades are one row of four; a colour grade's
-        // chart is eight hues across two rows (`SWEEP`).
-        let stops = swatch.stops();
-        let (cols, rows_in) = (swatch.cols(), swatch.rows());
-        let (bw, bh) = (cw / cols as f32, ch / rows_in as f32);
-        for (b, c) in stops.iter().enumerate() {
-            let (col, row) = (b % cols, b / cols);
-            if row >= rows_in {
-                break;
-            }
-            let (bx, by) = (x + col as f32 * bw, y + row as f32 * bh);
-            out.push(Draw::Rect {
-                x: bx,
-                y: by,
-                w: if col + 1 == cols { x + cw - bx } else { bw },
-                h: if row + 1 == rows_in { y + ch - by } else { bh },
-                colour: [
-                    c[0] as f32 / 255.0,
-                    c[1] as f32 / 255.0,
-                    c[2] as f32 / 255.0,
-                    1.0,
-                ],
+        // A cell carrying a picture of its own is drawn with it, filling the cell: the picture
+        // already *is* the entry, and bands over it would be a second, louder thing to read. Only
+        // the board of screen fits has any.
+        let thumbed = v.thumbs.get(i).map(|&(tex, ..)| tex);
+        if let Some(tex) = thumbed {
+            out.push(Draw::Tex {
+                x,
+                y,
+                w: cw,
+                h: ch,
+                tex,
+                alpha: 1.0,
             });
+        } else {
+            // One band a stop, laid edge to edge in the cell's own grid: the last column and the
+            // last row take whatever the arithmetic left over rather than their own share, so a
+            // cell can never end a pixel short. A Game Boy's four shades are one row of four; a
+            // colour grade's chart is eight hues across two rows (`SWEEP`).
+            let stops = swatch.stops();
+            let (cols, rows_in) = (swatch.cols(), swatch.rows());
+            let (bw, bh) = (cw / cols as f32, ch / rows_in as f32);
+            for (b, c) in stops.iter().enumerate() {
+                let (col, row) = (b % cols, b / cols);
+                if row >= rows_in {
+                    break;
+                }
+                let (bx, by) = (x + col as f32 * bw, y + row as f32 * bh);
+                out.push(Draw::Rect {
+                    x: bx,
+                    y: by,
+                    w: if col + 1 == cols { x + cw - bx } else { bw },
+                    h: if row + 1 == rows_in { y + ch - by } else { bh },
+                    colour: [
+                        c[0] as f32 / 255.0,
+                        c[1] as f32 / 255.0,
+                        c[2] as f32 / 255.0,
+                        1.0,
+                    ],
+                });
+            }
         }
         // The cell's own name, under it and in its own column.
         if let Some(&(tex, w, h)) = v.names.get(i) {
