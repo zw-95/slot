@@ -20,12 +20,19 @@ const VIDEO_BYTES: usize = (GBA_W * GBA_H * 4) as usize;
 /// the first one's machine.
 static LIVE: AtomicBool = AtomicBool::new(false);
 
-/// The buildbot core is compiled `COLOR_16_BIT`, so it only ever offers RGB565 and the
-/// host converts. A core built the other way needs no conversion.
-#[derive(Copy, Clone, PartialEq, Eq)]
+/// A core tells the host which of these its frames are, and the host converts to the XRGB8888
+/// everything downstream wants. All three, not just the two a Game Boy Advance core asks for:
+/// 0RGB1555 is what the older 16-bit cores — Snes9x's 2002/2005/2010 branches among them —
+/// render in, and it is the format libretro says a core falls back to when a host refuses the
+/// one it asked for. Refusing it does not leave the core with nothing to draw; it leaves the
+/// host reading a picture laid out another way, which on screen is a screenful of wrong
+/// colours rather than a clean failure.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum PixelFormat {
     Xrgb8888,
     Rgb565,
+    /// 16 bits: one unused, then five each of red, green and blue.
+    Rgb1555,
 }
 
 /// Everything the core's callbacks read or write. Lives in a `Box` so its address survives
@@ -123,6 +130,7 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             let want = match *(data as *const c_uint) {
                 PIXEL_FORMAT_XRGB8888 => PixelFormat::Xrgb8888,
                 PIXEL_FORMAT_RGB565 => PixelFormat::Rgb565,
+                PIXEL_FORMAT_0RGB1555 => PixelFormat::Rgb1555,
                 _ => return false,
             };
             with_host(|h| h.format = want).is_some()
@@ -418,6 +426,22 @@ unsafe extern "C" fn video_refresh(
                         let o = row + x * 4;
                         h.video[o] = (b << 3) | (b >> 2);
                         h.video[o + 1] = (g << 2) | (g >> 4);
+                        h.video[o + 2] = (r << 3) | (r >> 2);
+                        h.video[o + 3] = 0;
+                    }
+                }
+                // Five bits a channel rather than six in the green, and a bit going spare at
+                // the top. Widened the same way: three shifts up and the high bits repeated
+                // into the gap, so full-on is full-on rather than a near-miss.
+                PixelFormat::Rgb1555 => {
+                    for x in 0..cols {
+                        let p = ptr::read_unaligned((src as *const u16).add(x));
+                        let r = ((p >> 10) & 0x1f) as u8;
+                        let g = ((p >> 5) & 0x1f) as u8;
+                        let b = (p & 0x1f) as u8;
+                        let o = row + x * 4;
+                        h.video[o] = (b << 3) | (b >> 2);
+                        h.video[o + 1] = (g << 3) | (g >> 2);
                         h.video[o + 2] = (r << 3) | (r >> 2);
                         h.video[o + 3] = 0;
                     }
@@ -881,6 +905,41 @@ mod tests {
             options,
             options_dirty,
         })
+    }
+
+    /// libretro has three pixel formats and the host has to take all three, whatever its own
+    /// cores happen to render in. 0RGB1555 is the one that used to be refused, and refusing it
+    /// is the worse answer: a core told no does not stop drawing, it draws in the layout
+    /// libretro says to fall back to, and the host goes on reading the picture the way it was
+    /// reading it. What comes out is a screenful of wrong colours, which reads as a broken core
+    /// rather than as a host that said no.
+    #[test]
+    fn every_libretro_pixel_format_is_accepted() {
+        for (asked, want) in [
+            (PIXEL_FORMAT_0RGB1555, PixelFormat::Rgb1555),
+            (PIXEL_FORMAT_XRGB8888, PixelFormat::Xrgb8888),
+            (PIXEL_FORMAT_RGB565, PixelFormat::Rgb565),
+        ] {
+            let mut host = host_with(HashMap::new(), false);
+            let mut format = asked;
+            let ok = unsafe {
+                let _active = Active::bind(&mut host);
+                environment(SET_PIXEL_FORMAT, &mut format as *mut _ as *mut c_void)
+            };
+            assert!(ok, "the host refused format {asked}");
+            assert_eq!(host.format, want);
+        }
+        // A number libretro does not give a meaning is still refused, rather than read as the
+        // closest one: a core asking for something unknown gets a clear no and keeps whatever
+        // it was already doing.
+        let mut host = host_with(HashMap::new(), false);
+        let mut format = 3u32;
+        let ok = unsafe {
+            let _active = Active::bind(&mut host);
+            environment(SET_PIXEL_FORMAT, &mut format as *mut _ as *mut c_void)
+        };
+        assert!(!ok, "a format libretro does not have was accepted");
+        assert_eq!(host.format, PixelFormat::Xrgb8888, "and it changed the host");
     }
 
     #[test]

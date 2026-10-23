@@ -169,10 +169,18 @@ impl System {
             // long list costs nothing but travelling: what it does cost is that a player has to
             // walk to find out what is on it.
             System::Sfc => &[
+                // muOS's own default for the machine, and so this one's: that archive's
+                // `assign/Nintendo SNES - SFC/global.ini` reads `default = snes9x`. A machine's
+                // default taken from the same place its cores came from is a default somebody
+                // picked for these cores on this class of handheld, rather than one picked
+                // here for no better reason than that it was first.
+                Core::Snes9x,
+                // Which was the default before, and is the only core of the thirteen that has
+                // actually been run on the device. Second rather than dropped: it is the
+                // answer if `snes9x` turns out not to be.
                 Core::Supafaust,
                 Core::Snes9x2010,
                 Core::Snes9x2005Plus,
-                Core::Snes9x,
                 Core::Snes9xNext,
                 Core::Snes9x2002,
                 Core::MesenS,

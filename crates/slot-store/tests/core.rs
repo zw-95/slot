@@ -15,7 +15,7 @@ fn absent_file_means_everything_defaults() {
     let d = root_with(None);
     assert!(read_selected_cores(d.path()).is_empty());
     assert_eq!(core_for(d.path(), System::Gba, "Emerald"), Core::Mgba);
-    assert_eq!(core_for(d.path(), System::Sfc, "Contra"), Core::Supafaust);
+    assert_eq!(core_for(d.path(), System::Sfc, "Contra"), System::Sfc.default_core());
 }
 
 #[test]
@@ -91,7 +91,7 @@ fn a_bare_stem_is_still_the_advances() {
     let d = root_with(Some("Emerald = gpsp\n"));
     assert_eq!(core_for(d.path(), System::Gba, "Emerald"), Core::Gpsp);
     // And is nobody else's: a Super Nintendo cart of the same name has its own line to write.
-    assert_eq!(core_for(d.path(), System::Sfc, "Emerald"), Core::Supafaust);
+    assert_eq!(core_for(d.path(), System::Sfc, "Emerald"), System::Sfc.default_core());
 }
 
 /// A hand edited file is going to name cores from the wrong machine eventually. That is a
@@ -99,7 +99,7 @@ fn a_bare_stem_is_still_the_advances() {
 #[test]
 fn a_core_the_machine_cannot_run_is_not_an_answer() {
     let d = root_with(Some("SFC/Contra = mgba\nGB/Contra = gpsp\nGBC/Contra = gpsp\n"));
-    assert_eq!(core_for(d.path(), System::Sfc, "Contra"), Core::Supafaust);
+    assert_eq!(core_for(d.path(), System::Sfc, "Contra"), System::Sfc.default_core());
     assert_eq!(core_for(d.path(), System::Gb, "Contra"), Core::Mgba);
     assert_eq!(core_for(d.path(), System::Gbc, "Contra"), Core::Mgba);
 }
@@ -123,6 +123,18 @@ fn every_machine_offers_at_least_one_core_and_its_first_is_its_default() {
     assert_eq!(System::Gb.cores().len(), 1);
     assert!(System::Gba.cores().len() >= 2);
     assert!(System::Sfc.cores().len() >= 2);
+}
+
+/// A machine's default is the one muOS ships as its own for that machine, read out of the
+/// `global.ini` in the archive the cores came from — `default = snes9x` for the Super Nintendo,
+/// `default = mgba` for the Advance. Named here rather than left to the order of a list, so
+/// reordering the list for the picker's sake cannot quietly move a machine's default with it.
+#[test]
+fn a_machines_default_is_the_one_muos_ships() {
+    assert_eq!(System::Sfc.default_core(), Core::Snes9x);
+    assert_eq!(System::Gba.default_core(), Core::Mgba);
+    // And it is the first of what the machine offers, which is what `default_core` is.
+    assert_eq!(System::Sfc.default_core(), System::Sfc.cores()[0]);
 }
 
 #[test]
