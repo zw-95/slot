@@ -1,4 +1,5 @@
 mod atomic;
+pub mod borders;
 mod core;
 mod gba;
 mod migrate;
