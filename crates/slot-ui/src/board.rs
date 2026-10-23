@@ -186,43 +186,63 @@ fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
     box_fill(&mut face, 0, 0, w as i32, h as i32, base, 255);
     box_line(&mut face, 2, 2, w as i32 - 2, h as i32 - 2, SILK, 255);
 
-    // Copper: traces on a grid, each ending in a pad, coming in from the left and down from the
-    // top and stopping short of the middle where the socket is.
-    let ink = mix(COPPER, base, 0.30);
-    // Seeded on the machine, so two machines sharing a board size still get boards that do not
-    // read as the same drawing: the Super Nintendo's row is the Advance's, and its board should
-    // not look like the Advance's with a different ROM on it.
-    let mut k = 0;
-    let mut y = 9;
-    while y < h as i32 - 14 {
-        let x1 = (w as f32 * (0.16 + 0.20 * wobble(k, 7 + machine))) as i32;
-        hline(&mut face, 7, x1, y, ink, 255);
-        disc(&mut face, x1, y, 2.5, PAD, 255);
-        k += 1;
-        y += 15;
-    }
-    let mut x = 9;
-    while x < w as i32 - 14 {
-        let y1 = (h as f32 * (0.18 + 0.26 * wobble(k, 11 + machine))) as i32;
-        vline(&mut face, x, 7, y1, ink, 255);
-        disc(&mut face, x, y1, 2.5, PAD, 255);
-        k += 1;
-        x += 15;
+    // Where the socket is, which is where every trace on this board is going.
+    let s = w as f32 / BOARD_W as f32;
+    let (sw, sh) = ((CORE_W as f32 * s) as i32, (CORE_H as f32 * s) as i32);
+    let (sx, sy) = ((w as i32 - sw) / 2, (h as i32 - sh) / 2);
+
+    // The edge connector: gold fingers along the bottom, which is the end that goes in first and
+    // the end every trace starts from.
+    let gy = h as i32 - 10;
+    let fingers = ((w as i32 - 14) / 9).max(1);
+    for i in 0..fingers {
+        box_fill(&mut face, 7 + i * 9, gy, 12 + i * 9, h as i32 - 3, GOLD, 255);
     }
 
-    // The edge connector: gold fingers along the bottom, which is the end that goes in first.
-    let gy = h as i32 - 10;
-    let mut fx = 7;
-    while fx < w as i32 - 7 {
-        box_fill(&mut face, fx, gy, fx + 5, h as i32 - 3, GOLD, 255);
-        fx += 9;
+    // Copper, and it runs **from the fingers to the chip**: each trace leaves a finger, climbs to
+    // a height of its own, runs across to the leg on the chip it is meant for, and climbs into it,
+    // ending in a pad at the chip's foot. A fan coming in from the edge to the thing in the middle,
+    // which is what a board under a chip looks like. What it replaced was a grid of lines from
+    // nowhere to nowhere, and a board is not a grid: a trace is a way from one thing to another.
+    //
+    // Seeded on the machine, so two machines sharing a board size still get boards that do not read
+    // as the same drawing: the Super Nintendo's row is the Advance's, and its board should not look
+    // like the Advance's with a different ROM on it.
+    let ink = mix(COPPER, base, 0.30);
+    let n = (w / 30).max(5);
+    let lo = sy + sh + 6;
+    let hi = (gy - 5).max(lo + 1);
+    for i in 0..n {
+        // This trace's finger, its leg on the chip, and the height it runs across at.
+        let fx = 7 + (i as i32 * fingers) / n as i32 * 9 + 2;
+        let tx = sx + (sw as f32 * (i as f32 + 0.5) / n as f32) as i32;
+        let yb = lo + ((hi - lo) as f32 * (0.15 + 0.75 * wobble(i, 7 + machine))) as i32;
+        vline(&mut face, fx, yb, gy, ink, 255);
+        hline(&mut face, fx.min(tx), fx.max(tx) + 1, yb, ink, 255);
+        vline(&mut face, tx, sy + sh, yb, ink, 255);
+        disc(&mut face, tx, sy + sh, 2.0, PAD, 255);
+    }
+
+    // Where the ROM sits, for the bus to it and for the package itself.
+    let (rx, ry, rw, rh) = rom_at(w);
+
+    // And the bus between the chip and the ROM, on boards where there is room for one: two traces
+    // out of the package's long side, down to the chip's level, ending in pads the way the
+    // fingers' traces do. A portrait board's ROM sits too close to the socket for any wire between
+    // them, and a crowded board is allowed to be simply crowded.
+    if rx - (sx + sw) > 30 {
+        for i in 0..2u32 {            let fy = ry + rh / 2 + i as i32 * 10;
+            let mx = rx - 8 - i as i32 * 6;
+            hline(&mut face, mx, rx, fy, ink, 255);
+            vline(&mut face, mx, fy, sy + sh / 2, ink, 255);
+            disc(&mut face, mx, sy + sh / 2, 2.0, PAD, 255);
+        }
     }
 
     // The mask ROM, in the top corner away from the socket: a black package with pins down both
     // long sides, and the game's marking inked onto it by the caller. It sat where the board art
     // had it, which is under the middle of the board now that the core sits there — the chip was
     // drawing straight over the game's own name.
-    let (rx, ry, rw, rh) = rom_at(w);
     for i in 0..8 {
         let py = ry + 4 + i * (rh - 8) / 8;
         box_fill(&mut face, rx - 5, py, rx, py + 4, PIN, 255);
@@ -231,18 +251,8 @@ fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
     round_box(&mut face, rx, ry, rx + rw, ry + rh, 3, ROM_BODY, 255);
 
     // The socket: its outline in silkscreen, so the chip reads as seated in something rather than
-    // floating over the traces.
-    let s = w as f32 / BOARD_W as f32;
-    let (sw, sh) = ((CORE_W as f32 * s) as i32, (CORE_H as f32 * s) as i32);
-    box_line(
-        &mut face,
-        (w as i32 - sw) / 2 - 5,
-        (h as i32 - sh) / 2 - 5,
-        (w as i32 - sw) / 2 + sw + 5,
-        (h as i32 - sh) / 2 + sh + 5,
-        SILK,
-        255,
-    );
+    // floating over the board, and so the pads its traces end in have somewhere to arrive.
+    box_line(&mut face, sx - 5, sy - 5, sx + sw + 5, sy + sh + 5, SILK, 255);
     face
 }
 
