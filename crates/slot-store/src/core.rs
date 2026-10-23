@@ -65,6 +65,11 @@ pub enum Core {
     /// Snes9x's very old Chimera branch. On the card, and the least of these by some distance,
     /// but it costs nothing to leave it in the list.
     ChimeraSnes,
+    /// FCEUmm, the Family Computer core: muOS's own default for the machine — `default =
+    /// fceumm` in that archive's global.ini — and the only NES core worth the space on a
+    /// handheld this size. The one entry on its machine's list, so the machine opens no
+    /// picker: a question with one answer is not a question.
+    Fceumm,
 }
 
 impl Core {
@@ -72,7 +77,7 @@ impl Core {
     /// `migrate_states` walks this rather than spelling the variant list out a second time,
     /// so a third core added here does not also have to be remembered at every call site
     /// that needs to tell a core's own directory apart from a cart's.
-    pub const ALL: [Core; 22] = [
+    pub const ALL: [Core; 23] = [
         Core::Mgba,
         Core::Gpsp,
         Core::Gambatte,
@@ -95,6 +100,7 @@ impl Core {
         Core::BsnesMercuryPerformance,
         Core::BsnesCplusplus98,
         Core::ChimeraSnes,
+        Core::Fceumm,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -123,6 +129,7 @@ impl Core {
             Core::BsnesMercuryPerformance => "bsnes_mercury_performance",
             Core::BsnesCplusplus98 => "bsnes_cplusplus98",
             Core::ChimeraSnes => "chimerasnes",
+            Core::Fceumm => "fceumm",
         }
     }
 
@@ -160,6 +167,7 @@ impl Core {
             Core::BsnesMercuryPerformance => "bsnes Mercury",
             Core::BsnesCplusplus98 => "bsnes C++98",
             Core::ChimeraSnes => "ChimeraSNES",
+            Core::Fceumm => "FCEUmm",
         }
     }
 
@@ -187,6 +195,7 @@ impl Core {
             "bsnes_mercury_performance" | "bsnes_mercury" => Some(Core::BsnesMercuryPerformance),
             "bsnes_cplusplus98" => Some(Core::BsnesCplusplus98),
             "chimerasnes" | "chimera" => Some(Core::ChimeraSnes),
+            "fceumm" | "fceum" => Some(Core::Fceumm),
             _ => None,
         }
     }
@@ -259,6 +268,11 @@ impl System {
                 Core::ChimeraSnes,
                 Core::Snes9x2005,
             ],
+            // One core, because the machine's library is the card's largest and fceumm runs
+            // essentially all of it: Nestopia is the only other core here that would earn the
+            // space, and it is five megabytes for the same compatibility. One entry is not a
+            // choice — the machine's board has no picker to draw, and no socket to hop.
+            System::Fc => &[Core::Fceumm],
         }
     }
 

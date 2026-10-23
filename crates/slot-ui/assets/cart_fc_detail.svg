@@ -1,8 +1,17 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 276">
-  <!-- Famicom cart face detail: the moulded groove that runs across the shell above the label,
-       and the step line where the shell narrows towards the connector. Both are face mouldings
-       rather than parts of the outline. Runs are read off photographs, not measured. -->
-  <path d="M28 34 H212 A5 5 0 0 1 217 39 V45 A5 5 0 0 1 212 50 H28
-           A5 5 0 0 1 23 45 V39 A5 5 0 0 1 28 34 Z" fill="#fff"/>
-  <path d="M24 198 H216 V204 H24 Z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 212">
+  <!-- Family Computer cart face detail: the mould lines across the foot of the shell.
+
+       Two shallow grooves running most of the width, below where the blue label panel ends
+       (the panel's box lives in `cart.rs::size_for`, and ends at 72% of the height). They are
+       the only moulding the reference shell carries on its face: everything the Famicom cart
+       says is on its label, and the plastic underneath is content to have been moulded.
+
+       Shaded darker by the caller, like every detail in this directory - moulded plastic is
+       the same plastic, just turned away from the light. -->
+  <g fill="#fff">
+    <path d="M36 176 H204 A3 3 0 0 1 207 179 V181 A3 3 0 0 1 204 184 H36
+             A3 3 0 0 1 33 181 V179 A3 3 0 0 1 36 176 Z"/>
+    <path d="M36 192 H204 A3 3 0 0 1 207 195 V197 A3 3 0 0 1 204 200 H36
+             A3 3 0 0 1 33 197 V195 A3 3 0 0 1 36 192 Z"/>
+  </g>
 </svg>

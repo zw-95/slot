@@ -292,7 +292,12 @@ pub const NAME_TRAVEL: f32 = 150.0;
 /// The chip's size, and it is **the board's**: one chip and it has the board to itself, so it is
 /// as large as the board can carry — over half its width, and the fingers and their traces below
 /// it are the only other thing the board is carrying.
-pub const CORE_W: u32 = 200;
+///
+/// 220 rather than 200 because the name outgrew the package: a name face is 190 wide and its
+/// longest line 182, while the package inside the face is `CORE_W - 32` — 168 at 200 — so a long
+/// name's ends landed on the legs and the board behind them. At 220 the package is 188 and the
+/// name fits with room on both sides again.
+pub const CORE_W: u32 = 220;
 pub const CORE_H: u32 = 138;
 const SOCKET_INK: [u8; 3] = [0xee, 0xf5, 0xe6];
 const CHIP_INK: [u8; 3] = [0xf2, 0xf2, 0xf2];

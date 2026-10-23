@@ -583,8 +583,9 @@ impl Session {
         let (which, slot) = match system {
             System::Gb => ("gb", 0),
             System::Gbc => ("gbc", 1),
-            // Neither has an overlay set: both wear their screen look as an aperture preset.
-            System::Gba | System::Sfc => ("", 0),
+            // None of the three has an overlay set: all wear their screen look as an aperture
+            // preset, which the mask key walks.
+            System::Gba | System::Sfc | System::Fc => ("", 0),
         };
         if which.is_empty() {
             // No overlay set for this system: drop the previous cart's overlay.

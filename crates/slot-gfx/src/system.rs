@@ -29,6 +29,13 @@ pub const GB_SRC_H: u32 = 144;
 pub const SFC_SRC_W: u32 = 256;
 pub const SFC_SRC_H: u32 = 224;
 
+/// The Family Computer's, which is the Super Nintendo's frame stood on its head: 256x240, the
+/// console's 240 visible lines with the filler ones left in by the core. At three it is 240
+/// lines off the panel in height; at two it is 512x480, which fills the panel's height with
+/// four pixels to spare and leaves a bezel's width down each side.
+pub const FC_SRC_W: u32 = 256;
+pub const FC_SRC_H: u32 = 240;
+
 /// Which machine's picture is on the panel.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum System {
@@ -38,6 +45,10 @@ pub enum System {
     /// The Super Nintendo. The first machine here whose frame does not divide into the panel
     /// three times, and so the first that answers a different scale.
     Sfc,
+    /// The Family Computer, whose frame is the Super Nintendo's with eight more lines on the
+    /// bottom — and so the second machine that answers 2, and the second the 3x3 mask has to
+    /// stay away from.
+    Fc,
 }
 
 impl System {
@@ -58,6 +69,11 @@ impl System {
             // 512x448 centred: 104 panel pixels of margin either side and 16 above and below,
             // which is where a bezel goes.
             System::Sfc => 2,
+            // 512x480 centred: the panel's own height, two pixels of margin above and below,
+            // and 104 down each side for a bezel. The same answer as the Super Nintendo's for
+            // the same reason — three does not fit — and it is its own line because a frame
+            // that fills the panel exactly is worth reading as its own case, not as SFC's.
+            System::Fc => 2,
         }
     }
 
@@ -69,6 +85,7 @@ impl System {
             System::Gba => GBA_SRC_W,
             System::Gb => GB_SRC_W,
             System::Sfc => SFC_SRC_W,
+            System::Fc => FC_SRC_W,
         }
     }
 
@@ -77,6 +94,7 @@ impl System {
             System::Gba => GBA_SRC_H,
             System::Gb => GB_SRC_H,
             System::Sfc => SFC_SRC_H,
+            System::Fc => FC_SRC_H,
         }
     }
 

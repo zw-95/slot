@@ -7,15 +7,17 @@ const CART_GBA_SVG: &str = include_str!("../assets/cart.svg");
 const CART_SFC_SVG: &str = include_str!("../assets/cart_sfc.svg");
 const CART_GB_SVG: &str = include_str!("../assets/cart_gb.svg");
 const CART_GBC_SVG: &str = include_str!("../assets/cart_gbc.svg");
+const CART_FC_SVG: &str = include_str!("../assets/cart_fc.svg");
 const DETAIL_GBA_SVG: &str = include_str!("../assets/cart_detail.svg");
 const DETAIL_SFC_SVG: &str = include_str!("../assets/cart_sfc_detail.svg");
 /// Shared by class A, B and C, which is why there is one of it rather than two.
 const DETAIL_GB_SVG: &str = include_str!("../assets/cart_gb_detail.svg");
+const DETAIL_FC_SVG: &str = include_str!("../assets/cart_fc_detail.svg");
 
-/// Which of the four shells a machine's carts are: the Advance cart's landscape outline, the
-/// Super Nintendo's, and the Game Boy family's portrait one — carrying the top notch for class
-/// A and B (the grey and black carts) and not for class C (Game Boy Color only), which is the
-/// physical lockout.
+/// Which of the shells a machine's carts are: the Advance cart's landscape outline, the Super
+/// Nintendo's, the Game Boy family's portrait one — carrying the top notch for class A and B
+/// (the grey and black carts) and not for class C (Game Boy Color only), which is the physical
+/// lockout — and the Family Computer's.
 fn outline(system: System) -> &'static str {
     match system {
         System::Gba => CART_GBA_SVG,
@@ -26,6 +28,10 @@ fn outline(system: System) -> &'static str {
         System::Sfc => CART_SFC_SVG,
         System::Gb => CART_GB_SVG,
         System::Gbc => CART_GBC_SVG,
+        // The plainest outline here — a rounded rectangle, no grooves, no lockout — which is
+        // honest: the Family Computer shell is a box the label does the talking for. It is
+        // its own file rather than a shared rectangle because its proportions are its own.
+        System::Fc => CART_FC_SVG,
     }
 }
 
@@ -36,6 +42,8 @@ fn detail(system: System) -> &'static str {
         // towards the connector, rather than the Advance's grip ridge and thumb notch.
         System::Sfc => DETAIL_SFC_SVG,
         System::Gb | System::Gbc => DETAIL_GB_SVG,
+        // The mould lines across the foot of the shell, below the label panel.
+        System::Fc => DETAIL_FC_SVG,
     }
 }
 
@@ -49,6 +57,7 @@ fn index(system: System) -> usize {
         System::Sfc => 3,
         System::Gb => 1,
         System::Gbc => 2,
+        System::Fc => 4,
     }
 }
 

@@ -1,19 +1,19 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 276">
-  <!-- Famicom cartridge outline.
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 212">
+  <!-- Family Computer / NES cartridge outline.
 
-       Portrait, like the Game Boy family's shell, and drawn at that row's own size (240 x 276),
-       which is close enough to the real thing's proportions to pass: a Famicom cart is a tall,
-       narrow shell, roughly 70 mm across and 125 mm down, and the step where the lower quarter
-       narrows is what reads as a Famicom cart rather than a Game Boy one.
+       Drawn at 240 x 212, which is the shelf row's 240 width against the shell's own
+       proportions compressed the way the Super Nintendo's is: a Famicom cart is about
+       130 x 115 mm, and at the row's full scale (240 px = 57 mm) it would be 547 x 484 --
+       again taller than the 480 px panel a row lives on. Compressed by the same third, it
+       lands at 240 x 212, a landscape cart standing taller than an Advance one but shorter
+       than a Game Boy one, which is roughly where it sits on the shelf between them.
 
-       That step is the whole shape: the wide part runs from the top down to 75% of the height,
-       where each side cuts in 24 px over 16 px of depth, and the narrower foot continues to the
-       bottom corners. On the real shell this is the part that goes into the console. Unlike
-       cart_gb.svg there is no notch in a top corner — the Famicom cart has no lockout step.
-
-       Both the step's width (24 px) and its run (16 px) are estimated from photographs. Replace
-       them if a cartridge is ever measured with calipers. -->
-  <path d="M12 0 H228 A12 12 0 0 1 240 12 V206 L216 222 V264
-           A12 12 0 0 1 204 276 H36 A12 12 0 0 1 24 264 V222 L0 206 V12
-           A12 12 0 0 1 12 0 Z" fill="#fff"/>
+       What is kept is what makes the shell readable at a glance, and there is almost none of
+       it: the Famicom cart is a rounded box whose label does the talking. Rounded top corners
+       at 14 px against slightly softer ones at the foot, no grooves, no lockout step, and
+       straight sides -- the reference shell's silhouette is a rectangle that has been handled
+       enough to lose its edges. -->
+  <path d="M14 0 H226 A14 14 0 0 1 240 14 V198
+           A14 14 0 0 1 226 212 H14 A14 14 0 0 1 0 198 V14
+           A14 14 0 0 1 14 0 Z" fill="#fff"/>
 </svg>

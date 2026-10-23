@@ -84,17 +84,42 @@ pub struct CartSize {
 pub const fn size_for(system: slot_store::System) -> CartSize {
     match system {
         // A Super Nintendo cart shares the Advance's row — wide, and wider than it is tall —
-        // so the same size and the same label box. Its outline is its own and lives in
+        // so the same size and the same row figures. Its outline is its own and lives in
         // `silhouette`: the finger grooves down each side are the one thing that makes the
         // shell readable as a Super Nintendo cart, and the Advance's shell has none. A card
         // that ships its own `cart_sfc.png` still redraws it (see `cart_art::art_for`).
-        slot_store::System::Gba | slot_store::System::Sfc => CartSize {
+        slot_store::System::Gba => CartSize {
             w: CART_W,
             h: CART_H,
             pitch: 360.0,
             middle: 1.5,
             side: 1.0,
             label: [90, 228, 910, 863],
+        },
+        slot_store::System::Sfc => CartSize {
+            w: CART_W,
+            h: CART_H,
+            pitch: 360.0,
+            middle: 1.5,
+            side: 1.0,
+            // The label **plate** sits high and wide: a Super Famicom label is printed artwork
+            // on a dark field, running nearly edge to edge across the top half of the shell,
+            // and the band it leaves below — the trough, the foot bosses — is the moulding
+            // that makes the shell read as anything at all. Lower or narrower and the plate
+            // would be a sticker on a generic box; this placement is the reference shell's.
+            label: [64, 176, 936, 624],
+        },
+        slot_store::System::Fc => CartSize {
+            w: CART_W,
+            h: 212,
+            pitch: 360.0,
+            middle: 1.5,
+            side: 1.0,
+            // A Family Computer label is a big blue panel pasted over most of the shell's
+            // face, running wider than it is tall — the reference shell's sits from just
+            // under the top edge to about four fifths down, clear of the mould lines below.
+            // The band it leaves at the foot is where those lines live.
+            label: [80, 150, 920, 720],
         },
         slot_store::System::Gb | slot_store::System::Gbc => CartSize {
             w: 240,
@@ -252,17 +277,50 @@ fn themed_shell(shell: &Shell) -> Shell {
 pub fn cart_placeholder(size: CartSize, system: slot_store::System) -> CartFace {
     // The stand-in wears the current theme's shell rather than the table's dark grey, which is
     // what makes it belong to the light theme's furniture too.
-    let shell = themed_shell(&shell_for(""));
+    let shell = themed_shell(&cart_shell(system, ""));
     let mut face = shell_face(&shell, size, system);
     mould_detail(&mut face, &shell, size, system);
-    recess_label(&mut face, &shell, size.label_box());
+    match system {
+        // An empty plate, the way the blank Advance cart shows an empty recess: these two
+        // machines' labels are plates and not recesses, so their blanks are plates too.
+        slot_store::System::Sfc => sfc_plate(&mut face, size.label_box()),
+        slot_store::System::Fc => fc_plate(&mut face, size.label_box()),
+        _ => recess_label(&mut face, &shell, size.label_box()),
+    }
     clip_to_silhouette(&mut face, size, system);
     face
 }
 
+/// The Super Famicom's own shell, which is not the game's to choose: every real one is the same
+/// light grey plastic, so the header code that picks an Advance cart's colour has nothing to say
+/// on this machine. Read off a photograph of the reference shell, not recalled.
+const SFC_SHELL: Shell = Shell {
+    colour: [0xc8, 0xc4, 0xbb],
+    finish: Finish::Solid,
+};
+
+/// The Family Computer's own shell, which is the same story: the reference cart is that
+/// orange-yellow plastic, and no game's header is going to change it. It is the colour half
+/// the world means when it says "Famicom cart".
+const FC_SHELL: Shell = Shell {
+    colour: [0xe2, 0xa4, 0x2c],
+    finish: Finish::Solid,
+};
+
+/// The shell a cart wears: the game's own colour where the machine's header carries a code, the
+/// machine's own where it does not — which is both of the cartridge machines' case, and the
+/// placeholder's.
+fn cart_shell(system: slot_store::System, code: &str) -> Shell {
+    match system {
+        slot_store::System::Sfc => SFC_SHELL,
+        slot_store::System::Fc => FC_SHELL,
+        _ => shell_for(code),
+    }
+}
+
 pub fn cart_face(cart: &Cart) -> CartFace {
-    let shell = shell_for(&cart.code);
     let system = cart.system();
+    let shell = cart_shell(system, &cart.code);
     let size = size_for(system);
     // A card that supplies its own cart art is drawn from that instead of from the built-in
     // silhouette: see `cart_art`. Nothing below changes for a card that does not.
@@ -282,9 +340,26 @@ pub fn cart_face(cart: &Cart) -> CartFace {
     face_profile::add(0, t.elapsed());
 
     let t = std::time::Instant::now();
-    let label = match cart.label.as_deref().and_then(|p| art::cover(p, lw, lh)) {
-        Some(rgba) => rgba,
-        None => sized_label(&label_text(cart), lw, lh),
+    // What the label shows, sized for where it is going: on a Super Famicom that is the
+    // plate's inner panel — the plate is the machine's own, printed whether or not this cart
+    // has a game in it — and everywhere else it is the label panel itself.
+    let label = if system == slot_store::System::Sfc {
+        let inner = plate_inner((lx, ly, lw, lh));
+        match cart.label.as_deref().and_then(|p| art::cover(p, inner.2, inner.3)) {
+            Some(rgba) => rgba,
+            None => plate_text_label(&label_text(cart), inner.2, inner.3),
+        }
+    } else if system == slot_store::System::Fc {
+        let inner = plate_inner((lx, ly, lw, lh));
+        match cart.label.as_deref().and_then(|p| art::cover(p, inner.2, inner.3)) {
+            Some(rgba) => rgba,
+            None => plate_text_label(&label_text(cart), inner.2, inner.3),
+        }
+    } else {
+        match cart.label.as_deref().and_then(|p| art::cover(p, lw, lh)) {
+            Some(rgba) => rgba,
+            None => sized_label(&label_text(cart), lw, lh),
+        }
     };
     face_profile::add(1, t.elapsed());
 
@@ -293,11 +368,19 @@ pub fn cart_face(cart: &Cart) -> CartFace {
     face_profile::add(2, t.elapsed());
 
     let t = std::time::Instant::now();
-    recess_label(&mut face, &shell, (lx, ly, lw, lh));
+    match system {
+        slot_store::System::Sfc => sfc_plate(&mut face, (lx, ly, lw, lh)),
+        slot_store::System::Fc => fc_plate(&mut face, (lx, ly, lw, lh)),
+        _ => recess_label(&mut face, &shell, (lx, ly, lw, lh)),
+    }
     face_profile::add(3, t.elapsed());
 
     let t = std::time::Instant::now();
-    paste_label(&mut face, &label, (lx, ly, lw, lh));
+    let panel = match system {
+        slot_store::System::Sfc | slot_store::System::Fc => plate_inner((lx, ly, lw, lh)),
+        _ => (lx, ly, lw, lh),
+    };
+    paste_label(&mut face, &label, panel);
     face_profile::add(4, t.elapsed());
 
     let t = std::time::Instant::now();
@@ -532,6 +615,130 @@ fn sized_label(title: &str, w: u32, h: u32) -> Vec<u8> {
         text::draw_centred(&mut rgba, w, h, &layout, ink(bg));
     }
     rgba
+}
+
+/// The Super Famicom's label plate: the dark field the reference shell prints its artwork on,
+/// running nearly edge to edge across the top half of the shell, corners rounded, and the
+/// machine's three dots in its bottom right corner. Drawn straight onto the shell rather than
+/// rasterised apart from it, because it is the one label in the program that belongs to the
+/// machine rather than to the game.
+const SFC_PLATE_INK: [u8; 3] = [0x12, 0x12, 0x15];
+
+/// Yellow, red and green — the three the reference shell carries, left to right, and the one
+/// part of the label that says "Super Famicom" from across the room.
+const SFC_DOTS: [[u8; 3]; 3] = [[0xf0, 0xc2, 0x20], [0xd8, 0x30, 0x40], [0x38, 0xa8, 0x50]];
+
+fn sfc_plate(face: &mut CartFace, panel: (u32, u32, u32, u32)) {
+    let (lx, ly, lw, lh) = panel;
+    let (x0, y0) = (lx as i32, ly as i32);
+    let (x1, y1) = (x0 + lw as i32, y0 + lh as i32);
+    // A corner a twelfth of the short side: rounded the way a printed label is rounded, and
+    // not the sharp rectangle a sticker dies cut to.
+    let r = (lh.min(lw) / 12).max(6) as i32;
+    fill_round(face, x0, y0, x1, y1, r, SFC_PLATE_INK);
+
+    // The dots sit in the plate's own bottom-right corner, below the inner panel the game's
+    // art pastes into — the corner is the plate's, and it stays the plate's even on a cart
+    // whose cover runs the full inner panel.
+    let r_dot = 5 * FACE_SCALE as i32;
+    let cy = y1 - 7 * FACE_SCALE as i32;
+    let mut cx = x1 - 10 * FACE_SCALE as i32;
+    // Drawn right to left so the array reads left to right on the shell: the order on the
+    // face is the order the reference carries, yellow red green.
+    for ink in SFC_DOTS.iter().rev() {
+        fill_disc(face, cx, cy, r_dot, *ink);
+        cx -= 9 * FACE_SCALE as i32;
+    }
+}
+
+/// The panel of a plate the game's own art or title pastes into: inset from the plate on
+/// every side, and **shorter at the foot than the head**, because both machines' plates keep
+/// their bottom band for themselves — the Super Famicom's for its three dots, the Family
+/// Computer's for the blue it shows around its label.
+fn plate_inner(panel: (u32, u32, u32, u32)) -> (u32, u32, u32, u32) {
+    let (lx, ly, lw, lh) = panel;
+    let k = FACE_SCALE as u32;
+    (lx + 13 * k, ly + 12 * k, lw - 26 * k, lh - 28 * k)
+}
+
+/// A title with no cover art on either plate machine: white type on nothing at all, because
+/// the field behind it is already the ground those machines print their titles on. The
+/// Advance's label tints itself per game — `sized_label`'s work — and on these machines the
+/// machine carries the colour instead.
+fn plate_text_label(title: &str, w: u32, h: u32) -> Vec<u8> {
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    if let Some(font) = text::label_font() {
+        // Two lines at most in a band this short, and the band's own height as the em: a
+        // single line may use all of it, since there is no second line to reserve for.
+        let layout = text::fit(
+            font,
+            title,
+            (w - 2 * PAD) as f32,
+            2,
+            h as f32 / 1.36,
+            MIN_PX.max(12.0),
+        );
+        let cover = text::coverage(w, h, &layout);
+        for (d, c) in rgba.chunks_exact_mut(4).zip(cover) {
+            d[0] = 0xf5;
+            d[1] = 0xf4;
+            d[2] = 0xf0;
+            d[3] = c;
+        }
+    }
+    rgba
+}
+
+/// A filled rounded rectangle, straight into a face. Corner pixels test against the quarter
+/// disc whose centre is `r` in from each edge; everything else is plain fill.
+fn fill_round(face: &mut CartFace, x0: i32, y0: i32, x1: i32, y1: i32, r: i32, ink: [u8; 3]) {
+    let (w, h) = (face.w as i32, face.h as i32);
+    for y in y0.max(0)..y1.min(h) {
+        for x in x0.max(0)..x1.min(w) {
+            let cx = x.clamp(x0 + r, x1 - r);
+            let cy = y.clamp(y0 + r, y1 - r);
+            let dx = (x - cx) * (x - cx);
+            let dy = (y - cy) * (y - cy);
+            if dx + dy > r * r {
+                continue;
+            }
+            put(face, x, y, ink);
+        }
+    }
+}
+
+/// A filled disc: the machine's three dots, and nothing else in the program paints one.
+fn fill_disc(face: &mut CartFace, cx: i32, cy: i32, r: i32, ink: [u8; 3]) {
+    let (w, h) = (face.w as i32, face.h as i32);
+    for y in (cy - r).max(0)..(cy + r + 1).min(h) {
+        for x in (cx - r).max(0)..(cx + r + 1).min(w) {
+            if (x - cx) * (x - cx) + (y - cy) * (y - cy) <= r * r {
+                put(face, x, y, ink);
+            }
+        }
+    }
+}
+
+fn put(face: &mut CartFace, x: i32, y: i32, ink: [u8; 3]) {
+    let d = ((y as u32 * face.w + x as u32) * 4) as usize;
+    face.rgba[d] = ink[0];
+    face.rgba[d + 1] = ink[1];
+    face.rgba[d + 2] = ink[2];
+}
+
+/// The Family Computer's label: one big blue panel pasted over the shell's face, corners
+/// barely rounded — a sticker's rounding, not a printed label's — and nothing else on it,
+/// because the reference cart's panel carries the game's art and that is what pastes here.
+/// The blue is the reference shell's own: greyer than the sky a screenshot of it would
+/// suggest, which is what keeps it sitting on the yellow rather than fighting it.
+const FC_PLATE_INK: [u8; 3] = [0x93, 0xa7, 0xc4];
+
+fn fc_plate(face: &mut CartFace, panel: (u32, u32, u32, u32)) {
+    let (lx, ly, lw, lh) = panel;
+    let (x0, y0) = (lx as i32, ly as i32);
+    let (x1, y1) = (x0 + lw as i32, y0 + lh as i32);
+    let r = (lh.min(lw) / 24).max(3) as i32;
+    fill_round(face, x0, y0, x1, y1, r, FC_PLATE_INK);
 }
 
 /// Hue rotation alone puts yellow and blue at very different luminance, so the ink flips

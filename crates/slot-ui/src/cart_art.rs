@@ -74,6 +74,9 @@ pub struct CartArt {
     /// shell it shares with the Advance — same landscape shape — so a card that starts filing
     /// SFC games looks finished before anybody draws anything for it.
     sfc: Option<Art>,
+    /// A Family Computer cart of the card's own. Absent, that machine wears the built-in
+    /// yellow shell and its blue label panel, which is the shape a Famicom cart has anyway.
+    fc: Option<Art>,
 }
 
 static ART: OnceLock<CartArt> = OnceLock::new();
@@ -90,6 +93,7 @@ pub fn art_for(system: System) -> Option<&'static Art> {
         System::Gbc => all.gbc.as_ref(),
         System::Gba => all.gba.as_ref(),
         System::Sfc => all.sfc.as_ref(),
+        System::Fc => all.fc.as_ref(),
     }
 }
 
@@ -102,6 +106,7 @@ pub fn load(root: &Path) -> CartArt {
         gbc: read(&dir.join("cart_gbc.png")),
         gba: read(&dir.join("cart_gba.png")),
         sfc: read(&dir.join("cart_sfc.png")),
+        fc: read(&dir.join("cart_fc.png")),
     }
 }
 
@@ -110,7 +115,13 @@ pub fn load(root: &Path) -> CartArt {
 pub fn summary() -> String {
     match ART.get() {
         None => "none".to_string(),
-        Some(all) => [("gb", &all.gb), ("gbc", &all.gbc), ("gba", &all.gba), ("sfc", &all.sfc)]
+        Some(all) => [
+            ("gb", &all.gb),
+            ("gbc", &all.gbc),
+            ("gba", &all.gba),
+            ("sfc", &all.sfc),
+            ("fc", &all.fc),
+        ]
             .iter()
             .map(|(name, art)| match art {
                 Some(a) if a.label.is_some() => format!("{name} {}x{}+label", a.w, a.h),

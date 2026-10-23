@@ -29,6 +29,10 @@ pub enum System {
     /// The Super Nintendo. The first machine here that is not a Game Boy, and the first whose
     /// frame is a size the panel does not divide by three.
     Sfc,
+    /// The Family Computer — the NES and its Japanese twin, one machine two names, and the
+    /// roms arrive under both spellings and then some. The largest library on the card, and
+    /// the reason this branch exists at all.
+    Fc,
 }
 
 impl System {
@@ -38,6 +42,12 @@ impl System {
     /// A Super Nintendo rom comes as either spelling: `.sfc` and `.smc` are the same bytes,
     /// the second named for the copier that made it. Both are the console, and neither is
     /// a different machine, so they land on one shelf rather than two.
+    ///
+    /// A Family Computer rom comes as whatever the site that had it felt like that day:
+    /// `.fc` is what the copiers and the Japanese scene call it, `.nes` is what the English
+    /// one does, and `.unf`/`.unif` is the mapper-standard format the two of them agree on.
+    /// `.fds` is the disk system — the same machine wearing its disk drive — and fceumm runs
+    /// those, so they are carts of this machine too rather than a fifth shelf.
     pub fn from_extension(ext: &str) -> Option<Self> {
         if ext.eq_ignore_ascii_case("gba") {
             Some(System::Gba)
@@ -47,6 +57,13 @@ impl System {
             Some(System::Gbc)
         } else if ext.eq_ignore_ascii_case("sfc") || ext.eq_ignore_ascii_case("smc") {
             Some(System::Sfc)
+        } else if ext.eq_ignore_ascii_case("fc")
+            || ext.eq_ignore_ascii_case("nes")
+            || ext.eq_ignore_ascii_case("unf")
+            || ext.eq_ignore_ascii_case("unif")
+            || ext.eq_ignore_ascii_case("fds")
+        {
+            Some(System::Fc)
         } else {
             None
         }
@@ -59,6 +76,10 @@ impl System {
             System::Gb => "GB",
             System::Gbc => "GBC",
             System::Sfc => "SFC",
+            // The player's name for the machine, not the emulator's abbreviation and not
+            // "NES": on a card written in Chinese the shelf is the 红白机, and "FC" is what
+            // both of its names abbreviate to.
+            System::Fc => "FC",
         }
     }
 }

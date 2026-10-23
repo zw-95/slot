@@ -369,6 +369,7 @@ impl Frontend {
             ("GBC", "type_gbc.png"),
             ("GBA", "type_gba.png"),
             ("SFC", "type_sfc.png"),
+            ("FC", "type_fc.png"),
         ]
         .iter()
         .map(|(word, file)| {
@@ -393,6 +394,7 @@ impl Frontend {
             ("GBC", "type_gbc_light.png"),
             ("GBA", "type_gba_light.png"),
             ("SFC", "type_sfc_light.png"),
+            ("FC", "type_fc_light.png"),
         ]
         .iter()
         .map(|(word, file)| {

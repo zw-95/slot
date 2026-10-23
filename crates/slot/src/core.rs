@@ -162,7 +162,10 @@ pub fn open_core_for(
         | Core::Bsnes2014Performance
         | Core::BsnesMercuryPerformance
         | Core::BsnesCplusplus98
-        | Core::ChimeraSnes => vec![],
+        | Core::ChimeraSnes
+        // fceumm's own defaults are the ones a Family Computer wants: it needs no BIOS, its
+        // palette is the console's, and it draws no border of its own.
+        | Core::Fceumm => vec![],
     };
     for path in paths {
         if !path.exists() {

@@ -1,6 +1,6 @@
 //! What a card's `System/display.txt` is allowed to ask for.
 //!
-//! The file is one line — `mask cc_gba cc_gb cc_gbc cc_sfc` — and it is the only thing that
+//! The file is one line — `mask cc_gba cc_gb cc_gbc cc_sfc cc_fc` — and it is the only thing that
 //! survives a reboot, so every preset the interface can reach has to come back as itself.
 
 mod common;
@@ -18,13 +18,13 @@ fn the_whole_ring_survives_the_file() {
     // number in it was always the right number.
     let d = tmp_root_with_carts(&["Emerald"]);
     for mask in 0..MASK_STATES as u8 {
-        write_display_modes(d.path(), mask, [3, 7, 2, 11]);
+        write_display_modes(d.path(), mask, [3, 7, 2, 11, 13]);
         let (read, cc) = display_modes(d.path());
         assert_eq!(read, mask, "preset {mask} did not survive the file");
-        assert_eq!(cc, [3, 7, 2, 11], "and neither did the four colour slots");
+        assert_eq!(cc, [3, 7, 2, 11, 13], "and neither did the five colour slots");
     }
     // Past the end clamps to the last preset rather than wrapping, for a file edited on a PC.
-    write_display_modes(d.path(), 99, [0, 0, 0, 0]);
+    write_display_modes(d.path(), 99, [0, 0, 0, 0, 0]);
     assert_eq!(display_modes(d.path()).0 as usize, MASK_STATES - 1);
 }
 
@@ -32,14 +32,22 @@ fn the_whole_ring_survives_the_file() {
 fn a_file_from_before_the_super_nintendo_gives_it_the_advances_colour() {
     // The file used to hold one colour fewer. A card written then has no number for the fourth
     // machine, and the reading that keeps that card looking like itself is the one the colour
-    // machines already had — not a silent drop to grayscale.
+    // machines already had — not a silent drop to grayscale. Every machine added after it
+    // inherits the same way, and for the same reason.
     let d = tmp_root_with_carts(&["Emerald"]);
     let file = d.path().join("System/display.txt");
     std::fs::write(&file, "2 5 300 1").unwrap();
     assert_eq!(
         display_modes(d.path()),
-        (2, [5, 300, 1, 5]),
+        (2, [5, 300, 1, 5, 5]),
         "the Super Nintendo takes the Advance's grade"
+    );
+
+    std::fs::write(&file, "2 5 300 1 7").unwrap();
+    assert_eq!(
+        display_modes(d.path()),
+        (2, [5, 300, 1, 7, 5]),
+        "and so does the Family Computer"
     );
 }
 
@@ -51,19 +59,19 @@ fn a_missing_or_older_file_still_reads() {
     let d = tmp_root_with_carts(&["Emerald"]);
     let file = d.path().join("System/display.txt");
     let _ = std::fs::remove_file(&file);
-    assert_eq!(display_modes(d.path()), (2, [0, 0, 0, 0]), "the built-in default");
+    assert_eq!(display_modes(d.path()), (2, [0, 0, 0, 0, 0]), "the built-in default");
 
     std::fs::write(&file, "1 4").unwrap();
     assert_eq!(
         display_modes(d.path()),
-        (1, [4, 4, 4, 4]),
+        (1, [4, 4, 4, 4, 4]),
         "one colour, every machine"
     );
 
     std::fs::write(&file, "not a number").unwrap();
     assert_eq!(
         display_modes(d.path()),
-        (2, [0, 0, 0, 0]),
+        (2, [0, 0, 0, 0, 0]),
         "and it does not panic on nonsense"
     );
 }

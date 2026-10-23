@@ -568,12 +568,13 @@ struct DisplayFilter {
     /// `u16` rather than `u8` because the Game Boy's slot is an index into the whole palette
     /// table, which is past 255 entries and will only grow. The two colour machines' slots still
     /// hold 0..=6; the width is shared because the three are read as one array.
-    cc: [u16; 4],
+    cc: [u16; 5],
 }
 
-/// How many machines have their own shelf and their own colour correction. The three the
-/// device ships with; `machine_slot` is the mapping and it is the only one.
-const MACHINE_SLOTS: usize = 4;
+/// How many machines have their own shelf and their own colour correction. The four the
+/// device ships with plus the Family Computer; `machine_slot` is the mapping and it is the
+/// only one.
+const MACHINE_SLOTS: usize = 5;
 impl DisplayFilter {
     const IDENTITY: [[f32; 3]; 3] = [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]];
     // GRAYSCALE (0% saturation): plain luma. The whole picture collapses to its luma
@@ -619,6 +620,7 @@ impl DisplayFilter {
             System::Gb => 1,
             System::Gbc => 2,
             System::Sfc => 3,
+            System::Fc => 4,
         }
     }
 
@@ -740,7 +742,7 @@ impl DisplayFilter {
         lcd3x: [[[u8; 3]; 3]; 3],
         nocolor_cc: [[f32; 3]; 3],
         mode: u8,
-        cc: [u16; 4],
+        cc: [u16; 5],
     ) -> Self {
         Self {
             lcd3x,
@@ -755,6 +757,8 @@ impl DisplayFilter {
                 // against the same count. It has a slot of its own rather than sharing the
                 // Advance's because a player who sets one machine's look has not set the other's.
                 cc[3].min(Self::CC_COUNT - 1),
+                // The Family Computer, the same story on the fourth shelf.
+                cc[4].min(Self::CC_COUNT - 1),
             ],
         }
     }
@@ -1457,7 +1461,7 @@ impl App {
                 slot_gfx::builtin_panel_mask(),
                 DisplayFilter::DEFAULT_CC,
                 2,
-                [0, 0, 0, 0],
+                [0, 0, 0, 0, 0],
             ),
             // Page one, browser shut. `App::boot` moves the page onto whatever the card had
             // chosen, so the first tap of the palette key walks the fifteen around it.
@@ -1626,10 +1630,11 @@ impl App {
                 };
                 Some((colour, DisplayFilter::GBC_GRID_MIX, false))
             }
-            // Neither of the two machines that hang their screen look off an overlay ring draws
-            // a lattice from here. A Super Nintendo's mesh is the aperture preset instead: the
-            // scanline, which `mask_ring` keeps for it — see `display_mask`.
-            System::Gba | System::Sfc => None,
+            // None of the three machines that hang their screen look elsewhere draws a lattice
+            // from here. A Super Nintendo's and a Family Computer's mesh is the aperture preset
+            // instead: the scanline, which `mask_ring` keeps for machines at scale 2 — see
+            // `display_mask`.
+            System::Gba | System::Sfc | System::Fc => None,
         }
     }
 
@@ -2196,9 +2201,9 @@ impl App {
         let slot = match system {
             System::Gb => 0,
             System::Gbc => 1,
-            // No overlay set to walk: the Advance's and the Super Nintendo's screen looks are
-            // the aperture presets, which `cycle_mask` steps.
-            System::Gba | System::Sfc => return,
+            // No overlay set to walk: these three machines' screen looks are the aperture
+            // presets, which the mask key steps — held, it lays the whole ring out.
+            System::Gba | System::Sfc | System::Fc => return,
         };
         let Some(root) = self.root.clone() else {
             return;
@@ -2310,7 +2315,13 @@ impl App {
         if self.shelf_switch.is_some() || !self.on_shelf() || self.core_picker.is_some() {
             return;
         }
-        const ORDER: [System; 4] = [System::Gba, System::Gb, System::Gbc, System::Sfc];
+        const ORDER: [System; 5] = [
+            System::Gba,
+            System::Gb,
+            System::Gbc,
+            System::Sfc,
+            System::Fc,
+        ];
         let cur = ORDER.iter().position(|&s| s == self.shelf_system).unwrap_or(0);
         for k in 1..=ORDER.len() {
             let to = ORDER[(cur + k) % ORDER.len()];
@@ -2392,6 +2403,7 @@ impl App {
             System::Gbc => 1,
             System::Gba => 2,
             System::Sfc => 3,
+            System::Fc => 4,
         };
         let faces = match slot_ui::palette::mode() {
             slot_ui::Mode::Light => &self.shelf_ind_light,
@@ -2735,6 +2747,7 @@ impl App {
         match self.shelf.current_cart().map(|c| c.system()) {
             Some(System::Gb) | Some(System::Gbc) => ScreenSystem::Gb,
             Some(System::Sfc) => ScreenSystem::Sfc,
+            Some(System::Fc) => ScreenSystem::Fc,
             _ => ScreenSystem::Gba,
         }
     }
