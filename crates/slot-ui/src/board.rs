@@ -1,5 +1,10 @@
 //! The core picker's open cart: the back half of the shell with the board in it, drawn per cart
-//! because the shell is that cart's plastic and the ROM carries that cart's name.
+//! because the shell is that cart's plastic.
+//!
+//! **One** thing sits on that board: the chip in the middle, carrying the core's name. There is no
+//! mask ROM in a corner printing the game's title over it — which cart this is was settled on the
+//! shelf, and a second thing to read on the board is a second thing the eye has to read past on its
+//! way to the one that can be changed.
 //!
 //! Drawn here in pixels and not rastered from art, which is the change: the art was one machine's
 //! board, and stretching it to every other machine's shape is what put an Advance board inside a
@@ -15,7 +20,6 @@ use crate::shelf::foot_y;
 use crate::shell::shell_for;
 use crate::slot_chrome::ease;
 use crate::text;
-use slot_store::clean_label;
 
 
 
@@ -23,73 +27,7 @@ use slot_store::clean_label;
 pub const BOARD_W: u32 = 372;
 pub const BOARD_H: u32 = 209;
 
-/// The ROM's body inside the board face: board units (43, 31) to (89, 89).
-pub const ROM_X: u32 = 67;
-pub const ROM_Y: u32 = 48;
-pub const ROM_W: u32 = 71;
-pub const ROM_H: u32 = 90;
 
-
-
-/// Words to a line on the ROM, and lines to the chip. Counted in characters rather than
-/// measured, so the split is a fact about the name and the tests can state it; the fitter
-/// then shrinks any line that is still too wide.
-const MARK_LINE_CHARS: usize = 10;
-const MARK_LINES: usize = 3;
-const MARK_PAD: u32 = 4;
-const MARK_PX: f32 = 10.0;
-const MARK_MIN_PX: f32 = 6.0;
-/// Grey on black, as a mask ROM is marked: legible, and nothing like the socket names, which
-/// are the words on the board that mean something.
-const MARK_INK: [u8; 3] = [0xbd, 0xbd, 0xbd];
-
-/// The game's title, a few words to a line. The dump's bracketed tags are facts about the file
-/// rather than the game, and the chip does not carry them.
-pub fn rom_marking(stem: &str) -> Vec<String> {
-    let mut title: Vec<String> = Vec::new();
-    for word in clean_label(stem).to_uppercase().split_whitespace() {
-        match title.last_mut() {
-            Some(line) if line.len() + 1 + word.len() <= MARK_LINE_CHARS => {
-                line.push(' ');
-                line.push_str(word);
-            }
-            _ => title.push(word.to_string()),
-        }
-    }
-    if title.len() > MARK_LINES {
-        let tail = title.split_off(MARK_LINES - 1).join(" ");
-        title.push(tail);
-    }
-    title
-}
-
-/// The marking alone, on nothing, the size of the ROM's body — times `scale`, because the board
-/// it is inked onto is not always drawn at the size the art was drawn at: a portrait cart's
-/// shell is taller than its board is, and the board inside it is smaller than an Advance one.
-pub fn rom_marking_face(stem: &str, scale: f32) -> CartFace {
-    let title = rom_marking(stem);
-    let (w, h) = (
-        (ROM_W as f32 * scale).round() as u32,
-        (ROM_H as f32 * scale).round() as u32,
-    );
-    let mut face = CartFace {
-        rgba: vec![0; (w * h * 4) as usize],
-        w,
-        h,
-    };
-    let Some(font) = text::label_font() else {
-        return face;
-    };
-    let max_w = (w - 2 * MARK_PAD) as f32;
-    let line_h = (MARK_PX * scale * 1.25).ceil() as u32;
-    let mut top = h.saturating_sub(line_h * title.len() as u32) / 2;
-    for line in &title {
-        let layout = text::fit(font, line, max_w, 1, MARK_PX * scale, MARK_MIN_PX * scale);
-        ink_band(&mut face, top, line_h, &layout, MARK_INK, 1.0);
-        top += line_h;
-    }
-    face
-}
 
 /// The board a cart carries, and the shell it sits in.
 ///
@@ -111,16 +49,6 @@ pub fn board_face(cart: &Cart, system: slot_store::System) -> CartFace {
     let pcb = pcb_face(shell.colour, pw, ph, system as u32);
     let (px, py) = ((w - pw) / 2, (h - ph) / 2);
     over(&mut face, &pcb, px, py);
-    // The ROM's marking travels with the board it is printed on, at the board's own scale, onto
-    // the package the board drew for it.
-    let s = pw as f32 / BOARD_W as f32;
-    let (rx, ry, _, _) = rom_at(pw);
-    over(
-        &mut face,
-        &rom_marking_face(&cart.stem, s),
-        px + rx as u32,
-        py + ry as u32,
-    );
     face
 }
 
@@ -223,45 +151,10 @@ fn pcb_face(shell: [u8; 3], w: u32, h: u32, machine: u32) -> CartFace {
         disc(&mut face, tx, sy + sh, 2.0, PAD, 255);
     }
 
-    // Where the ROM sits, for the bus to it and for the package itself.
-    let (rx, ry, rw, rh) = rom_at(w);
-
-    // And the bus between the chip and the ROM, on boards where there is room for one: two traces
-    // out of the package's long side, down to the chip's level, ending in pads the way the
-    // fingers' traces do. A portrait board's ROM sits too close to the socket for any wire between
-    // them, and a crowded board is allowed to be simply crowded.
-    if rx - (sx + sw) > 30 {
-        for i in 0..2u32 {            let fy = ry + rh / 2 + i as i32 * 10;
-            let mx = rx - 8 - i as i32 * 6;
-            hline(&mut face, mx, rx, fy, ink, 255);
-            vline(&mut face, mx, fy, sy + sh / 2, ink, 255);
-            disc(&mut face, mx, sy + sh / 2, 2.0, PAD, 255);
-        }
-    }
-
-    // The mask ROM, in the top corner away from the socket: a black package with pins down both
-    // long sides, and the game's marking inked onto it by the caller. It sat where the board art
-    // had it, which is under the middle of the board now that the core sits there — the chip was
-    // drawing straight over the game's own name.
-    for i in 0..8 {
-        let py = ry + 4 + i * (rh - 8) / 8;
-        box_fill(&mut face, rx - 5, py, rx, py + 4, PIN, 255);
-        box_fill(&mut face, rx + rw, py, rx + rw + 5, py + 4, PIN, 255);
-    }
-    round_box(&mut face, rx, ry, rx + rw, ry + rh, 3, ROM_BODY, 255);
-
     // The socket: its outline in silkscreen, so the chip reads as seated in something rather than
     // floating over the board, and so the pads its traces end in have somewhere to arrive.
     box_line(&mut face, sx - 5, sy - 5, sx + sw + 5, sy + sh + 5, SILK, 255);
     face
-}
-
-/// Where the mask ROM sits on a board `w` wide: the top corner, clear of the socket the core
-/// sits in at the middle, at the ROM's own size scaled to the board's.
-fn rom_at(w: u32) -> (i32, i32, i32, i32) {
-    let s = w as f32 / BOARD_W as f32;
-    let (rw, rh) = ((ROM_W as f32 * s) as i32, (ROM_H as f32 * s) as i32);
-    (w as i32 - rw - 8, 10, rw, rh)
 }
 
 /// How many pixels in from the rim the shell's wall stops darkening it.
@@ -558,7 +451,6 @@ const PAD: [u8; 3] = [0xd8, 0xb4, 0x66];
 const GOLD: [u8; 3] = [0xd4, 0xa8, 0x3c];
 const SILK: [u8; 3] = [0xe8, 0xf0, 0xe4];
 const PIN: [u8; 3] = [0xb8, 0xbc, 0xb6];
-const ROM_BODY: [u8; 3] = [0x18, 0x18, 0x1b];
 const CHIP_BODY: [u8; 3] = [0x22, 0x24, 0x28];
 
 /// `a` pulled `t` of the way to `b`.

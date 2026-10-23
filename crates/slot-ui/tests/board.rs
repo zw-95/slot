@@ -1,9 +1,9 @@
 use slot_store::{Cart, Core, System};
 use slot_ui::{
     board_at, board_face, chip_face, chip_shadow_face, lid_at, lift_of, on_board, padded,
-    rom_marking, rom_marking_face, shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed,
-    BOARD_H, BOARD_W, CART_H, DEFAULT_SHELL, LID_TURN, ROM_H, ROM_W, SHADOW_H,
-    SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H, SOCKET_W, TURN_PAD,
+    shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed, BOARD_H, BOARD_W, CART_H,
+    DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H, SOCKET_W,
+    TURN_PAD,
 };
 
 fn cart(stem: &str, code: &str) -> Cart {
@@ -34,57 +34,31 @@ fn near(a: [u8; 3], b: [u8; 3]) -> bool {
 
 const EMERALD: &str = "Pokemon - Emerald Version (USA, Europe)";
 
-/// The chip is tall and narrow, so the name goes on it a few words at a time. The dump's tags
-/// are facts about the file, not the game, and the chip does not carry them.
+/// The open cart shows **one** chip, in the middle, carrying the core's name. It does not repeat
+/// the game's title in a corner as well: which cart this is was settled on the shelf, and a second
+/// thing to read on the board is a second thing to read past.
 #[test]
-fn the_marking_is_the_title_stacked() {
-    assert_eq!(rom_marking(EMERALD), ["POKEMON", "EMERALD", "VERSION"]);
-}
-
-/// Three lines is all the chip has. A fourth would run off the bottom, so the rest joins the
-/// third and the fitter shrinks it.
-#[test]
-fn a_long_title_folds_its_tail_into_the_third_line() {
-    assert_eq!(
-        rom_marking("Advance Wars 2 - Black Hole Rising"),
-        ["ADVANCE", "WARS 2", "BLACK HOLE RISING"]
+fn the_board_carries_no_second_chip() {
+    let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
+    // The whole upper-right region, where a mask ROM used to sit with the game's name on it:
+    // substrate from one end of it to the other, with nothing printed over it.
+    let shell = shell_for("BPEE").colour;
+    let base: [u8; 3] = [0x1e, 0x53, 0x36]
+        .iter()
+        .zip(shell)
+        .map(|(&x, y)| (x as f32 * 0.84 + y as f32 * 0.16).round() as u8)
+        .collect::<Vec<_>>()
+        .try_into()
+        .unwrap();
+    let plain = (12..58)
+        .flat_map(|y| (232..364).map(move |x| (x, y)))
+        .filter(|&(x, y)| near(rgb(&face, x, y), base))
+        .count();
+    let total = 46 * 132;
+    assert!(
+        plain > total * 9 / 10,
+        "only {plain} of {total} pixels up there are bare substrate — something is still drawn"
     );
-}
-
-#[test]
-fn bracketed_tags_never_reach_the_chip() {
-    assert_eq!(
-        rom_marking("Pokemon - LeafGreen Version (USA, Europe) (Rev 1)"),
-        ["POKEMON", "LEAFGREEN", "VERSION"]
-    );
-    assert_eq!(rom_marking("Metroid Fusion"), ["METROID", "FUSION"]);
-}
-
-/// Ink in the outermost column is type that ran off the chip and onto the legs.
-#[test]
-fn the_marking_is_drawn_and_stays_on_the_chip() {
-    for stem in [
-        EMERALD,
-        "Metroid Fusion",
-        "Advance Wars 2 - Black Hole Rising",
-        "Pokemon - LeafGreen Version (USA, Europe) (Rev 1)",
-    ] {
-        let face = rom_marking_face(stem, 1.0);
-        assert_eq!((face.w, face.h), (ROM_W, ROM_H));
-        let alpha = |x: u32, y: u32| face.rgba[((y * face.w + x) * 4 + 3) as usize];
-        assert!(
-            (0..face.h).any(|y| (0..face.w).any(|x| alpha(x, y) > 128)),
-            "{stem} left no marking"
-        );
-        for y in 0..face.h {
-            assert_eq!(alpha(0, y), 0, "{stem} ran off the left of the chip");
-            assert_eq!(
-                alpha(face.w - 1, y),
-                0,
-                "{stem} ran off the right of the chip"
-            );
-        }
-    }
 }
 
 /// Rasterised at the size it is shown at, since that is the only size a face is sharp at.
