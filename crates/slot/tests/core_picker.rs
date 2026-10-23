@@ -1,11 +1,10 @@
 use slot::core_picker::{
-    CorePicker, Outcome, Press, CLOSE_MS, HOP_MS, LIFT_MS, OPEN_MS, SLIDE_MS, SOCKETS,
+    swap_pose, CorePicker, Outcome, Press, CLOSE_MS, HOP_MS, LIFT_MS, OPEN_MS, SLIDE_MS,
 };
 use slot_store::{Core, System};
 use slot_ui::Millis;
 
-/// A picker whose faces were ready the moment it opened, on the Advance's two sockets — which
-/// is what every one of these tests is about until the last, which is about three.
+/// A picker whose faces were ready the moment it opened, on the Advance's cores.
 fn opened(seat: Core, at: Millis) -> CorePicker {
     let mut p = CorePicker::open(seat, System::Gba.cores(), at);
     p.start(at);
@@ -28,24 +27,34 @@ fn it_opens_over_the_open_time_and_then_rests() {
 fn the_chip_starts_seated_in_the_carts_own_core() {
     let chip = opened(Core::Gpsp, 0).chip(0);
     assert_eq!(chip.seated, Some(Core::Gpsp));
-    assert_eq!((chip.across, chip.lift, chip.tip), (1.0, 0.0, 0.0));
+    // Nothing is changing: the name on it is the cart's own, and has been since it opened.
+    assert!(chip.swap.is_none(), "a name is moving on a chip at rest");
 }
 
+/// The chip does not travel any more and does not go blank: it is the same chip for every core,
+/// and what moves is the name written on it. Pressing right sends the old name out to the right
+/// and brings the new one in from the left.
 #[test]
-fn right_from_mgba_hops_blank_and_lands_named_in_gpsp() {
+fn right_from_mgba_sends_one_name_out_and_another_in() {
     let mut p = opened(Core::Mgba, 0);
     assert_eq!(p.press(Press::Right, 500), Outcome::Nothing);
     assert_eq!(p.seat(), Core::Gpsp);
 
     let mid = p.chip(500 + HOP_MS / 2);
-    assert_eq!(mid.seated, None, "the chip wears a name in flight");
-    assert!((mid.across - 0.5).abs() < 0.01, "across {}", mid.across);
-    assert!((mid.lift - 1.0).abs() < 0.01, "lift {}", mid.lift);
-    assert!(mid.tip > 0.0, "a chip moving right should lean right");
+    assert_eq!(mid.seated, Some(Core::Gpsp), "the chip went blank in flight");
+    let swap = mid.swap.expect("no name is changing");
+    assert_eq!(swap.from, Core::Mgba);
+    assert_eq!(swap.to, Core::Gpsp);
+    assert_eq!(swap.dir, 1.0, "a press to the right sends the name right");
+    // Halfway through, and the two of them are the same distance either side of the middle and
+    // equally solid — one leaving at exactly the rate the other arrives.
+    let (out_x, out_a, in_x, in_a) = swap_pose(&swap);
+    assert!(out_x > 0.0 && in_x < 0.0, "the names are travelling together");
+    assert!((out_a - in_a).abs() < 0.02, "they are not changing hands evenly");
 
     let landed = p.chip(500 + HOP_MS);
+    assert!(landed.swap.is_none(), "the name is still moving");
     assert_eq!(landed.seated, Some(Core::Gpsp));
-    assert_eq!((landed.across, landed.lift), (1.0, 0.0));
 }
 
 /// Toward the socket it is already in there is nowhere to go. The chip shakes, and nothing
@@ -60,20 +69,24 @@ fn toward_the_socket_it_is_in_is_refused_and_only_shakes() {
     assert_eq!(p.chip(700).shake, 0.0, "the shake outlived its 300 ms");
 }
 
-/// Back toward the socket it is leaving, the chip retraces its arc from where it is rather
-/// than jumping to the start of a new one.
+/// Back the other way mid-change, the name picks up from where it had got to rather than
+/// jumping to the start of a new travel: it is already a third of the way out to the right, so
+/// it comes back from a third of the way out to the right.
 #[test]
-fn back_mid_hop_turns_the_chip_round_from_where_it_is() {
+fn back_mid_change_turns_the_name_round_from_where_it_is() {
     let mut p = opened(Core::Mgba, 0);
     p.press(Press::Right, 400);
     let at = 400 + HOP_MS / 4;
-    let before = p.chip(at).across;
+    let before = swap_pose(&p.chip(at).swap.expect("no name is moving")).0;
+    assert!(before > 0.0, "the name had not started leaving");
     assert_eq!(p.press(Press::Left, at), Outcome::Nothing);
     assert_eq!(p.seat(), Core::Mgba);
+    let turned = p.chip(at).swap.expect("the name stopped moving");
+    assert_eq!(turned.dir, -1.0, "a press to the left sends the name left");
     assert!(
-        (p.chip(at).across - before).abs() < 0.02,
-        "the chip jumped from {before} to {} as it turned",
-        p.chip(at).across
+        (swap_pose(&turned).0 - before).abs() < 0.05,
+        "the name jumped from {before} to {} as it turned",
+        swap_pose(&turned).0
     );
     assert_eq!(p.chip(at + HOP_MS).seated, Some(Core::Mgba));
 }
@@ -220,80 +233,47 @@ fn the_arrows_do_nothing_while_the_picker_waits() {
     );
 }
 
-/// More than two sockets, which is the whole of what a machine with three to choose between
-/// changes: `across` is a fraction of the run of sockets, so the middle one is halfway along
-/// it, and both ends are still ends — the arrow refuses rather than wrapping to the far side.
+/// There is no board to fill and no window to roll any more — one chip, one name — so a machine
+/// may offer as many cores as it likes and the picker walks them in the order it was given, one
+/// press at a time, refusing at both ends rather than wrapping to the far side.
 #[test]
-fn a_run_of_three_puts_the_middle_socket_in_the_middle() {
-    // Spelled out rather than taken from a machine, because a machine's list can grow past what
-    // the board holds and this is about three that fit.
-    let cores = [
-        Core::Supafaust,
-        Core::Snes9x2010,
-        Core::Snes9x2005Plus,
-    ];
-    assert_eq!(cores.len(), SOCKETS, "this list fills the board");
-    let mut p = CorePicker::open(Core::Supafaust, &cores, 0);
-    p.start(0);
-    assert_eq!(p.chip(0).across, 0.0);
-
-    p.press(Press::Right, 100);
-    assert_eq!(p.seat(), cores[1]);
-    assert_eq!(p.chip(100 + HOP_MS).across, 0.5, "the middle is halfway");
-
-    p.press(Press::Right, 200);
-    assert_eq!(p.seat(), cores[2]);
-    assert_eq!(p.chip(200 + HOP_MS).across, 1.0);
-
-    assert_eq!(
-        p.press(Press::Right, 300),
-        Outcome::Refused,
-        "the arrow wrapped round to the far socket"
-    );
-    assert_eq!(p.seat(), cores[2]);
-}
-
-/// A machine may offer more cores than the board has sockets for. The board shows a window of
-/// them and rolls it along: the chip walks to the end of what is showing, and the next press
-/// brings the next core onto the board without the chip leaving the socket it is standing on.
-#[test]
-fn a_list_longer_than_the_board_rolls_under_the_chip() {
+fn a_long_list_is_walked_one_core_at_a_time_and_stops_at_both_ends() {
     let cores = System::Sfc.cores();
-    assert!(cores.len() > SOCKETS, "this machine fits, so nothing rolls");
+    assert!(cores.len() > 3, "this machine is too short to show it");
     let mut p = CorePicker::open(cores[0], cores, 0);
     p.start(0);
-    assert_eq!(p.window(), &cores[..SOCKETS]);
-    assert_eq!(p.chip(0).visible, SOCKETS);
-
-    // To the far end of what is showing.
-    p.press(Press::Right, 100);
-    assert_eq!(p.chip(100 + HOP_MS).across, 0.5);
-    p.press(Press::Right, 200);
-    assert_eq!(p.chip(200 + HOP_MS).across, 1.0);
-    assert_eq!(p.window(), &cores[..SOCKETS]);
-
-    // One more, and it is the window that moves: the chip is still on the right-hand socket,
-    // and the core under it is the next one along.
-    p.press(Press::Right, 300);
-    assert_eq!(p.seat(), cores[3]);
-    assert_eq!(p.chip(300 + HOP_MS).across, 1.0, "the chip left the board");
-    assert_eq!(p.window(), &cores[1..1 + SOCKETS]);
-    // It hopped on the spot, and upright: a window rolling under it is not a direction.
-    assert_eq!(p.chip(300 + HOP_MS / 2).tip, 0.0);
+    for (i, _) in cores.iter().enumerate().skip(1) {
+        assert_eq!(
+            p.press(Press::Right, 100 + i as Millis * 1_000),
+            Outcome::Nothing,
+            "the walk stopped at {i}"
+        );
+        assert_eq!(p.seat(), cores[i], "the walk is out of step at {i}");
+        // A card that drew its own board put a lamp per place on it, and the lit one has to be
+        // the place the chip is at, not the place it started.
+        assert_eq!(p.index(), i);
+    }
+    assert_eq!(
+        p.press(Press::Right, 1_000_000),
+        Outcome::Refused,
+        "the arrow wrapped round to the far end"
+    );
+    assert_eq!(p.seat(), cores[cores.len() - 1]);
 }
 
-/// Opening on a core at the far end of a long list has to bring the board to it, or the chip
-/// would be drawn standing on a socket that is not showing the core it is standing for.
+/// Opening on a core at the far end of a long list opens on that core, with nothing beyond it in
+/// that direction — and with the rest of the machine's list behind it, which a picker that had
+/// forgotten where it opened would not be able to get back to.
 #[test]
-fn opening_on_a_core_at_the_end_brings_the_window_to_it() {
+fn opening_at_an_end_leaves_nothing_beyond_it_and_the_rest_behind_it() {
     let cores = System::Sfc.cores();
     let last = cores[cores.len() - 1];
     let mut p = CorePicker::open(last, cores, 0);
     p.start(0);
     assert_eq!(p.seat(), last);
-    assert_eq!(p.window().last().copied(), Some(last));
-    // And it is the end: nothing to the right of it.
     assert_eq!(p.press(Press::Right, 100), Outcome::Refused);
+    assert_eq!(p.press(Press::Left, 200), Outcome::Nothing);
+    assert_eq!(p.seat(), cores[cores.len() - 2]);
 }
 
 /// A machine with one core is not asked: there is nowhere for the chip to hop to, and `App`

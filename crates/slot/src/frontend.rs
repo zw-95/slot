@@ -10,11 +10,10 @@ use slot_store::{format_stamp, System};
 use slot_ui::lang;
 use slot_ui::{
     arrows_hint_face, cart_face, cart_placeholder, cart_shadow, cheat_row_face, chip_face,
-    dialog_line_face, size_for,
+    core_name_face, dialog_line_face, size_for,
     chip_shadow_face, clean_label, clock_face, hhmm, hint_face, icon_face, letters, menu_face,
     palette_cell_w, palette_name_face, palette_name_h, photo_face, set_clock_hint_face,
-    shelf_folder_face, shelf_title_face, shortcut_hint_face, shortcut_row_face, socket_face,
-    sticker_face,
+    shelf_folder_face, shelf_title_face, shortcut_hint_face, shortcut_row_face, sticker_face,
     title_face, toast_face, wallpaper_face, word_face, Icon, PowerChoice, StickerFields, Toast,
     ALERT_PX, BOLT_PX, HUD_ICON_PX, LEGEND, PALETTE_FOOT_PX, SHORTCUT_ROWS,
 };
@@ -430,30 +429,30 @@ impl Frontend {
             })
             .collect();
         self.session.app_mut().set_power_menu_faces(menu);
-        // The open cart's parts that never change: each socket, the chip seated in each, the
-        // blank chip in flight and its shadow, in `Core::ALL` order. At boot like the power
-        // menu's rows, so the first frame of a lid coming off is not spent in a rasteriser.
-        let sockets = slot_store::Core::ALL
-            .iter()
-            .map(|c| {
-                let f = socket_face(*c);
-                compositor.create_texture(f.w, f.h, &f.rgba)
-            })
-            .collect();
+        // The open cart's parts that never change: the chip, and each core's name, in
+        // `Core::ALL` order. At boot like the power menu's rows, so the first frame of a lid
+        // coming off is not spent in a rasteriser. The chip is one face per core only because
+        // the caller indexes it that way — it is the same chip for all of them, and what
+        // differs is the name that goes on it.
         let chips = slot_store::Core::ALL
             .iter()
             .map(|c| {
-                let f = chip_face(Some(*c));
+                let f = chip_face(*c);
                 compositor.create_texture(f.w, f.h, &f.rgba)
             })
             .collect();
-        let blank = chip_face(None);
-        let blank = compositor.create_texture(blank.w, blank.h, &blank.rgba);
+        let names = slot_store::Core::ALL
+            .iter()
+            .map(|c| {
+                let f = core_name_face(*c);
+                compositor.create_texture(f.w, f.h, &f.rgba)
+            })
+            .collect();
         let shadow = chip_shadow_face();
         let shadow = compositor.create_texture(shadow.w, shadow.h, &shadow.rgba);
         self.session
             .app_mut()
-            .set_core_part_faces(sockets, chips, blank, shadow);
+            .set_core_part_faces(chips, names, shadow);
         // Every action the picker takes, the way out first and the choice last, as the
         // switcher's legend is ordered.
         let legend = [

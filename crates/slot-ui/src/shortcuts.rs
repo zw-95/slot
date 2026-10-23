@@ -161,7 +161,7 @@ impl Row {
 /// actually carries, not with the one that happened to be on the desk when the card was written;
 /// the measuring script takes the font as `SLOT_FONT`.
 #[cfg(not(feature = "lang-en"))]
-pub const ROWS: [Row; 39] = [
+pub const ROWS: [Row; 40] = [
     // The keys that answer on every screen, and the only section that is about the device rather
     // than about a screen: the two levels, and the power button. None of them needs a screen to be
     // under it, so none of them belongs to one.
@@ -215,6 +215,13 @@ pub const ROWS: [Row; 39] = [
     // pair was the other way round until the player asked for it: the hand reads down one column
     // of gestures, and a lone hold among them is the one that has to be found rather than read.
     Row::Key(&[Seg::Sep("轻点"), Seg::Btn("Y")], "切换子文件夹"),
+    // Two ways to the same shelf. The chord is the one worth teaching: it answers the moment
+    // it goes down. The hold is kept because a hand that learned it before the chord existed
+    // still reaches for it, and a shortcut that stops working is worse than one that is slow.
+    Row::Key(
+        &[Seg::Btn("SELECT"), Seg::Sep("+"), Seg::Btn("Y")],
+        "切换机种货架",
+    ),
     Row::Key(&[Seg::Sep("长按"), Seg::Btn("Y")], "切换机种货架"),
     Row::Key(&[Seg::Btn("START")], "为这张卡挑一个模拟器"),
     Row::Key(&[Seg::Btn("MENU")], "关于页与快捷键说明"),
@@ -373,7 +380,7 @@ pub const ROWS: [Row; 39] = [
 /// is what it is: the order, the key lines and the counts are identical, and only the words move.
 /// Measured against the column budget above, not eyeballed — see the note on the Chinese table.
 #[cfg(feature = "lang-en")]
-pub const ROWS: [Row; 39] = [
+pub const ROWS: [Row; 40] = [
     // The keys that answer on every screen — see the note on the Chinese table.
     Row::Head("On any screen"),
     Row::Key(
@@ -405,6 +412,11 @@ pub const ROWS: [Row; 39] = [
     Row::Key(&[Seg::Sep("Hold"), Seg::Btn("X")], "Favourites / all"),
     // Tap first, hold second: the order A and X use two rows up.
     Row::Key(&[Seg::Sep("Tap"), Seg::Btn("Y")], "Switch subfolder"),
+    // The chord and the hold are the same shelf — see the note on the Chinese table.
+    Row::Key(
+        &[Seg::Btn("SELECT"), Seg::Sep("+"), Seg::Btn("Y")],
+        "Cycle the machine",
+    ),
     Row::Key(&[Seg::Sep("Hold"), Seg::Btn("Y")], "Cycle the machine"),
     Row::Key(&[Seg::Btn("START")], "Pick the core"),
     Row::Key(&[Seg::Btn("MENU")], "About & shortcuts"),

@@ -44,11 +44,10 @@ fn main() {
     let t = Instant::now();
     let mut n = 0;
     for c in slot_store::Core::ALL {
-        n += slot_ui::socket_face(c).rgba.len();
-        n += slot_ui::chip_face(Some(c)).rgba.len();
+        n += slot_ui::chip_face(c).rgba.len();
+        n += slot_ui::core_name_face(c).rgba.len();
     }
-    n += slot_ui::chip_face(None).rgba.len();
-    rows.push(("插座 + 芯片", ms(t), n));
+    rows.push(("芯片 + 名称", ms(t), n));
 
     let t = Instant::now();
     let mut n = 0;

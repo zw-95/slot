@@ -11,15 +11,15 @@ use slot_store::{
 use slot_ui::lang;
 use slot_ui::{
     board_at, board_zoom, draw_backdrop, draw_edge_glow, draw_empty_slot, draw_shortcut_row,
-    draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of, on_board,
+    draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of,
     ClockPicker, Draw, FfState, Hud, HudKind, Icon, Letters, Millis, Placed, Polaroids,
-    PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W,
-    CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HINT_H, HOP_LIFT, MOUTH_H, PLATE_Y, SHADOW_H,
-    SHADOW_W, SHELF_TITLE_H, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, STICKER_H, TURN_PAD,
+    PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W, CORE_H,
+    CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H, NAME_TRAVEL, NAME_W, PLATE_Y, SHELF_TITLE_H,
+    STICKER_H, TURN_PAD,
 };
 
 use crate::audio::{Profile, Sfx};
-use crate::core_picker::{Chip, CorePicker, Outcome, Press};
+use crate::core_picker::{swap_pose, Chip, CorePicker, Outcome, Press};
 use crate::link_radio::LinkRole;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
 use crate::persist::{self, Snapshot};
@@ -1011,6 +1011,12 @@ pub struct App {
     fav_held: Option<Millis>,
     /// When B went down on the shelf: a hold opens the direct-connect dialog. A tap does nothing.
     mtp_held: Option<Millis>,
+    /// When Y went down on the shelf. Y carries two gestures and always did: a tap walking the
+    /// machine's subfolders, and a hold swapping which machine's shelf is up. The hold is the
+    /// older way and SELECT+Y is the newer one, and both answer — a hand that learned the hold
+    /// reaches for it without being told to, and a shortcut that quietly stopped working is
+    /// worse than one that makes you wait half a second. Same shape as `play_held`.
+    sys_held: Option<Millis>,
     /// The mark a favourite cart wears, with the size it was rasterised at. One colour whatever
     /// shelf is up. Its own upload rather than one of the HUD's, because it is the one glyph on the
     /// shelf that is a colour of its own instead of the case's ink.
@@ -1069,12 +1075,12 @@ pub struct App {
     core_lid_face: Option<TexId>,
     /// The cart the uploaded board and lid were built for.
     core_faces_stem: Option<String>,
-    /// In `Core::ALL` order: each socket empty, and the chip seated and named in each. Uploaded
-    /// at boot, since none of them ever changes.
-    core_socket_faces: Vec<TexId>,
+    /// In `Core::ALL` order: the chip, and each core's name. Uploaded at boot, since neither ever
+    /// changes. The chip is one shape for all of them — what differs is the name on it, which is
+    /// why there is a face per core and not per core *and* per socket.
     core_chip_faces: Vec<TexId>,
-    /// The chip in flight, blank, and the shadow under it.
-    core_blank_chip_face: Option<TexId>,
+    core_name_faces: Vec<TexId>,
+    /// The shadow under the open lid.
     core_chip_shadow_face: Option<TexId>,
     /// `B` Cancel, the two arrows, `A` Choose, each with the width it was rastered at, laid out
     /// by role in that order: Cancel under the cart's left edge, Swap on the panel's centre,
@@ -1311,6 +1317,7 @@ impl App {
             play_held: None,
             fav_held: None,
             mtp_held: None,
+            sys_held: None,
             fav_star: None,
             fav_ind: None,
             refusal: None,
@@ -1331,9 +1338,8 @@ impl App {
             core_board_face: None,
             core_lid_face: None,
             core_faces_stem: None,
-            core_socket_faces: Vec::new(),
             core_chip_faces: Vec::new(),
-            core_blank_chip_face: None,
+            core_name_faces: Vec::new(),
             core_chip_shadow_face: None,
             core_legend_faces: Vec::new(),
             game_menu: None,
@@ -2865,10 +2871,16 @@ impl App {
                         self.toggle_favorite();
                     }
                 }
-                // Y is one thing now: a tap walks this machine's subfolders. It used to hold to
-                // swap the machine as well, and no longer does — that is SELECT+Y, which costs
-                // a chord rather than half a second of waiting.
-                Action::GbaUp(Btn::Y) => self.cycle_folder(),
+                // Y, on the same mechanism as A and X: the press is remembered, the release
+                // decides which gesture it was, and the hold has spent the press already if it
+                // got to the threshold first. A tap walks this machine's subfolders; a hold
+                // swaps the machine, which SELECT+Y also does without the wait.
+                Action::GbaDown(Btn::Y) => self.sys_held = Some(now),
+                Action::GbaUp(Btn::Y) => {
+                    if self.sys_held.take().is_some() {
+                        self.cycle_folder();
+                    }
+                }
                 // (长按 B 起 WiFi 直连的入口已按用户要求移除——功能暂缓。)
                 Action::Insert => self.insert(false),
                 _ => {}
@@ -3269,6 +3281,7 @@ impl App {
     fn timers(&mut self) {
         self.play_hold();
         self.fav_hold();
+        self.sys_hold();
         // The "connect the cable" beat hands over to the live screen on its own, a moment after
         // the gadget has been switched.
         // While the connect beat is up, poll for the address the enter script leaves behind: the
@@ -3804,17 +3817,15 @@ impl App {
         self.core_faces_stem = self.selected_stem().map(str::to_string);
     }
 
-    /// `sockets` and `chips` in `Core::ALL` order.
+    /// `chips` and `names`, both in `Core::ALL` order.
     pub fn set_core_part_faces(
         &mut self,
-        sockets: Vec<TexId>,
         chips: Vec<TexId>,
-        blank: TexId,
+        names: Vec<TexId>,
         shadow: TexId,
     ) {
-        self.core_socket_faces = sockets;
         self.core_chip_faces = chips;
-        self.core_blank_chip_face = Some(blank);
+        self.core_name_faces = names;
         self.core_chip_shadow_face = Some(shadow);
     }
 
@@ -3974,6 +3985,27 @@ impl App {
         self.direct_ip_dirty = false;
     }
 
+    /// One core's name on the board, at `alpha` — full while nothing is changing, and somewhere
+    /// between nothing and full while it is either leaving or arriving.
+    fn draw_core_name(
+        &self,
+        core: Core,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
+        alpha: f32,
+        out: &mut Vec<Draw>,
+    ) {
+        if alpha <= 0.0 {
+            return;
+        }
+        let Some(tex) = self.core_name_faces.get(core.index()).copied() else {
+            return;
+        };
+        out.push(Draw::Tex { x, y, w, h, tex, alpha });
+    }
+
     /// The picker, but only once it has started opening: `None` while it is still standing on
     /// the shelf waiting for this cart's faces, so nothing of it is on screen yet and the row
     /// has not made way for it.
@@ -3996,7 +4028,11 @@ impl App {
         let progress = picker.openness(now);
         // The shadows and the legend come in with the lift, not with the slide.
         let lift = lift_of(progress);
-        let board = board_at(progress);
+        // Which machine's cart is being opened. The back half is that machine's shell, so a Game
+        // Boy cart has to open as a portrait cart and a Super Nintendo one as its own shape:
+        // borrowing the Advance's for all four put a landscape board inside a portrait lid.
+        let system = self.current_machine();
+        let board = board_at(progress, system);
         let zoom = board_zoom(board);
         let ready = self.core_faces_ready();
         // A card that supplies its own board has the chips drawn into the art, so there is
@@ -4022,11 +4058,9 @@ impl App {
             // green once the choice has been made and the picker is on its way out. Nothing is
             // baked into the board texture, because the state changes every press.
             if let Some(art) = slot_ui::board_art() {
-                let chip = picker.chip(now);
-                // Which socket, by position on the board rather than by measuring `across`
-                // back: a chip halfway through a hop between the ends of a run of three is
-                // over the middle one, and a threshold would call it the right-hand one.
-                let here = chip.index;
+                // How far along the machine's own list the core in hand is: a card that drew its
+                // own board drew a lamp per place on it, and this is the one that is lit.
+                let here = picker.index();
                 let done = picker.closing();
                 for (i, lamp) in art.lamps.iter().enumerate() {
                     let colour = if i == here {
@@ -4054,78 +4088,68 @@ impl App {
             // positions standing over a finished board — the picker's own furniture printed over
             // somebody else's drawing. The chip below is gated for the same reason and always
             // was; this loop was not, which is the pair of leftovers the player saw.
-            if !own_board {
-                // One per core this machine offers, and not one per core that exists: every
-                // core's socket face is uploaded at boot, but the board has room for a
-                // machine's own list and the rest of them are not this cart's to choose from.
-                for (i, core) in picker.window().iter().copied().enumerate() {
-                    let Some(tex) = self.core_socket_faces.get(core.index()).copied() else {
-                        continue;
-                    };
-                    // A face drawn at its own size is only sharp on whole pixels.
-                    let (x, y) = on_board(board, SOCKET_U[i], SOCKET_V);
-                    out.push(Draw::Tex {
-                        x: x.round(),
-                        y: y.round(),
-                        w: SOCKET_W as f32 * zoom,
-                        h: SOCKET_H as f32 * zoom,
-                        tex,
-                        alpha: 1.0,
-                    });
-                }
-            }
-
+            // The chip, and the whole of what the board is for. What core is in hand is written
+            // on the chip rather than shown by which socket it is standing in, so there is one
+            // chip and it sits in the middle of the board — the same chip whichever core it is,
+            // which is why it never flies anywhere and never needs a stand-in in flight.
             let chip = picker.chip(now);
-            // Between the ends of the run: `across` is a fraction of that run and the sockets
-            // are evenly spaced, so the last socket is where 1.0 lands whatever the count is.
-            let u = CHIP_U[0] + (CHIP_U[chip.visible - 1] - CHIP_U[0]) * chip.across;
-            if !own_board && chip.lift > 0.0 {
-                if let Some(tex) = self.core_chip_shadow_face {
-                    // Under the body's middle and 90 units down the board, where the mockup's
-                    // oval falls: low enough to read as cast on the board rather than tucked
-                    // under the pins.
-                    let (cx, cy) = on_board(board, u + 19.0, CHIP_V + 29.4);
-                    let (w, h) = (SHADOW_W as f32 * zoom, SHADOW_H as f32 * zoom);
-                    out.push(Draw::Tex {
-                        x: cx - w / 2.0,
-                        y: cy - h / 2.0,
-                        w,
-                        h,
-                        tex,
-                        alpha: 0.6 * chip.lift * lift,
-                    });
-                }
-            }
-            // The blank stand-in is for a chip in flight, and there is no chip to fly across a
-            // board that has its own: drawn anyway it would be a grey chip flashing over a
-            // finished board, which is worse than nothing.
-            let face = if own_board {
-                None
-            } else {
-                match chip.seated {
-                    Some(core) => self.core_chip_faces.get(core.index()).copied(),
-                    None => self.core_blank_chip_face,
-                }
-            };
-            if let Some(tex) = face {
-                let (x, y) = on_board(board, u, CHIP_V - HOP_LIFT * chip.lift);
+            if !own_board {
+                let (cw, ch) = (CORE_W as f32 * zoom, CORE_H as f32 * zoom);
                 let body = Placed {
-                    x: x + chip.shake,
-                    y,
-                    w: CHIP_W as f32 * zoom,
-                    h: CHIP_H as f32 * zoom,
+                    x: board.x + (board.w - cw) / 2.0 + chip.shake,
+                    y: board.y + (board.h - ch) / 2.0,
+                    w: cw,
+                    h: ch,
                 };
-                // Whole pixels, as the sockets: a seated chip is drawn at its own size too.
-                let at = grown(body, TURN_PAD as f32 * zoom);
-                out.push(Draw::Turned {
-                    x: at.x.round(),
-                    y: at.y.round(),
-                    w: at.w,
-                    h: at.h,
-                    tex,
-                    alpha: 1.0,
-                    turn: chip.tip,
-                });
+                if let Some(core) = chip.seated {
+                    if let Some(tex) = self.core_chip_faces.get(core.index()).copied() {
+                        // Grown into the transparent border the face carries, so the padding is
+                        // part of the draw and not a chip drawn too small.
+                        let at = grown(body, TURN_PAD as f32 * zoom);
+                        out.push(Draw::Tex {
+                            x: at.x.round(),
+                            y: at.y.round(),
+                            w: at.w,
+                            h: at.h,
+                            tex,
+                            alpha: 1.0,
+                        });
+                    }
+                }
+                // And the name on it. One name while nothing is changing, and two while it is:
+                // the one being left goes out the way the hand went, and the one being arrived
+                // at comes in from the other side.
+                let (nw, nh) = (NAME_W as f32 * zoom, NAME_H as f32 * zoom);
+                let nx = board.x + (board.w - nw) / 2.0 + chip.shake;
+                let ny = body.y + (ch - nh) / 2.0;
+                match chip.swap {
+                    Some(swap) => {
+                        let (out_x, out_a, in_x, in_a) = swap_pose(&swap);
+                        self.draw_core_name(
+                            swap.from,
+                            nx + out_x * NAME_TRAVEL * zoom,
+                            ny,
+                            nw,
+                            nh,
+                            out_a,
+                            out,
+                        );
+                        self.draw_core_name(
+                            swap.to,
+                            nx + in_x * NAME_TRAVEL * zoom,
+                            ny,
+                            nw,
+                            nh,
+                            in_a,
+                            out,
+                        );
+                    }
+                    None => {
+                        if let Some(core) = chip.seated {
+                            self.draw_core_name(core, nx, ny, nw, nh, 1.0, out);
+                        }
+                    }
+                }
             }
         }
 
@@ -4134,8 +4158,8 @@ impl App {
         // with the lid and comes in as the lid rises. Drawn whether or not this cart's faces are
         // ready: the lid is always something, the fallback included, and it always casts one.
         if let Some(tex) = self.core_chip_shadow_face {
-            let (lid, _) = lid_at(progress);
-            let k = lid.w / lid_at(1.0).0.w;
+            let (lid, _) = lid_at(progress, system);
+            let k = lid.w / lid_at(1.0, system).0.w;
             let (w, h) = (LID_SHADOW_W * k, LID_SHADOW_H * k);
             out.push(Draw::Tex {
                 x: lid.x + (lid.w - w) / 2.0,
@@ -4151,7 +4175,7 @@ impl App {
             // Always opaque: at the very start and end of the movement the lid is the cart on
             // the shelf, and a cart there does not fade.
             if let Some(tex) = self.core_lid_face {
-                let (lid, turn) = lid_at(progress);
+                let (lid, turn) = lid_at(progress, system);
                 let at = grown(lid, TURN_PAD as f32 * lid.w / CART_W as f32);
                 out.push(Draw::Turned {
                     x: at.x,
@@ -4170,7 +4194,7 @@ impl App {
             // cart is the only thing left to lift — not `core_lid_face`, which would still be
             // whatever cart the worker built last — and it is drawn unpadded: unlike a face
             // built for the picker, the shelf's face carries no transparent border to grow into.
-            let (lid, turn) = lid_at(progress);
+            let (lid, turn) = lid_at(progress, system);
             out.push(Draw::Turned {
                 x: lid.x,
                 y: lid.y,
@@ -4312,6 +4336,26 @@ impl App {
         if self.now().saturating_sub(at) >= PLAY_HOLD_MS {
             self.mtp_held = None;
             self.open_direct_link();
+        }
+    }
+
+    /// A hold of Y: swap which machine's shelf is up. Spent like `fav_hold`, for the same
+    /// reason — the shelf stays up afterwards, and a hold that fired on every tick would walk
+    /// the machines round for as long as the button was down.
+    ///
+    /// It is the slower of the two ways to this shelf and it is not the one the card teaches,
+    /// but it is the one an older hand reaches for, so it is kept rather than removed.
+    fn sys_hold(&mut self) {
+        let Some(at) = self.sys_held else {
+            return;
+        };
+        if !self.on_shelf() {
+            self.sys_held = None;
+            return;
+        }
+        if self.now().saturating_sub(at) >= PLAY_HOLD_MS {
+            self.sys_held = None;
+            self.cycle_system();
         }
     }
 
@@ -5203,6 +5247,7 @@ impl App {
         self.play_held = None;
         self.fav_held = None;
         self.mtp_held = None;
+        self.sys_held = None;
     }
 
     /// Whether the board and lid on the GPU are the highlighted cart's, so its open can start.

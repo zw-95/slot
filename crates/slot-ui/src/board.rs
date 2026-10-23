@@ -64,29 +64,35 @@ pub fn rom_marking(stem: &str) -> Vec<String> {
     title
 }
 
-/// The marking alone, on nothing, the size of the ROM's body.
-pub fn rom_marking_face(stem: &str) -> CartFace {
+/// The marking alone, on nothing, the size of the ROM's body — times `scale`, because the board
+/// it is inked onto is not always drawn at the size the art was drawn at: a portrait cart's
+/// shell is taller than its board is, and the board inside it is smaller than an Advance one.
+pub fn rom_marking_face(stem: &str, scale: f32) -> CartFace {
     let title = rom_marking(stem);
+    let (w, h) = (
+        (ROM_W as f32 * scale).round() as u32,
+        (ROM_H as f32 * scale).round() as u32,
+    );
     let mut face = CartFace {
-        rgba: vec![0; (ROM_W * ROM_H * 4) as usize],
-        w: ROM_W,
-        h: ROM_H,
+        rgba: vec![0; (w * h * 4) as usize],
+        w,
+        h,
     };
     let Some(font) = text::label_font() else {
         return face;
     };
-    let max_w = (ROM_W - 2 * MARK_PAD) as f32;
-    let line_h = (MARK_PX * 1.25).ceil() as u32;
-    let mut top = ROM_H.saturating_sub(line_h * title.len() as u32) / 2;
+    let max_w = (w - 2 * MARK_PAD) as f32;
+    let line_h = (MARK_PX * scale * 1.25).ceil() as u32;
+    let mut top = h.saturating_sub(line_h * title.len() as u32) / 2;
     for line in &title {
-        let layout = text::fit(font, line, max_w, 1, MARK_PX, MARK_MIN_PX);
+        let layout = text::fit(font, line, max_w, 1, MARK_PX * scale, MARK_MIN_PX * scale);
         ink_band(&mut face, top, line_h, &layout, MARK_INK, 1.0);
         top += line_h;
     }
     face
 }
 
-pub fn board_face(cart: &Cart) -> CartFace {
+pub fn board_face(cart: &Cart, system: slot_store::System) -> CartFace {
     // The card's own board, if it supplied one. Its chips are drawn into the art and its lamps
     // are magenta for the code to fill, so none of what follows applies: no shell-coloured
     // placeholders to paint and no ROM line to ink, because the card has already drawn both.
@@ -98,23 +104,71 @@ pub fn board_face(cart: &Cart) -> CartFace {
         };
     }
     let shell = shell_for(&cart.code);
-    // Deepest placeholder first and the wall last, so a shell whose own hex or shade matches
-    // a placeholder still further down the list finds nothing left to replace: once a
-    // placeholder's `.replace` call has run, its literal text is gone from the SVG.
+    let (w, h) = board_size(system);
+    // The back half of the shell, in this cart's own plastic and this machine's own shape.
+    let mut face = back_shell(system, shell.colour, w, h);
+    // And the board inside it, drawn at the proportions it was drawn at and inset in the shell
+    // rather than stretched to fill it: a portrait shell is nearly half again as tall as the
+    // board is, and pulling the art to that shape would bow its traces and oval its pads.
+    let (pw, ph) = pcb_size(w, h);
     let svg = BOARD_SVG
         .replace(DEEP, &hex(shade(shell.colour, 0.35)))
         .replace(FLOOR, &hex(shade(shell.colour, 0.62)))
         .replace(PLASTIC, &hex(shell.colour));
-    let rgba = art::render_svg(&svg, BOARD_W, BOARD_H)
-        .unwrap_or_else(|| vec![0; (BOARD_W * BOARD_H * 4) as usize]);
-    let mut face = CartFace {
-        rgba,
-        w: BOARD_W,
-        h: BOARD_H,
+    let pcb = CartFace {
+        rgba: art::render_svg(&svg, pw, ph)
+            .unwrap_or_else(|| vec![0; (pw * ph * 4) as usize]),
+        w: pw,
+        h: ph,
     };
-    over(&mut face, &rom_marking_face(&cart.stem), ROM_X, ROM_Y);
+    let (px, py) = ((w - pw) / 2, (h - ph) / 2);
+    over(&mut face, &pcb, px, py);
+    // The ROM's marking travels with the board it is printed on, at the board's own scale.
+    let s = pw as f32 / BOARD_W as f32;
+    over(
+        &mut face,
+        &rom_marking_face(&cart.stem, s),
+        px + (ROM_X as f32 * s).round() as u32,
+        py + (ROM_Y as f32 * s).round() as u32,
+    );
     face
 }
+
+/// The shell's back half: the machine's outline in this cart's plastic, darkened — it is the
+/// inside of a shell that has just been taken apart — with its thickness showing at the rim.
+fn back_shell(system: slot_store::System, shell: [u8; 3], w: u32, h: u32) -> CartFace {
+    let mask = crate::silhouette::silhouette(system, w, h);
+    let depth = crate::silhouette::cart_depth(system, w, h);
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    for i in 0..(w * h) as usize {
+        let a = mask[i];
+        if a == 0 {
+            continue;
+        }
+        // Dark at the rim and lifting inward over the first `RIM_PX`, which is how thick a
+        // cart's wall is at the size an open cart is drawn.
+        let k = 0.40 + 0.34 * (depth[i] as f32 / RIM_PX).min(1.0);
+        rgba[i * 4..i * 4 + 3].copy_from_slice(&shell.map(|v| (v as f32 * k).round() as u8));
+        rgba[i * 4 + 3] = a;
+    }
+    CartFace { rgba, w, h }
+}
+
+/// How big the board is inside a shell of `w`×`h`: nearly the shell's width, and at the board
+/// art's own proportions — capped by height, so a portrait shell does not get a board taller
+/// than the shell it sits in.
+fn pcb_size(w: u32, h: u32) -> (u32, u32) {
+    let mut pw = (w as f32 * 0.94).round() as u32;
+    let mut ph = (pw as f32 * BOARD_H as f32 / BOARD_W as f32).round() as u32;
+    if ph > h {
+        ph = h;
+        pw = (ph as f32 * BOARD_W as f32 / BOARD_H as f32).round() as u32;
+    }
+    (pw, ph)
+}
+
+/// How many pixels in from the rim the shell's wall stops darkening it.
+const RIM_PX: f32 = 26.0;
 
 /// One line of type, centred across the face, in `band` rows from `top`, its coverage scaled by
 /// `strength`. Composited straight-over whatever is already there: on a transparent pixel that
@@ -235,15 +289,36 @@ pub const SHADOW_H: u32 = 12;
 /// 11 board units, the socket names' size in the mockup.
 const NAME_PX: f32 = 17.0;
 const NAME_MIN_PX: f32 = 8.0;
+/// The name on the chip, which is the one name on the board and is read on its own rather than
+/// as one of three: set bigger than a socket's was, and shrunk only if a core's name will not
+/// fit the width at full size.
+const NAME_BIG_PX: f32 = 30.0;
+const NAME_BIG_MIN_PX: f32 = 15.0;
+/// The name's face, and how far it travels: the width it is allowed, and the distance either
+/// side of the middle that a leaving name goes to and an arriving one comes from.
+pub const NAME_W: u32 = 190;
+pub const NAME_H: u32 = 48;
+pub const NAME_TRAVEL: f32 = 150.0;
+/// The chip's size: the board's, now that it has it to itself.
+pub const CORE_W: u32 = 150;
+pub const CORE_H: u32 = 104;
 const SOCKET_INK: [u8; 3] = [0xee, 0xf5, 0xe6];
 const CHIP_INK: [u8; 3] = [0xf2, 0xf2, 0xf2];
 
+/// Where the lid rests, and the enlargement it rests at — the Advance lid's own 144 over its
+/// 240, so a portrait cart's lid comes out portrait rather than at the Advance's proportions.
 const LID_REST: Placed = Placed {
     x: 288.0,
     y: 30.0,
     w: 144.0,
     h: 81.0,
 };
+const LID_ZOOM: f32 = 144.0 / 240.0;
+
+/// The board's enlargement: the Advance board's own 372 over its 240. Capped by
+/// `BOARD_MAX_H` for the portrait machines — see `board_size`.
+const BOARD_ZOOM: f32 = 372.0 / 240.0;
+const BOARD_MAX_H: f32 = 290.0;
 
 /// A rect on the panel.
 #[derive(Copy, Clone, PartialEq, Debug)]
@@ -254,11 +329,28 @@ pub struct Placed {
     pub h: f32,
 }
 
-/// The highlighted cart as the shelf stands it, once the row has settled.
-pub fn shelf_cart() -> Placed {
-    // The core picker opens the Advance cart: a Game Boy or Game Boy Color cart has the one
-    // core and nothing to choose, so this view is never reached for one.
-    let size = size_for(slot_store::System::Gba);
+/// How big the opened cart is drawn, per machine: the cart's own shape at the board's
+/// enlargement, and not one shape borrowed for all four.
+///
+/// It was borrowed until every machine had cores to choose between — the picker was written for
+/// the Advance, and a Game Boy cart had one core and nothing to pick. A portrait cart opened at
+/// the Advance's factor is 428 tall, which with the board's y put its foot 98 past the bottom of
+/// a 480 panel, so a board is capped by height and a portrait one is drawn a little smaller.
+pub fn board_size(system: slot_store::System) -> (u32, u32) {
+    let size = size_for(system);
+    let zoom = BOARD_ZOOM.min(BOARD_MAX_H / size.h as f32);
+    (
+        (size.w as f32 * zoom).round() as u32,
+        (size.h as f32 * zoom).round() as u32,
+    )
+}
+
+/// The highlighted cart as the shelf stands it, once the row has settled — which is a cart of
+/// the machine whose shelf is up. A Game Boy cart is portrait and stands higher than an Advance
+/// one, and the open grows out of whatever is standing there rather than out of an Advance cart
+/// that is not.
+pub fn shelf_cart(system: slot_store::System) -> Placed {
+    let size = size_for(system);
     Placed {
         x: (OUT_W - size.w) as f32 / 2.0,
         y: foot_y(size) - size.h as f32,
@@ -268,25 +360,39 @@ pub fn shelf_cart() -> Placed {
 }
 
 /// The back half: standing where the shelf stood it through the slide, then growing to its rest.
-pub fn board_at(progress: f32) -> Placed {
+pub fn board_at(progress: f32, system: slot_store::System) -> Placed {
+    let (w, h) = board_size(system);
     let rest = Placed {
         x: BOARD_X,
         y: BOARD_Y,
-        w: BOARD_W as f32,
-        h: BOARD_H as f32,
+        w: w as f32,
+        h: h as f32,
     };
-    lerp(shelf_cart(), rest, lift_of(progress))
+    lerp(shelf_cart(system), rest, lift_of(progress))
 }
 
-/// The front half and its turn: slid up off the back, then lifted from there to its rest.
-pub fn lid_at(progress: f32) -> (Placed, f32) {
-    let shelf = shelf_cart();
+/// The front half and its turn: slid up off the back, then lifted from there to its rest. The
+/// lid is the cart's own front, so it is the machine's shape too — a portrait cart's lid is
+/// portrait, and not an Advance lid stretched over a Game Boy shell.
+pub fn lid_at(progress: f32, system: slot_store::System) -> (Placed, f32) {
+    let shelf = shelf_cart(system);
     let slid = Placed {
         y: shelf.y - SLIDE_UP * slide_of(progress),
         ..shelf
     };
     let lift = lift_of(progress);
-    (lerp(slid, LID_REST, lift), LID_TURN * lift)
+    (lerp(slid, lid_rest(system), lift), LID_TURN * lift)
+}
+
+/// Where the lid rests, and the size it rests at: the same place for every machine, at that
+/// machine's own proportions.
+fn lid_rest(system: slot_store::System) -> Placed {
+    let size = size_for(system);
+    Placed {
+        w: size.w as f32 * LID_ZOOM,
+        h: size.h as f32 * LID_ZOOM,
+        ..LID_REST
+    }
 }
 
 /// A board unit on the panel, wherever the open cart currently is.
@@ -344,28 +450,58 @@ pub fn socket_face(core: Core) -> CartFace {
         w: SOCKET_W,
         h: SOCKET_H,
     };
-    if let Some(layout) = name_layout(core, (SOCKET_W - 12) as f32) {
+    if let Some(layout) = name_layout(core, (SOCKET_W - 12) as f32, NAME_PX, NAME_MIN_PX) {
         // Inside the outline, which runs from 2.9 to 26.9 units down the face.
         ink_band(&mut face, 4, 37, &layout, SOCKET_INK, 0.5);
     }
     face
 }
 
-/// The chip, named for the socket it is seated in, or blank in flight. Padded, since it tips.
-pub fn chip_face(core: Option<Core>) -> CartFace {
-    let svg = CHIP_SVG;
-    let rgba = art::render_svg(svg, CHIP_W, CHIP_H)
-        .unwrap_or_else(|| vec![0; (CHIP_W * CHIP_H * 4) as usize]);
+/// The one chip the open cart shows, and now the only thing on the board besides the name.
+///
+/// **Unnamed**, which is the change: the name used to be inked into the chip, and a name that
+/// cannot move cannot leave. It is a face of its own now (`core_name_face`), because when the
+/// core changes it is the name that travels and the chip under it that stays — the same chip,
+/// whichever of them is in hand.
+///
+/// Far bigger than a socket's chip was: three sockets shared the board between them and one chip
+/// has it to itself. Padded, because it is drawn turned when the board refuses a press.
+pub fn chip_face(_core: Core) -> CartFace {
+    let rgba = art::render_svg(CHIP_SVG, CORE_W, CORE_H)
+        .unwrap_or_else(|| vec![0; (CORE_W * CORE_H * 4) as usize]);
+    padded(
+        &CartFace {
+            rgba,
+            w: CORE_W,
+            h: CORE_H,
+        },
+        TURN_PAD,
+    )
+}
+
+/// A core's name on nothing, wide enough for the longest of them and centred in that width so
+/// that it can slide: while the core changes, two of these are drawn at once, one leaving and
+/// one arriving, and both travel the same distance either side of the middle.
+pub fn core_name_face(core: Core) -> CartFace {
     let mut face = CartFace {
-        rgba,
-        w: CHIP_W,
-        h: CHIP_H,
+        rgba: vec![0; (NAME_W * NAME_H * 4) as usize],
+        w: NAME_W,
+        h: NAME_H,
     };
-    if let Some(layout) = core.and_then(|c| name_layout(c, (CHIP_W - 8) as f32)) {
-        // The body, between the two rows of legs.
-        ink_band(&mut face, 4, 34, &layout, CHIP_INK, 1.0);
-    }
-    padded(&face, TURN_PAD)
+    let Some(layout) = name_layout(core, (NAME_W - 8) as f32, NAME_BIG_PX, NAME_BIG_MIN_PX) else {
+        return face;
+    };
+    // Centred in the face's height, in a band the size of the type.
+    let band = (NAME_BIG_PX * 1.6).ceil() as u32;
+    ink_band(
+        &mut face,
+        (NAME_H - band) / 2,
+        band,
+        &layout,
+        CHIP_INK,
+        1.0,
+    );
+    face
 }
 
 /// A soft dark oval, for under the chip while it is off the board.
@@ -385,11 +521,11 @@ pub fn chip_shadow_face() -> CartFace {
 
 /// A core's name exactly as the player reads it — `mGBA`, not `MGBA`. `text::fit` capitalises
 /// everything it lays out, so this builds the layout itself, shrinking only if it must.
-fn name_layout(core: Core, max_w: f32) -> Option<text::Layout> {
+fn name_layout(core: Core, max_w: f32, start_px: f32, min_px: f32) -> Option<text::Layout> {
     let font = text::label_font()?;
     let tracking = |px: f32| (px * 0.10).round();
-    let mut px = NAME_PX;
-    while px > NAME_MIN_PX && text::line_width(font, core.text(), px, tracking(px)) > max_w {
+    let mut px = start_px;
+    while px > min_px && text::line_width(font, core.text(), px, tracking(px)) > max_w {
         px -= 1.0;
     }
     Some(text::Layout {

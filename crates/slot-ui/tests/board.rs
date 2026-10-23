@@ -1,8 +1,8 @@
-use slot_store::{Cart, Core};
+use slot_store::{Cart, Core, System};
 use slot_ui::{
     board_at, board_face, chip_face, chip_shadow_face, lid_at, lift_of, on_board, padded,
     rom_marking, rom_marking_face, shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed,
-    BOARD_H, BOARD_W, CART_H, CHIP_H, CHIP_W, DEFAULT_SHELL, LID_TURN, ROM_H, ROM_W, SHADOW_H,
+    BOARD_H, BOARD_W, CART_H, DEFAULT_SHELL, LID_TURN, ROM_H, ROM_W, SHADOW_H,
     SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H, SOCKET_W, TURN_PAD,
 };
 
@@ -69,7 +69,7 @@ fn the_marking_is_drawn_and_stays_on_the_chip() {
         "Advance Wars 2 - Black Hole Rising",
         "Pokemon - LeafGreen Version (USA, Europe) (Rev 1)",
     ] {
-        let face = rom_marking_face(stem);
+        let face = rom_marking_face(stem, 1.0);
         assert_eq!((face.w, face.h), (ROM_W, ROM_H));
         let alpha = |x: u32, y: u32| face.rgba[((y * face.w + x) * 4 + 3) as usize];
         assert!(
@@ -91,7 +91,7 @@ fn the_marking_is_drawn_and_stays_on_the_chip() {
 /// within 9 px of it is only the cell's own fill, so dark pixels there are print.
 #[test]
 fn the_cell_carries_no_print() {
-    let face = board_face(&cart(EMERALD, "BPEE"));
+    let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
     let dark = (50..69)
         .flat_map(|y| (307..326).map(move |x| (x, y)))
         .filter(|&(x, y)| (x as i32 - 316).pow(2) + (y as i32 - 59).pow(2) <= 81)
@@ -103,7 +103,7 @@ fn the_cell_carries_no_print() {
 /// Rasterised at the size it is shown at, since that is the only size a face is sharp at.
 #[test]
 fn the_board_is_the_size_it_is_shown_at() {
-    let face = board_face(&cart(EMERALD, "BPEE"));
+    let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
     assert_eq!((face.w, face.h), (BOARD_W, BOARD_H));
     assert_eq!((BOARD_W, BOARD_H), (372, 209));
 }
@@ -112,13 +112,13 @@ fn the_board_is_the_size_it_is_shown_at() {
 /// (9, 45) is clear of the clips, the floor and every shadow.
 #[test]
 fn the_back_shell_is_the_carts_own_plastic() {
-    let emerald = board_face(&cart(EMERALD, "BPEE"));
+    let emerald = board_face(&cart(EMERALD, "BPEE"), System::Gba);
     assert!(
         near(rgb(&emerald, 14, 70), shell_for("BPEE").colour),
         "Emerald's wall is {:?}",
         rgb(&emerald, 14, 70)
     );
-    let unknown = board_face(&cart("Homebrew", ""));
+    let unknown = board_face(&cart("Homebrew", ""), System::Gba);
     assert!(
         near(rgb(&unknown, 14, 70), DEFAULT_SHELL.colour),
         "an unknown cart's wall is {:?}",
@@ -130,7 +130,7 @@ fn the_back_shell_is_the_carts_own_plastic() {
 /// nothing. Board unit (200, 70) is bare solder mask.
 #[test]
 fn the_board_itself_is_drawn() {
-    let face = board_face(&cart(EMERALD, "BPEE"));
+    let face = board_face(&cart(EMERALD, "BPEE"), System::Gba);
     assert!(
         near(rgb(&face, 310, 108), [0x3a, 0x9a, 0x3c]),
         "the board is {:?}",
@@ -147,7 +147,7 @@ fn alpha(face: &CartFace, x: u32, y: u32) -> u8 {
 #[test]
 fn the_open_cart_starts_as_the_shelf_cart_and_lands_where_the_mockup_has_it() {
     assert_eq!(
-        shelf_cart(),
+        shelf_cart(System::Gba),
         Placed {
             x: 240.0,
             y: 172.5,
@@ -155,9 +155,9 @@ fn the_open_cart_starts_as_the_shelf_cart_and_lands_where_the_mockup_has_it() {
             h: 135.0
         }
     );
-    assert_eq!(board_at(0.0), shelf_cart());
+    assert_eq!(board_at(0.0, System::Gba), shelf_cart(System::Gba));
     assert_eq!(
-        board_at(1.0),
+        board_at(1.0, System::Gba),
         Placed {
             x: 174.0,
             y: 150.0,
@@ -165,13 +165,13 @@ fn the_open_cart_starts_as_the_shelf_cart_and_lands_where_the_mockup_has_it() {
             h: 209.0
         }
     );
-    assert_eq!(board_at(1.7), board_at(1.0), "an overshoot kept growing");
+    assert_eq!(board_at(1.7, System::Gba), board_at(1.0, System::Gba), "an overshoot kept growing");
 }
 
 #[test]
 fn the_lid_leaves_level_and_rests_turned() {
-    assert_eq!(lid_at(0.0), (shelf_cart(), 0.0));
-    let (rest, turn) = lid_at(1.0);
+    assert_eq!(lid_at(0.0, System::Gba), (shelf_cart(System::Gba), 0.0));
+    let (rest, turn) = lid_at(1.0, System::Gba);
     assert_eq!(
         rest,
         Placed {
@@ -201,7 +201,7 @@ fn the_beats_split_one_progress() {
 #[test]
 fn the_back_half_stays_on_the_shelf_while_the_front_slides() {
     for p in [0.0, 0.1, 0.25, SLIDE_SHARE] {
-        assert_eq!(board_at(p), shelf_cart(), "the back moved at progress {p}");
+        assert_eq!(board_at(p, System::Gba), shelf_cart(System::Gba), "the back moved at progress {p}");
     }
 }
 
@@ -209,8 +209,8 @@ fn the_back_half_stays_on_the_shelf_while_the_front_slides() {
 #[test]
 fn the_front_slides_up_a_third_before_it_lifts() {
     assert_eq!(SLIDE_UP, CART_H as f32 / 3.0);
-    let shelf = shelf_cart();
-    let (slid, turn) = lid_at(SLIDE_SHARE);
+    let shelf = shelf_cart(System::Gba);
+    let (slid, turn) = lid_at(SLIDE_SHARE, System::Gba);
     assert_eq!(
         slid,
         Placed {
@@ -219,21 +219,21 @@ fn the_front_slides_up_a_third_before_it_lifts() {
         }
     );
     assert_eq!(turn, 0.0);
-    let (half, turn) = lid_at(SLIDE_SHARE / 2.0);
+    let (half, turn) = lid_at(SLIDE_SHARE / 2.0, System::Gba);
     assert!(half.y < shelf.y && half.y > slid.y && turn == 0.0 && half.w == shelf.w);
 }
 
 /// The lift picks the lid up from where the slide left it rather than from the shelf.
 #[test]
 fn the_lift_starts_where_the_slide_ends() {
-    let (slid, _) = lid_at(SLIDE_SHARE);
-    let (next, _) = lid_at(SLIDE_SHARE + 0.001);
+    let (slid, _) = lid_at(SLIDE_SHARE, System::Gba);
+    let (next, _) = lid_at(SLIDE_SHARE + 0.001, System::Gba);
     assert!((next.y - slid.y).abs() < 0.5 && (next.w - slid.w).abs() < 0.5);
 }
 
 #[test]
 fn board_units_land_on_the_panel_at_one_and_a_half_times() {
-    let board = board_at(1.0);
+    let board = board_at(1.0, System::Gba);
     assert_eq!(on_board(board, 0.0, 0.0), (174.0, 150.0));
     assert_eq!(on_board(board, 240.0, 135.0), (546.0, 359.0));
 }
@@ -281,11 +281,11 @@ fn a_partly_covered_socket_edge_pixel_keeps_the_outline_inks_brightness() {
 /// texture: the outermost `TURN_PAD` pixels are nothing.
 #[test]
 fn the_chip_is_padded_clear_on_every_side() {
-    for core in [None, Some(Core::Mgba), Some(Core::Gpsp)] {
+    for core in [Core::Mgba, Core::Gpsp] {
         let face = chip_face(core);
         assert_eq!(
             (face.w, face.h),
-            (CHIP_W + 2 * TURN_PAD, CHIP_H + 2 * TURN_PAD)
+            (slot_ui::CORE_W + 2 * TURN_PAD, slot_ui::CORE_H + 2 * TURN_PAD)
         );
         for y in 0..face.h {
             for x in 0..face.w {
@@ -301,31 +301,42 @@ fn the_chip_is_padded_clear_on_every_side() {
     }
 }
 
-/// Seated, the chip is the loudest word on the board; in flight it says nothing, so the two
-/// sockets' names are the only ones on screen.
+/// The chip is one shape and every core wears it — the board no longer changes which socket it
+/// is standing in, it changes the name written on the chip, and a chip whose mark changed with
+/// the core would make the name slide out from under a different picture every press.
+///
+/// What tells two cores apart is the name, which is a face of its own so that it can travel.
 #[test]
-fn a_seated_chip_wears_its_name_and_a_flying_one_is_blank() {
+fn the_chip_is_one_shape_and_each_core_has_a_name_of_its_own() {
     let light = |face: &CartFace| {
         face.rgba
             .chunks_exact(4)
             .filter(|p| p[0] > 200 && p[1] > 200 && p[2] > 200 && p[3] > 200)
             .count()
     };
-    assert!(
-        light(&chip_face(Some(Core::Mgba))) > 20,
-        "mGBA left no name"
+    assert_eq!(
+        chip_face(Core::Mgba).rgba,
+        chip_face(Core::Gpsp).rgba,
+        "two cores, two chips"
     );
-    assert_eq!(light(&chip_face(None)), 0, "the blank chip says something");
+    assert!(
+        light(&slot_ui::core_name_face(Core::Mgba)) > 20,
+        "mGBA's name is not there"
+    );
+    assert!(
+        light(&slot_ui::core_name_face(Core::Gpsp)) > 20,
+        "gpSP's name is not there"
+    );
     assert_ne!(
-        chip_face(Some(Core::Mgba)).rgba,
-        chip_face(Some(Core::Gpsp)).rgba,
-        "both cores wear the same mark"
+        slot_ui::core_name_face(Core::Mgba).rgba,
+        slot_ui::core_name_face(Core::Gpsp).rgba,
+        "both cores wear the same name"
     );
 }
 
 #[test]
 fn padding_moves_nothing() {
-    let face = chip_face(Some(Core::Gpsp));
+    let face = chip_face(Core::Gpsp);
     let more = padded(&face, 3);
     assert_eq!((more.w, more.h), (face.w + 6, face.h + 6));
     for (x, y) in [(0, 0), (10, 7), (face.w - 1, face.h - 1)] {
@@ -344,27 +355,26 @@ fn the_shadow_is_darkest_in_the_middle_and_gone_at_the_corners() {
 }
 
 /// The seated chip's name sits on the chip's own opaque black body, not on nothing, so its
-/// edges have to blend toward the body colour instead of snapping straight to full ink. Diffed
-/// against the blank chip, which carries the same body art, so only the name's own pixels are
-/// in play — not the legs, the pin-1 dot or the body's rounded corners, which are antialiased
-/// on both chips already.
+/// edges have to blend toward whatever it lands on instead of snapping straight to full ink —
+/// the name slides, so it is drawn over a chip, over a board and over the edge of the board in
+/// turn, and hard-edged type over that reads as a sticker rather than as words.
+///
+/// It is the name's own face now, not a mark inked into the chip's body: the chip is one shape
+/// for every core and the name is what changes.
 #[test]
-fn the_seated_chips_name_is_antialiased_against_the_body() {
-    let red = |face: &CartFace, x: u32, y: u32| face.rgba[((y * face.w + x) * 4) as usize];
+fn the_core_names_edges_are_antialiased() {
     for core in [Core::Mgba, Core::Gpsp] {
-        let named = chip_face(Some(core));
-        let blank = chip_face(None);
-        let soft = (0..named.h)
-            .flat_map(|y| (0..named.w).map(move |x| (x, y)))
+        let name = slot_ui::core_name_face(core);
+        let soft = (0..name.h)
+            .flat_map(|y| (0..name.w).map(move |x| (x, y)))
             .filter(|&(x, y)| {
-                alpha(&named, x, y) == 255
-                    && red(&named, x, y) != red(&blank, x, y)
-                    && (0x40..0xc0).contains(&red(&named, x, y))
+                let a = alpha(&name, x, y);
+                a > 0 && a < 255
             })
             .count();
         assert!(
             soft > 5,
-            "{core:?}'s name has only {soft} antialiased pixels"
+            "{core:?}'s name has only {soft} soft-edged pixels"
         );
     }
 }

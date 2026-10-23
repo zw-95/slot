@@ -3,7 +3,7 @@
 //!
 //! `SCRATCH_PNG=/tmp/board.png cargo test -p slot-ui --test render_board -- --nocapture`
 
-use slot_store::Cart;
+use slot_store::{Cart, System};
 use slot_ui::board_face;
 
 #[test]
@@ -18,7 +18,7 @@ fn render_board() {
         label: None,
         code: "BPEE".into(),
         title: "POKEMON EMER".into(),
-    });
+    }, System::Gba);
     let f = std::fs::File::create(&out).unwrap();
     let mut e = png::Encoder::new(std::io::BufWriter::new(f), face.w, face.h);
     e.set_color(png::ColorType::Rgba);

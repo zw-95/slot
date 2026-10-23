@@ -39,7 +39,9 @@ impl FaceBuilder {
                     }
                     let faces = BuiltFaces {
                         stem: cart.stem.clone(),
-                        board: board_face(&cart),
+                        // The back half is this cart's own machine's shell: a Game Boy cart
+                        // opens as a portrait cart, and not as an Advance one.
+                        board: board_face(&cart, cart.system()),
                         lid: padded(&cart_face(&cart), TURN_PAD),
                     };
                     if outbox.send(faces).is_err() {
