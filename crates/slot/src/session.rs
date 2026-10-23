@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use slot_input::{Action, Gestures, Millis, RawEvent};
 use slot_retro::Rumble;
-use slot_store::{Core, System};
+use slot_store::System;
 use slot_ui::{FfState, Toast};
 
 use crate::app::{App, Phase};
@@ -536,16 +536,13 @@ impl Session {
         // in practice, right up until `open_core` did not yet know `Core` existed. `App` stores
         // this rather than re-deriving it later, which is what makes that class of drift
         // structurally unreachable now instead of merely unobserved.
-        // Only the Game Boy Advance has a choice to make, and the choice is the card's. Every
-        // other machine has exactly one core that can take it, whatever the card's own file
-        // says — including a line somebody wrote into it by hand. Everything downstream reads
-        // the core from the variable above, so clamping it here is all it takes to keep a
-        // `.gb` off gpSP and a `.sfc` off mGBA.
-        let core = match system {
-            System::Gba => slot_store::core_for(&self.root, stem),
-            System::Gb | System::Gbc => Core::Mgba,
-            System::Sfc => Core::Supafaust,
-        };
+        // The choice is the card's, and only within what the machine can be run by. A machine
+        // with one core has no choice to make and gets that core whatever the file says; one
+        // with three gets whichever this cart was last given. The clamp is inside `core_for`,
+        // so a line naming a core from another machine — `.gb = gpsp`, or a `.sfc` left
+        // pointing at mGBA by an older build — is read as nothing chosen rather than as an
+        // instruction, and the machine's own default answers instead.
+        let core = slot_store::core_for(&self.root, system, stem);
         self.app.set_core(core);
         // An SGB-enhanced GB/GBC cart would draw mGBA's Super Game Boy border, which SLOT
         // already covers with its own bezel — so it is disabled at core open (see

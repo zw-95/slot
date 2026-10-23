@@ -1,10 +1,11 @@
 use slot::core_picker::{CorePicker, Outcome, Press, CLOSE_MS, HOP_MS, LIFT_MS, OPEN_MS, SLIDE_MS};
-use slot_store::Core;
+use slot_store::{Core, System};
 use slot_ui::Millis;
 
-/// A picker whose faces were ready the moment it opened.
+/// A picker whose faces were ready the moment it opened, on the Advance's two sockets — which
+/// is what every one of these tests is about until the last, which is about three.
 fn opened(seat: Core, at: Millis) -> CorePicker {
-    let mut p = CorePicker::open(seat, at);
+    let mut p = CorePicker::open(seat, System::Gba.cores(), at);
     p.start(at);
     p
 }
@@ -149,7 +150,7 @@ fn the_open_is_a_slide_then_a_lift_and_the_board_agrees() {
 /// Opened before its faces are uploaded, the cart stands on the shelf until it is started.
 #[test]
 fn a_picker_waits_until_it_is_started() {
-    let mut p = CorePicker::open(Core::Mgba, 100);
+    let mut p = CorePicker::open(Core::Mgba, System::Gba.cores(), 100);
     assert!(p.waiting());
     assert_eq!(p.openness(5_000), 0.0);
     assert_eq!(p.waited(350), 250);
@@ -161,7 +162,7 @@ fn a_picker_waits_until_it_is_started() {
 
 #[test]
 fn a_second_start_keeps_the_first() {
-    let mut p = CorePicker::open(Core::Mgba, 0);
+    let mut p = CorePicker::open(Core::Mgba, System::Gba.cores(), 0);
     p.start(300);
     p.start(500);
     assert_eq!(p.openness(300 + OPEN_MS), 1.0);
@@ -170,7 +171,7 @@ fn a_second_start_keeps_the_first() {
 /// Backing out before anything moved has nothing to put back.
 #[test]
 fn backing_out_while_waiting_finishes_at_once() {
-    let mut p = CorePicker::open(Core::Mgba, 0);
+    let mut p = CorePicker::open(Core::Mgba, System::Gba.cores(), 0);
     p.press(Press::Back, 50);
     assert!(p.finished(50));
 }
@@ -191,7 +192,7 @@ fn a_close_from_rest_takes_the_close_time() {
 /// a refusal would shake a chip nobody can see.
 #[test]
 fn the_arrows_do_nothing_while_the_picker_waits() {
-    let mut p = CorePicker::open(Core::Mgba, 0);
+    let mut p = CorePicker::open(Core::Mgba, System::Gba.cores(), 0);
     assert_eq!(p.press(Press::Right, 100), Outcome::Nothing);
     assert_eq!(p.seat(), Core::Mgba, "a hop started while the cart waited");
     let chip = p.chip(100);
@@ -215,4 +216,44 @@ fn the_arrows_do_nothing_while_the_picker_waits() {
         None,
         "no hop once the cart had opened"
     );
+}
+
+/// More than two sockets, which is the whole of what a machine with three to choose between
+/// changes: `across` is a fraction of the run of sockets, so the middle one is halfway along
+/// it, and both ends are still ends — the arrow refuses rather than wrapping to the far side.
+#[test]
+fn a_run_of_three_puts_the_middle_socket_in_the_middle() {
+    let cores = System::Sfc.cores();
+    assert_eq!(cores.len(), 3, "the Super Nintendo offers three");
+    let mut p = CorePicker::open(Core::Supafaust, cores, 0);
+    p.start(0);
+    assert_eq!(p.chip(0).across, 0.0);
+
+    p.press(Press::Right, 100);
+    assert_eq!(p.seat(), cores[1]);
+    assert_eq!(p.chip(100 + HOP_MS).across, 0.5, "the middle is halfway");
+
+    p.press(Press::Right, 200);
+    assert_eq!(p.seat(), cores[2]);
+    assert_eq!(p.chip(200 + HOP_MS).across, 1.0);
+
+    assert_eq!(
+        p.press(Press::Right, 300),
+        Outcome::Refused,
+        "the arrow wrapped round to the far socket"
+    );
+    assert_eq!(p.seat(), cores[2]);
+}
+
+/// A machine with one core is not asked: there is nowhere for the chip to hop to, and `App`
+/// does not open the board for it at all.
+#[test]
+fn one_core_is_not_a_choice() {
+    let cores = System::Gb.cores();
+    assert_eq!(cores.len(), 1);
+    let mut p = CorePicker::open(cores[0], cores, 0);
+    p.start(0);
+    assert_eq!(p.press(Press::Right, 100), Outcome::Refused);
+    assert_eq!(p.press(Press::Left, 200), Outcome::Refused);
+    assert_eq!(p.seat(), cores[0]);
 }

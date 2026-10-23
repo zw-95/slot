@@ -6,7 +6,7 @@ use slot::app::{App, Phase, EJECT_S, INSERT_S, SEATED_AT};
 use slot::audio::Sfx;
 use slot::session::Session;
 use slot_input::{Action, Btn, RawEvent};
-use slot_store::{write_slot_state, Cart, Core, SlotState};
+use slot_store::{write_slot_state, Cart, Core, SlotState, System};
 use slot_ui::{
     board_at, grown, lid_at, on_board, opening, shelf_cart, Draw, Placed, TexId, BOARD_W, CART_H,
     CART_W, CENTER_SCALE, CHIP_H, CHIP_U, CHIP_V, CHIP_W, HINT_EDGE, HINT_H, LID_TURN, SLIDE_UP,
@@ -563,7 +563,7 @@ fn start_on_the_shelf_opens_the_core_picker_on_the_carts_current_core() {
     app.apply(Action::GbaDown(Btn::B));
     let_it_close(&mut app);
 
-    slot_store::write_selected_core(d.path(), "Emerald", Core::Gpsp).unwrap();
+    slot_store::write_selected_core(d.path(), System::Gba, "Emerald", Core::Gpsp).unwrap();
     app.apply(Action::GbaDown(Btn::Start));
     assert_eq!(
         app.core_picker(),
@@ -581,9 +581,9 @@ fn choosing_a_core_writes_it_and_closes() {
     app.apply(Action::GbaDown(Btn::Right));
     app.apply(Action::GbaDown(Btn::A));
 
-    assert_eq!(slot_store::core_for(d.path(), "Emerald"), Core::Gpsp);
+    assert_eq!(slot_store::core_for(d.path(), System::Gba, "Emerald"), Core::Gpsp);
     assert_eq!(
-        slot_store::core_for(d.path(), "Zzz"),
+        slot_store::core_for(d.path(), System::Gba, "Zzz"),
         Core::Mgba,
         "the choice landed on a cart the shelf was not on"
     );
@@ -606,7 +606,7 @@ fn b_closes_the_picker_without_writing() {
 
     assert_eq!(app.core_picker(), None);
     assert_eq!(
-        slot_store::core_for(d.path(), "Emerald"),
+        slot_store::core_for(d.path(), System::Gba, "Emerald"),
         Core::Mgba,
         "backing out of the picker still changed the cart"
     );
@@ -695,7 +695,7 @@ fn a_mid_hop_writes_where_the_chip_is_heading() {
     app.apply(Action::GbaDown(Btn::Right));
     app.update(0.05);
     app.apply(Action::GbaDown(Btn::A));
-    assert_eq!(slot_store::core_for(d.path(), "Emerald"), Core::Gpsp);
+    assert_eq!(slot_store::core_for(d.path(), System::Gba, "Emerald"), Core::Gpsp);
 }
 
 /// A on the shelf inserts on the release of a press the shelf saw. The press that saved went
@@ -737,7 +737,7 @@ fn presses_during_the_close_and_keys_the_picker_does_not_use_do_nothing() {
     let_it_close(&mut app);
     assert_eq!(app.core_picker(), None);
     assert_eq!(
-        slot_store::core_for(d.path(), "Emerald"),
+        slot_store::core_for(d.path(), System::Gba, "Emerald"),
         Core::Mgba,
         "a press during the close wrote a core"
     );
@@ -753,7 +753,7 @@ fn shutting_the_lid_closes_the_picker_without_writing() {
     app.apply(Action::GbaDown(Btn::Right));
     app.apply(Action::LidClose);
     assert_eq!(app.core_picker(), None, "the picker survived the lid");
-    assert_eq!(slot_store::core_for(d.path(), "Emerald"), Core::Mgba);
+    assert_eq!(slot_store::core_for(d.path(), System::Gba, "Emerald"), Core::Mgba);
 }
 
 /// A menu that let the thing behind it move would act on a different cart than the one it

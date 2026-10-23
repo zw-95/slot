@@ -13,6 +13,12 @@ pub const OPEN_MS: Millis = SLIDE_MS + LIFT_MS;
 pub const CLOSE_MS: Millis = 320;
 pub const HOP_MS: Millis = 180;
 
+/// The most cores one machine can put on the board. The picker is `Copy` and `App` holds it
+/// frame to frame, so its sockets are a fixed array rather than a `Vec`. Three is what fits
+/// across the board art; a machine offering more than this is a machine `System::cores` has
+/// to answer for, because the picker cannot lay a fourth socket out.
+pub const CORES_MAX: usize = 3;
+
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Press {
     Left,
@@ -32,8 +38,15 @@ pub enum Outcome {
 /// The chip's pose for one frame.
 #[derive(Copy, Clone, PartialEq, Debug)]
 pub struct Chip {
-    /// 0.0 over the mGBA socket, 1.0 over the gpSP socket.
+    /// 0.0 over the leftmost socket, 1.0 over the rightmost, for whichever machine this is.
+    /// The sockets are evenly spaced, so a fraction of the run lands either on one of them or
+    /// in the air between two.
     pub across: f32,
+    /// Which socket that is, left to right, and how many the board has. Given rather than
+    /// measured back off `across`: rounding a fraction that came from an even spacing is how
+    /// a chip in flight would be reported as sitting in the socket it is only passing over.
+    pub index: usize,
+    pub count: usize,
     /// 0.0 seated, 1.0 at the top of the hop.
     pub lift: f32,
     /// Radians, clockwise, leaning into the direction of travel.
@@ -46,7 +59,10 @@ pub struct Chip {
 
 #[derive(Copy, Clone)]
 struct Hop {
-    from: Core,
+    /// Socket it left, by position on the board rather than by which core it is: two hops can
+    /// run through the same core in opposite directions, and the arc is drawn from where the
+    /// chip was to where it is going, not from what it was called.
+    from: usize,
     started: Millis,
 }
 
@@ -59,7 +75,15 @@ struct Close {
 
 #[derive(Copy, Clone)]
 pub struct CorePicker {
-    seat: Core,
+    /// Which socket the chip is in, left to right. An index and not a `Core`, because the
+    /// whole of the picker's own behaviour — where the chip is, which way a press moves it,
+    /// when it is at an end — is about position on the board, and the core is only what that
+    /// position is standing for.
+    seat: usize,
+    /// The cores the machine offers, left to right, and how many of them there are. Filled
+    /// from the left; the rest of the array is never read.
+    cores: [Core; CORES_MAX],
+    count: usize,
     /// When START was pressed.
     opened: Millis,
     /// When the open's clock began, once the cart's faces were ready.
@@ -71,15 +95,38 @@ pub struct CorePicker {
 }
 
 impl CorePicker {
-    pub fn open(seat: Core, now: Millis) -> Self {
+    /// Opens on `seat`, which is the core the cart already uses: the board answers "which is
+    /// this?" before it asks "which do you want?". `cores` is the machine's own list, in the
+    /// order the sockets are laid out, and must hold at least two — a board with one socket is
+    /// not a question, and `App` does not open the picker for it.
+    ///
+    /// A `seat` the list does not hold opens on the first socket instead, which is that
+    /// machine's default: the same answer `core_for` would have given for a cart with no line.
+    pub fn open(seat: Core, cores: &[Core], now: Millis) -> Self {
+        let count = cores.len().min(CORES_MAX).max(1);
+        let mut list = [Core::Mgba; CORES_MAX];
+        list[..count].copy_from_slice(&cores[..count]);
+        let seat = cores
+            .iter()
+            .position(|c| *c == seat)
+            .unwrap_or(0)
+            .min(count - 1);
         CorePicker {
             seat,
+            cores: list,
+            count,
             opened: now,
             started: None,
             hop: None,
             close: None,
             refusal: None,
         }
+    }
+
+    /// The sockets on the board, left to right. `App` asks for it to draw them: which faces to
+    /// put down and how far apart, and the chip's own face comes out of the same list.
+    pub fn cores(&self) -> &[Core] {
+        &self.cores[..self.count]
     }
 
     /// Starts the open's clock. The first start is the one that counts.
@@ -99,7 +146,7 @@ impl CorePicker {
 
     /// Where the chip is, or where it is going: the core `A` writes.
     pub fn seat(&self) -> Core {
-        self.seat
+        self.cores[self.seat]
     }
 
     pub fn closing(&self) -> bool {
@@ -128,22 +175,32 @@ impl CorePicker {
     /// waits on its faces the arrows do nothing: the chip is not on screen, and a hop run unseen
     /// would open the cart with the chip already in the other socket, for an `A` to write a core
     /// the player never saw chosen. `A` and `B` still close it.
+    ///
+    /// The arrows step one socket and do not wrap: at either end the board refuses rather than
+    /// sending the chip round to the far side, because a chip that appeared at the other end
+    /// would read as a second, longer hop rather than as "there is nothing over there".
     pub fn press(&mut self, press: Press, now: Millis) -> Outcome {
         if self.close.is_some() {
             return Outcome::Nothing;
         }
-        let target = match press {
+        let step = match press {
             Press::Keep => {
                 self.begin_close(now);
-                return Outcome::Write(self.seat);
+                return Outcome::Write(self.seat());
             }
             Press::Back => {
                 self.begin_close(now);
                 return Outcome::Nothing;
             }
-            Press::Left => Core::Mgba,
-            Press::Right => Core::Gpsp,
+            Press::Left => -1,
+            Press::Right => 1,
         };
+        let target = self.seat as isize + step;
+        if target < 0 || target >= self.count as isize {
+            self.refusal = Some(Refusal::started(now));
+            return Outcome::Refused;
+        }
+        let target = target as usize;
         if self.waiting() {
             return Outcome::Nothing;
         }
@@ -164,10 +221,6 @@ impl CorePicker {
             self.refusal = None;
             return Outcome::Nothing;
         }
-        if target == self.seat {
-            self.refusal = Some(Refusal::started(now));
-            return Outcome::Refused;
-        }
         self.hop = Some(Hop {
             from: self.seat,
             started: now,
@@ -181,27 +234,35 @@ impl CorePicker {
 
     pub fn chip(&self, now: Millis) -> Chip {
         let shake = self.refusal.map_or(0.0, |r| r.offset(now));
-        match (self.hop, self.hop_progress(now)) {
+        let (across, lift, tip, seated) = match (self.hop, self.hop_progress(now)) {
             (Some(hop), Some(q)) => {
-                let rightward = hop.from == Core::Mgba;
-                let lean = if rightward { 1.0 } else { -1.0 };
+                let from = self.pos(hop.from);
+                let to = self.pos(self.seat);
+                let lean = if to > from { 1.0 } else { -1.0 };
                 let arc = (std::f32::consts::PI * q).sin();
-                Chip {
-                    across: if rightward { ease(q) } else { 1.0 - ease(q) },
-                    lift: arc,
-                    tip: lean * CHIP_TIP * arc,
-                    seated: None,
-                    shake,
-                }
+                (from + (to - from) * ease(q), arc, lean * CHIP_TIP * arc, None)
             }
-            _ => Chip {
-                across: self.seat.index() as f32,
-                lift: 0.0,
-                tip: 0.0,
-                seated: Some(self.seat),
-                shake,
-            },
+            _ => (self.pos(self.seat), 0.0, 0.0, Some(self.seat())),
+        };
+        Chip {
+            across,
+            index: self.seat,
+            count: self.count,
+            lift,
+            tip,
+            seated,
+            shake,
         }
+    }
+
+    /// Where socket `i` falls between the two ends: 0.0 at the leftmost, 1.0 at the rightmost,
+    /// evenly spaced between. One socket is 0.0 whatever it is, there being no run to be a
+    /// fraction of.
+    fn pos(&self, i: usize) -> f32 {
+        if self.count < 2 {
+            return 0.0;
+        }
+        i as f32 / (self.count - 1) as f32
     }
 
     fn begin_close(&mut self, now: Millis) {

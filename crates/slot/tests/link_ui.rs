@@ -444,7 +444,7 @@ fn the_open_menu_draws_its_rows_over_the_game() {
 /// `selected_core.ini` says gpSP, because that is what decides the Link row exists.
 fn session_playing_on_gpsp() -> (Session, TempDir, Millis) {
     let d = common::tmp_root_with_carts(&["Emerald"]);
-    slot_store::write_selected_core(d.path(), "Emerald", Core::Gpsp).expect("write core");
+    slot_store::write_selected_core(d.path(), slot_store::System::Gba, "Emerald", Core::Gpsp).expect("write core");
     write_slot_state(
         d.path(),
         &SlotState {

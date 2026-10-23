@@ -4027,7 +4027,10 @@ impl App {
             // baked into the board texture, because the state changes every press.
             if let Some(art) = slot_ui::board_art() {
                 let chip = picker.chip(now);
-                let here = usize::from(chip.across >= 0.5);
+                // Which socket, by position on the board rather than by measuring `across`
+                // back: a chip halfway through a hop between the ends of a run of three is
+                // over the middle one, and a threshold would call it the right-hand one.
+                let here = chip.index;
                 let done = picker.closing();
                 for (i, lamp) in art.lamps.iter().enumerate() {
                     let colour = if i == here {
@@ -4051,13 +4054,19 @@ impl App {
                 }
             }
             // The sockets are the **built-in** board's, and only its: a card that drew its own
-            // board drew its chips into it as well, so placing these two on top leaves two empty
+            // board drew its chips into it as well, so placing these on top leaves empty
             // positions standing over a finished board — the picker's own furniture printed over
             // somebody else's drawing. The chip below is gated for the same reason and always
             // was; this loop was not, which is the pair of leftovers the player saw.
             if !own_board {
-                // A face drawn at its own size is only sharp on whole pixels.
-                for (i, tex) in self.core_socket_faces.iter().copied().enumerate() {
+                // One per core this machine offers, and not one per core that exists: every
+                // core's socket face is uploaded at boot, but the board has room for a
+                // machine's own list and the rest of them are not this cart's to choose from.
+                for (i, core) in picker.cores().iter().copied().enumerate() {
+                    let Some(tex) = self.core_socket_faces.get(core.index()).copied() else {
+                        continue;
+                    };
+                    // A face drawn at its own size is only sharp on whole pixels.
                     let (x, y) = on_board(board, SOCKET_U[i], SOCKET_V);
                     out.push(Draw::Tex {
                         x: x.round(),
@@ -4071,7 +4080,9 @@ impl App {
             }
 
             let chip = picker.chip(now);
-            let u = CHIP_U[0] + (CHIP_U[1] - CHIP_U[0]) * chip.across;
+            // Between the ends of the run: `across` is a fraction of that run and the sockets
+            // are evenly spaced, so the last socket is where 1.0 lands whatever the count is.
+            let u = CHIP_U[0] + (CHIP_U[chip.count - 1] - CHIP_U[0]) * chip.across;
             if !own_board && chip.lift > 0.0 {
                 if let Some(tex) = self.core_chip_shadow_face {
                     // Under the body's middle and 90 units down the board, where the mockup's
@@ -5188,16 +5199,19 @@ impl App {
         let Some(cart) = self.shelf.current_cart() else {
             return;
         };
-        // Nothing to choose for anything that is not a GBA cart: gpSP does not take Game Boy,
-        // so mGBA is not a preference to record but the only answer there is. The picker is two
-        // sockets to hop between, and opening it over one socket is a question that can only be
-        // refused.
-        if cart.system() != System::Gba {
+        let system = cart.system();
+        let cores = system.cores();
+        // One core is not a choice. The picker is sockets to hop between, and opening it over
+        // a single socket is a question that can only be refused — which is what kept it on the
+        // Advance alone for so long: gpSP does not take a Game Boy cart, so mGBA there is not a
+        // preference to record but the only answer there is. A machine's own list decides, so
+        // a machine that grows a second core gets a picker without this changing again.
+        if cores.len() < 2 {
             return;
         }
-        let seat = slot_store::core_for(&root, &cart.stem);
+        let seat = slot_store::core_for(&root, system, &cart.stem);
         let now = self.now();
-        let mut picker = CorePicker::open(seat, now);
+        let mut picker = CorePicker::open(seat, cores, now);
         if self.core_faces_ready() {
             picker.start(now);
         }
@@ -5430,7 +5444,9 @@ impl App {
         let (Some(root), Some(cart)) = (self.root.clone(), self.shelf.current_cart()) else {
             return;
         };
-        if let Err(e) = slot_store::write_selected_core(&root, &cart.stem, core) {
+        // The machine goes into the line with the cart: this stem may exist on another shelf
+        // too, and a line without it would be read as that cart's as well.
+        if let Err(e) = slot_store::write_selected_core(&root, cart.system(), &cart.stem, core) {
             eprintln!("slot: core: could not write selected_core.ini: {e}");
         }
     }

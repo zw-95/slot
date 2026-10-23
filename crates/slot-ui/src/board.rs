@@ -209,14 +209,22 @@ pub fn lift_of(progress: f32) -> f32 {
     ease(((progress - SLIDE_SHARE) / (1.0 - SLIDE_SHARE)).clamp(0.0, 1.0))
 }
 
-/// Each socket's face, in `Core::ALL` order: board units of its top left, and its size.
-pub const SOCKET_U: [f32; 2] = [99.5, 171.5];
+/// Each socket's face: board units of its top left, and its size. Left to right, evenly
+/// spaced, one per core a machine can offer — so a machine offering two fills the left two,
+/// which is where the board's art was drawn for them, and the third is where a third goes.
+///
+/// Three and not two because the picker draws one face per core on the machine's own list and
+/// indexes this by position on the board: a third core with only two positions here was a
+/// panic the first time a cart with three to choose between had its lid taken off. Adding a
+/// fourth means adding a number here and a number in `CHIP_U`, and seeing on the device
+/// whether the board has room — the run of sockets grows rightward from the art's own pair.
+pub const SOCKET_U: [f32; 3] = [99.5, 171.5, 243.5];
 pub const SOCKET_V: f32 = 59.1;
 pub const SOCKET_W: u32 = 64;
 pub const SOCKET_H: u32 = 46;
 
 /// The chip seated in each socket, unpadded: board units of its top left, and its size.
-pub const CHIP_U: [f32; 2] = [101.0, 173.0];
+pub const CHIP_U: [f32; 3] = [101.0, 173.0, 245.0];
 pub const CHIP_V: f32 = 60.6;
 pub const CHIP_W: u32 = 59;
 pub const CHIP_H: u32 = 41;
