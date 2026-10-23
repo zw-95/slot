@@ -7,8 +7,8 @@
 
 use slot_store::{Cart, Core, System};
 use slot_ui::{
-    board_at, board_face, chip_face, core_dot_face, core_name_face, CORE_DOT, CORE_DOT_DIM,
-    CORE_DOT_GAP, CORE_DOT_LIFT, OUT_H, OUT_W,
+    board_at, board_face, chip_face, core_dot_face, core_name_face, CORE_DOT, CORE_DOT_GAP,
+    CORE_DOT_HALO, CORE_DOT_LIFT, OUT_H, OUT_W,
 };
 
 fn cart(stem: &str, code: &str, ext: &str) -> Cart {
@@ -145,10 +145,14 @@ fn main() {
         .unwrap_or_else(|| std::env::temp_dir().to_string_lossy().into_owned());
     let chip = chip_face(Core::Mgba);
     let name = core_name_face(Core::Mgba);
-    let dot = core_dot_face();
+    // The row above the chip is a row of lamps: every seat wears one that is out, and the one
+    // in hand is the one burning.
+    let lamp_off = core_dot_face(false);
+    let lamp_on = core_dot_face(true);
     write(&chip.rgba, chip.w, chip.h, &format!("{out}/chip.png"));
     write(&name.rgba, name.w, name.h, &format!("{out}/name.png"));
-    write(&dot.rgba, dot.w, dot.h, &format!("{out}/dot.png"));
+    write(&lamp_off.rgba, lamp_off.w, lamp_off.h, &format!("{out}/lamp_off.png"));
+    write(&lamp_on.rgba, lamp_on.w, lamp_on.h, &format!("{out}/lamp_on.png"));
     for (system, stem, ext, code) in [
         (
             System::Gba,
@@ -200,25 +204,20 @@ fn main() {
             System::Fc => 1,
         };
         if count > 1 {
-            let row = count as f32 * CORE_DOT + (count - 1) as f32 * CORE_DOT_GAP;
+            // A lamp is drawn a little wider than it is: the face carries the lit one's halo out
+            // past the disc, and a lamp clipped to its own circle throws no light.
+            let size = CORE_DOT + CORE_DOT_HALO * 2.0;
+            let row = count as f32 * size + (count - 1) as f32 * CORE_DOT_GAP;
             let x0 = (face.w as f32 - row) / 2.0;
-            let y = (face.h - chip.h) as i32 / 2 - CORE_DOT_LIFT as i32 - CORE_DOT as i32;
+            let y = (face.h - chip.h) as i32 / 2 - CORE_DOT_LIFT as i32 - size as i32;
             for i in 0..count {
-                let x = (x0 + i as f32 * (CORE_DOT + CORE_DOT_GAP)) as i32;
-                paste_a(
-                    &mut rgba, face.w, face.h, &dot.rgba, dot.w, dot.h, x, y, CORE_DOT_DIM,
-                );
-                paste_a(
-                    &mut rgba,
-                    face.w,
-                    face.h,
-                    &dot.rgba,
-                    dot.w,
-                    dot.h,
-                    x,
-                    y,
-                    if i == count / 2 { 1.0 } else { 0.0 },
-                );
+                let x = (x0 + i as f32 * (size + CORE_DOT_GAP)) as i32;
+                paste_a(&mut rgba, face.w, face.h, &lamp_off.rgba, lamp_off.w, lamp_off.h, x, y, 1.0);
+                if i == count / 2 {
+                    paste_a(
+                        &mut rgba, face.w, face.h, &lamp_on.rgba, lamp_on.w, lamp_on.h, x, y, 1.0,
+                    );
+                }
             }
         }
         write(&rgba, face.w, face.h, &format!("{out}/opened_{system:?}.png"));

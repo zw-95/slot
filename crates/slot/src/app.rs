@@ -14,7 +14,7 @@ use slot_ui::{
     draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of,
     ClockPicker, Draw, FfState, Hud, HudKind, Icon, Letters, Millis, Placed, Polaroids,
     PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W, CORE_DOT,
-    CORE_DOT_DIM, CORE_DOT_GAP, CORE_DOT_LIFT, CORE_H, CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H,
+    CORE_DOT_GAP, CORE_DOT_LIFT, CORE_H, CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H,
     NAME_TRAVEL, NAME_W, PLATE_Y, SHELF_TITLE_H, STICKER_H, TURN_PAD,
 };
 
@@ -1143,10 +1143,15 @@ pub struct App {
     /// Each core's name, in `Core::ALL` order. This is the part that changes when the core does,
     /// and it is a face of its own so that it can travel off the chip and back onto it.
     core_name_faces: Vec<TexId>,
-    /// One dot of the row above the chip. One face for all of them, lit or not: how lit a dot is
-    /// is the draw's alpha rather than a second picture, which is what lets the light travel
-    /// from one to the next instead of blinking.
-    core_dot_face: Option<TexId>,
+    /// One lamp of the row above the chip, **out** — the grey every seat is wearing.
+    ///
+    /// Two faces and not one: a lamp that is out is not a dim green one, it is a different
+    /// lamp, and no alpha on a green disc says that. The lit one is drawn over this at the alpha
+    /// the light has reached, which is what lets it travel from the seat being left to the one
+    /// being arrived at instead of blinking.
+    core_dot_off: Option<TexId>,
+    /// The same lamp **burning**, green and hot in the middle.
+    core_dot_on: Option<TexId>,
     /// The shadow under the open lid.
     core_chip_shadow_face: Option<TexId>,
     /// `B` Cancel, the two arrows, `A` Choose, each with the width it was rastered at, laid out
@@ -1433,7 +1438,8 @@ impl App {
             core_faces_stem: None,
             core_chip_face: None,
             core_name_faces: Vec::new(),
-            core_dot_face: None,
+            core_dot_off: None,
+            core_dot_on: None,
             core_chip_shadow_face: None,
             core_legend_faces: Vec::new(),
             game_menu: None,
@@ -4000,8 +4006,9 @@ impl App {
         self.core_chip_shadow_face = Some(shadow);
     }
 
-    pub fn set_core_dot_face(&mut self, dot: TexId) {
-        self.core_dot_face = Some(dot);
+    pub fn set_core_dot_faces(&mut self, off: TexId, on: TexId) {
+        self.core_dot_off = Some(off);
+        self.core_dot_on = Some(on);
     }
 
     pub fn set_core_legend_faces(&mut self, faces: Vec<(TexId, u32)>) {
@@ -4210,42 +4217,45 @@ impl App {
         now: Millis,
         out: &mut Vec<Draw>,
     ) {
-        let Some(tex) = self.core_dot_face else {
+        let (Some(off), Some(on)) = (self.core_dot_off, self.core_dot_on) else {
             return;
         };
         let n = picker.count();
         if n < 2 || lift <= 0.0 {
             return;
         }
-        let row = n as f32 * CORE_DOT + (n - 1) as f32 * CORE_DOT_GAP;
+        // The lamp is drawn at a little over `CORE_DOT`, because the face carries the lit one's
+        // halo out past the disc and a lamp clipped to its own circle has no light round it.
+        let pad = slot_ui::CORE_DOT_HALO;
+        let size = CORE_DOT + pad * 2.0;
+        let row = n as f32 * size + (n - 1) as f32 * CORE_DOT_GAP;
         let x0 = board.x + (board.w - row) / 2.0;
-        // Above the chip's top edge, and **not** carried along by the refusal shake: the row is
-        // the machine's own scale and not a part of the chip, and a ruler that flinches when a
-        // press is refused is no ruler.
-        let y = (chip_top - CORE_DOT_LIFT - CORE_DOT).round();
+        let y = (chip_top - CORE_DOT_LIFT - size / 2.0 - CORE_DOT / 2.0).round();
         for i in 0..n {
-            let x = (x0 + i as f32 * (CORE_DOT + CORE_DOT_GAP)).round();
+            let x = (x0 + i as f32 * (size + CORE_DOT_GAP)).round();
             let lit = picker.dot_lit(i, now);
-            // Two draws of one face. A dot that is being left and one that is being arrived at
-            // are both halfway lit at the same moment, and one alpha cannot say that: the dim
-            // one has to stay where it is under the light that is crossing to it.
-            let base = CORE_DOT_DIM * lift;
+            // The lamp itself, out, at whatever share of the open the cart is through.
             out.push(Draw::Tex {
                 x,
                 y,
-                w: CORE_DOT,
-                h: CORE_DOT,
-                tex,
-                alpha: base,
+                w: size,
+                h: size,
+                tex: off,
+                alpha: lift,
             });
-            out.push(Draw::Tex {
-                x,
-                y,
-                w: CORE_DOT,
-                h: CORE_DOT,
-                tex,
-                alpha: (1.0 - CORE_DOT_DIM) * lit * lift,
-            });
+            // And the light in it, over the top: two of them are part-lit at once while the
+            // light is travelling from the seat being left to the one being arrived at, which is
+            // the only way a row of lamps can show a hand moving along it rather than blinking.
+            if lit > 0.0 {
+                out.push(Draw::Tex {
+                    x,
+                    y,
+                    w: size,
+                    h: size,
+                    tex: on,
+                    alpha: (lit * lift).min(1.0),
+                });
+            }
         }
     }
 
@@ -4304,7 +4314,7 @@ impl App {
             let chip = picker.chip(now);
             let (cw, ch) = (CORE_W as f32 * zoom, CORE_H as f32 * zoom);
             let body = Placed {
-                x: board.x + (board.w - cw) / 2.0 + chip.shake,
+                x: board.x + (board.w - cw) / 2.0,
                 y: board.y + (board.h - ch) / 2.0,
                 w: cw,
                 h: ch,
@@ -4330,7 +4340,7 @@ impl App {
             // the one being left goes out the way the hand went, and the one being arrived
             // at comes in from the other side.
             let (nw, nh) = (NAME_W as f32 * zoom, NAME_H as f32 * zoom);
-            let nx = board.x + (board.w - nw) / 2.0 + chip.shake;
+            let nx = board.x + (board.w - nw) / 2.0;
             let ny = body.y + (ch - nh) / 2.0;
             match chip.swap {
                 Some(swap) => {

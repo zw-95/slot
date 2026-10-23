@@ -611,49 +611,48 @@ fn b_closes_the_picker_without_writing() {
     );
 }
 
-/// The sockets sit left and right, so the arrows point at them: no wrapping. Toward the socket
-/// the chip is already in, only the chip shakes.
+/// The list is a **ring**, so an arrow at either end comes back round: left from the first is the
+/// last, and right from the last is the first.
+///
+/// It was a wall until 2026-10-24, and a wall is the wrong shape for a list of thirteen — getting
+/// from the last core to the first meant walking back through twelve, and the row of lamps above
+/// the chip already reads as something you can go round.
 #[test]
-fn the_chip_goes_where_the_arrow_points_and_does_not_wrap() {
+fn the_walk_comes_back_round_at_both_ends() {
+    let cores = System::Gba.cores();
     let (_d, mut app) = on_shelf(&["Emerald", "Zzz"]);
     fake_picker_faces(&mut app);
     app.apply(Action::GbaDown(Btn::Start));
 
+    // Left off the front is the back of the list, not a wall.
     app.apply(Action::GbaDown(Btn::Left));
     assert_eq!(
         app.core_picker(),
-        Some(Core::Mgba),
-        "left from mGBA wrapped round"
-    );
-    assert_ne!(
-        app.core_picker_chip().unwrap().shake,
-        0.0,
-        "a press toward the chip's own socket went unanswered"
+        Some(*cores.last().unwrap()),
+        "left from the first did not come back round"
     );
     assert_eq!(
         app.shelf_shake(),
         0.0,
         "the shelf shook as well as the chip"
     );
-
-    app.apply(Action::GbaDown(Btn::Right));
-    assert_eq!(app.core_picker(), Some(Core::Gpsp));
     let_it_hop(&mut app);
-    // Onward to the end of the Advance's list, one press at a time — gpSP stopped being the last
-    // of them when the machine grew past two. What is asserted is the same thing it always was:
-    // the walk stops at the end rather than wrapping round to the first core.
-    let cores = System::Gba.cores();
-    for next in &cores[2..] {
+
+    // And right off the back is the front again.
+    app.apply(Action::GbaDown(Btn::Right));
+    assert_eq!(
+        app.core_picker(),
+        Some(cores[0]),
+        "right from the last did not come back round"
+    );
+    let_it_hop(&mut app);
+
+    // The walk itself is unchanged: one core at a time, in the list's own order.
+    for next in &cores[1..] {
         app.apply(Action::GbaDown(Btn::Right));
         let_it_hop(&mut app);
         assert_eq!(app.core_picker(), Some(*next));
     }
-    app.apply(Action::GbaDown(Btn::Right));
-    assert_eq!(
-        app.core_picker(),
-        Some(*cores.last().unwrap()),
-        "right from the end wrapped round"
-    );
 }
 
 /// `the_chip_goes_where_the_arrow_points_and_does_not_wrap` asserts this too, but nothing in it
@@ -684,11 +683,6 @@ fn back_mid_change_turns_round_and_onward_keeps_walking() {
     // to be "nothing happens" because the machine had two cores and the walk had nowhere left.
     app.apply(Action::GbaDown(Btn::Right));
     assert_eq!(app.core_picker(), Some(cores[2]));
-    assert_eq!(
-        app.core_picker_chip().unwrap().shake,
-        0.0,
-        "onward mid-change was refused"
-    );
 
     // And back the other way still turns it round, from the core it is on.
     app.apply(Action::GbaDown(Btn::Left));
@@ -1376,27 +1370,35 @@ fn mid_change_both_names_travel_the_way_the_hand_went_and_the_chip_stays() {
     );
 }
 
-/// A refusal moves the chip and nothing else on the panel.
+/// A press at the end of the ring takes the next core rather than shaking the chip: the list has
+/// no end to refuse at, so nothing on the panel flinches — the name leaves, and the chip it is
+/// written on stays where it is.
+///
+/// It was `the_chip_alone_shakes_when_refused` until 2026-10-24, when the walk became a ring.
 #[test]
-fn the_chip_alone_shakes_when_refused() {
+fn the_walk_round_the_ring_moves_the_name_and_not_the_chip() {
     let (_d, mut app) = on_shelf(&["Emerald", "Metroid Fusion", "Zzz"]);
     let f = fake_picker_faces(&mut app);
     app.apply(Action::GbaDown(Btn::Start));
     let_it_open(&mut app);
     let before = frame(&app);
+    // Left off the front of the list, which is where the wall used to be. A quarter of the way
+    // through the travel, so the name has somewhere to have got to.
     app.apply(Action::GbaDown(Btn::Left));
+    app.update(0.05);
     let after = frame(&app);
 
     let (_, still) = tex_at(&before, f.chip).unwrap();
-    let (_, shaken) = tex_at(&after, f.chip).unwrap();
-    assert_ne!(still[0], shaken[0], "the chip did not move");
-    // The name moves with it: the name is written on the chip, so a shake that moved the chip and
-    // left the words behind would slide them off the picture they belong to.
-    let (_, name_still) = tex_at(&before, f.names[0]).unwrap();
-    let (_, name_shaken) = tex_at(&after, f.names[0]).unwrap();
-    assert_ne!(
-        name_still[0], name_shaken[0], "the name did not shake with the chip"
+    let (_, moved) = tex_at(&after, f.chip).unwrap();
+    assert_eq!(
+        still[0], moved[0],
+        "the chip moved: there is nothing to refuse at the end of a ring"
     );
+    // The name is what travels: the one on the chip goes out to the left, and the one it is being
+    // replaced by comes in from the other side.
+    let (_, name_still) = tex_at(&before, f.names[0]).unwrap();
+    let (_, name_gone) = tex_at(&after, f.names[0]).unwrap();
+    assert_ne!(name_still[0], name_gone[0], "the name did not leave");
     let rest = |out: &[Draw]| -> Vec<Draw> {
         out.iter()
             .filter(|d| !matches!(d, Draw::Tex { tex, .. } if *tex == f.chip || *tex == f.names[0]))

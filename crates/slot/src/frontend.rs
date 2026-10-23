@@ -459,11 +459,14 @@ impl Frontend {
         self.session
             .app_mut()
             .set_core_part_faces(chip, names, shadow);
-        // One dot of the row above the chip, and one for the whole row: how lit each dot is a
-        // alpha on this one picture, not a second picture per state.
-        let dot = core_dot_face();
-        let dot = compositor.create_texture(dot.w, dot.h, &dot.rgba);
-        self.session.app_mut().set_core_dot_face(dot);
+        // The two lamps of the row above the chip: every seat wears the one that is out, and the
+        // one burning is drawn over it at the alpha the light has reached, which is what lets it
+        // travel from seat to seat rather than blink.
+        let off = core_dot_face(false);
+        let off = compositor.create_texture(off.w, off.h, &off.rgba);
+        let on = core_dot_face(true);
+        let on = compositor.create_texture(on.w, on.h, &on.rgba);
+        self.session.app_mut().set_core_dot_faces(off, on);
         // The board of screen fits' three names, at boot like the power menu's rows: the three
         // are a fact of the program and not of the card, so there is nothing to re-rasterise.
         let fit_names = App::fit_names()

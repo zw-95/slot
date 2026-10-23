@@ -3,7 +3,7 @@
 //! the whole of its behaviour can be stated against a number of milliseconds.
 
 use slot_store::Core;
-use slot_ui::{ease, Millis, Refusal};
+use slot_ui::{ease, Millis};
 
 /// The front half slides off the back, then lifts away; the close runs the same progress back,
 /// quicker. `slot_ui::SLIDE_SHARE` is the slide's share of the open, held to these by a test.
@@ -29,10 +29,13 @@ pub enum Press {
 }
 
 /// What a press asks of `App`, beyond the picker's own state.
+///
+/// There is no `Refused` any more. The arrows walk a ring, so there is no end to press against,
+/// and the only other thing a press could be refused for — waiting on the cart's faces — answers
+/// `Nothing` because a chip nobody can see shaking is no answer at all.
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Outcome {
     Nothing,
-    Refused,
     Write(Core),
 }
 
@@ -59,9 +62,6 @@ pub struct Chip {
     pub seated: Option<Core>,
     /// A name changing on it, if one is.
     pub swap: Option<Swap>,
-    /// Panel pixels the refusal puts on its x. Both the chip and its name carry it, so the
-    /// whole thing shakes rather than the words sliding out from under a still chip.
-    pub shake: f32,
 }
 
 #[derive(Copy, Clone)]
@@ -98,8 +98,6 @@ pub struct CorePicker {
     started: Option<Millis>,
     hop: Option<Hop>,
     close: Option<Close>,
-    /// The chip's own. The shelf does not shake while the picker is up.
-    refusal: Option<Refusal>,
 }
 
 impl CorePicker {
@@ -127,7 +125,6 @@ impl CorePicker {
             started: None,
             hop: None,
             close: None,
-            refusal: None,
         }
     }
 
@@ -217,9 +214,13 @@ impl CorePicker {
     /// unseen would open the cart with another core's name already on it, for an `A` to write a
     /// core the player never saw chosen. `A` and `B` still close it.
     ///
-    /// The arrows step one core along the machine's list and do not wrap: at either end the
-    /// board refuses rather than sending the player round to the far core, because arriving at
-    /// the other end would read as a long way round rather than as "there is nothing over there".
+    /// The arrows step one core along the machine's list, and **the list is a ring**: a press at
+    /// either end comes back round to the other. It was a wall until 2026-10-24, and a wall is
+    /// the wrong shape for a list of thirteen the board shows three of at a time — getting from
+    /// the last core to the first meant walking back through eleven, and a player who wanted the
+    /// Snes9x at the front of the list had no way to it but to know it was there and turn round.
+    /// A ring is also what the row of lamps above the chip already reads as: a row with an end
+    /// you can press against is a row you have to count.
     pub fn press(&mut self, press: Press, now: Millis) -> Outcome {
         if self.close.is_some() {
             return Outcome::Nothing;
@@ -243,12 +244,10 @@ impl CorePicker {
         if self.waiting() {
             return Outcome::Nothing;
         }
-        let target = self.seat as isize + step;
-        if target < 0 || target >= self.count as isize {
-            self.refusal = Some(Refusal::started(now));
-            return Outcome::Refused;
-        }
-        let target = target as usize;
+        // Round the ring: `rem_euclid` against the count, so a press left off the first lands on
+        // the last and a press right off the last lands on the first. There is no end to refuse
+        // at any more, which is why nothing here can answer `Refused`.
+        let target = (self.seat as isize + step).rem_euclid(self.count as isize) as usize;
         // The name the player is leaving is the one on the chip now, whatever the last change
         // was doing: a second press before the first has settled takes the name it was arriving
         // at and sends that one on its way, which is what makes a run of presses read as one
@@ -266,9 +265,6 @@ impl CorePicker {
             started,
         });
         self.seat = target;
-        // A change is happening now, so a shake left over from an earlier refusal is not this
-        // chip's any more.
-        self.refusal = None;
         Outcome::Nothing
     }
 
@@ -283,7 +279,6 @@ impl CorePicker {
                     q,
                 })
             }),
-            shake: self.refusal.map_or(0.0, |r| r.offset(now)),
         }
     }
 

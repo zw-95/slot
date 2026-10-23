@@ -2,8 +2,8 @@ use slot_store::{Cart, Core, System};
 use slot_ui::{
     board_at, board_face, board_rest, chip_face, chip_shadow_face, lid_at, lift_of, on_board,
     padded, shelf_cart, shell_for, slide_of, socket_face, CartFace, Placed, BOARD_H, BOARD_W,
-    CART_H, CORE_DOT, DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H,
-    SOCKET_W, TURN_PAD,
+    CART_H, CORE_DOT, CORE_DOT_HALO, DEFAULT_SHELL, LID_TURN, SHADOW_H, SHADOW_W, SLIDE_SHARE,
+    SLIDE_UP, SOCKET_H, SOCKET_W, TURN_PAD,
 };
 use slot_ui::{OUT_H, OUT_W};
 
@@ -390,25 +390,51 @@ fn the_core_names_edges_are_antialiased() {
     }
 }
 
-/// One face for the whole row, however many cores a machine offers: how lit a dot is is the
-/// draw's alpha, and lit and unlit are the same disc. What has to hold is that the disc is a
-/// disc — solid in the middle, gone at the corners, and soft at the edge, because a hard-edged
-/// dot at nine pixels is a square with delusions.
+/// The row above the chip is a row of **lamps**: the one in hand burns green and every other
+/// seat is a grey one that is out. Two faces, because a lamp that is out is not a dim green one
+/// and no alpha on a green disc says that.
 #[test]
-fn a_core_dot_is_a_disc_and_not_a_square() {
-    let dot = slot_ui::core_dot_face();
-    let (w, h) = (CORE_DOT.ceil() as u32, CORE_DOT.ceil() as u32);
-    assert_eq!((dot.w, dot.h), (w, h));
-    let mid = (w / 2, h / 2);
-    assert_eq!(alpha(&dot, mid.0, mid.1), 255, "the middle is solid");
-    assert_eq!(alpha(&dot, 0, 0), 0, "the corner is nothing");
-    // An antialiased edge somewhere between the two, along the rim.
-    let soft = (0..h)
-        .flat_map(|y| (0..w).map(move |x| (x, y)))
-        .filter(|&(x, y)| {
-            let a = alpha(&dot, x, y);
-            a > 0 && a < 255
-        })
-        .count();
-    assert!(soft > 4, "only {soft} soft-edged pixels round the rim");
+fn a_core_dot_is_a_lamp_that_is_either_out_or_burning() {
+    let side = CORE_DOT.ceil() as u32 + CORE_DOT_HALO.ceil() as u32 * 2;
+    for on in [false, true] {
+        let dot = slot_ui::core_dot_face(on);
+        assert_eq!((dot.w, dot.h), (side, side), "the lamp carries its halo's room");
+        let mid = (side / 2, side / 2);
+        assert_eq!(alpha(&dot, mid.0, mid.1), 255, "the middle is solid");
+        assert_eq!(alpha(&dot, 0, 0), 0, "the corner is nothing");
+        // An antialiased edge somewhere between the two, along the rim.
+        let soft = (0..side)
+            .flat_map(|y| (0..side).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let a = alpha(&dot, x, y);
+                a > 0 && a < 255
+            })
+            .count();
+        assert!(soft > 4, "only {soft} soft-edged pixels round the rim");
+    }
+    // Out is grey, and burning is **green** — the one thing the row has to be able to say at a
+    // glance, which is why the two are different faces and not one face at two alphas.
+    let off = slot_ui::core_dot_face(false);
+    let lit = slot_ui::core_dot_face(true);
+    let (mid_r, mid_g, mid_b) = {
+        let i = ((side / 2 * side + side / 2) * 4) as usize;
+        (off.rgba[i], off.rgba[i + 1], off.rgba[i + 2])
+    };
+    assert!(
+        mid_r.max(mid_g).max(mid_b) - mid_r.min(mid_g).min(mid_b) < 12,
+        "a lamp that is out is not grey: {mid_r},{mid_g},{mid_b}"
+    );
+    let i = ((side / 2 * side + side / 2) * 4) as usize;
+    assert!(
+        lit.rgba[i + 1] > lit.rgba[i] + 40 && lit.rgba[i + 1] > lit.rgba[i + 2] + 40,
+        "a burning lamp is not green: {},{},{}",
+        lit.rgba[i],
+        lit.rgba[i + 1],
+        lit.rgba[i + 2]
+    );
+    // And it throws light past its own rim: a lamp that stopped dead at the edge is a sticker.
+    let rim = (side as f32 / 2.0 + CORE_DOT / 2.0 + 1.0) as u32;
+    let halo = alpha(&lit, rim, side / 2);
+    assert!(halo > 0, "the burning lamp has no halo round it");
+    assert_eq!(alpha(&off, rim, side / 2), 0, "and a lamp that is out has none");
 }

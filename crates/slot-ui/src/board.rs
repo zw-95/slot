@@ -635,33 +635,79 @@ pub fn chip_face(_core: Core) -> CartFace {
 /// Panel pixels rather than board units, and therefore not scaled with the board: the row is
 /// read as a row whatever size the board happens to be at, and a dot that grew with the
 /// enlargement would be a different control on a portrait cart than on a landscape one.
-pub const CORE_DOT: f32 = 9.0;
+pub const CORE_DOT: f32 = 10.0;
 pub const CORE_DOT_GAP: f32 = 7.0;
 /// Clear of the chip's top edge by this much, so the row reads as sitting above the chip and
 /// not as printed on it.
 pub const CORE_DOT_LIFT: f32 = 12.0;
-/// How far a dot that is not the one in hand is held back. Enough to be counted, not enough to
-/// be mistaken for the lit one — the same reading the switcher's dots are drawn on.
-pub const CORE_DOT_DIM: f32 = 0.28;
 
-/// One dot: a filled disc, white, its edge antialiased by coverage. A disc rather than the
-/// square the switcher's dots are, because these stand for a seat on the board and read as
-/// lamps, and a square lamp is a solder pad.
-pub fn core_dot_face() -> CartFace {
-    let (w, h) = (CORE_DOT.ceil() as u32, CORE_DOT.ceil() as u32);
+/// A lamp that is off: the plastic of an unlit LED, which is a dark grey rather than a hole in
+/// the board. Every seat has one, and the row reads as a row of lamps with one of them burning.
+const LED_OFF: [u8; 3] = [0x46, 0x4a, 0x4e];
+/// A lamp that is on: green, hot in the middle and falling off towards the rim, the way a lit
+/// indicator actually looks — a disc of one flat green reads as a green dot, not as a light.
+const LED_LIT: [u8; 3] = [0x3c, 0xd2, 0x5a];
+const LED_CORE: [u8; 3] = [0xd6, 0xff, 0xe0];
+/// How far past the lamp's own edge its light carries, in the face's own pixels. A lamp that
+/// stopped dead at its rim is a sticker; this is what makes the lit one read as lit rather than
+/// as green.
+pub const CORE_DOT_HALO: f32 = 2.5;
+
+/// One lamp of the row above the chip: `on` is the one burning, and off is every other seat.
+///
+/// A face each rather than one face drawn at two alphas, because a lamp that is out is not a dim
+/// green one — it is a different-coloured lamp, grey, and no amount of alpha on a green disc says
+/// that. The **halo is in the same face**, out past the disc: the light a lit lamp throws is part
+/// of the lamp, and drawing it separately would put a second decision in the caller's hands.
+pub fn core_dot_face(on: bool) -> CartFace {
+    // The lamp is `CORE_DOT` across; the face is that plus the halo's room on every side.
+    let pad = CORE_DOT_HALO.ceil() as u32;
+    let side = CORE_DOT.ceil() as u32 + pad * 2;
     let mut face = CartFace {
-        rgba: vec![0; (w * h * 4) as usize],
-        w,
-        h,
+        rgba: vec![0; (side * side * 4) as usize],
+        w: side,
+        h: side,
     };
-    let c = (w as f32 - 1.0) / 2.0;
-    for y in 0..h {
-        for x in 0..w {
-            let d = ((x as f32 - c) * (x as f32 - c) + (y as f32 - c) * (y as f32 - c)).sqrt();
-            let cov = (c + 0.5 - d).clamp(0.0, 1.0);
-            let i = ((y * w + x) * 4) as usize;
-            face.rgba[i..i + 3].copy_from_slice(&CHIP_INK);
-            face.rgba[i + 3] = (cov * 255.0) as u8;
+    let c = (side as f32 - 1.0) / 2.0;
+    let r = CORE_DOT / 2.0;
+    for y in 0..side {
+        for x in 0..side {
+            let dx = x as f32 - c;
+            let dy = y as f32 - c;
+            let d = (dx * dx + dy * dy).sqrt();
+            let i = ((y * side + x) * 4) as usize;
+            // The disc, antialiased by coverage: a lamp's edge is a circle, and a hard-edged one
+            // at ten pixels is a square with delusions.
+            let cov = (r + 0.5 - d).clamp(0.0, 1.0);
+            let mut rgb = LED_OFF;
+            let mut a = cov;
+            if on {
+                if cov > 0.0 {
+                    // Hot in the middle: the middle of a lit lamp is near white, and its rim is
+                    // the green it is supposed to be.
+                    let t = (d / r).clamp(0.0, 1.0);
+                    rgb = [
+                        (LED_CORE[0] as f32 * (1.0 - t) + LED_LIT[0] as f32 * t).round() as u8,
+                        (LED_CORE[1] as f32 * (1.0 - t) + LED_LIT[1] as f32 * t).round() as u8,
+                        (LED_CORE[2] as f32 * (1.0 - t) + LED_LIT[2] as f32 * t).round() as u8,
+                    ];
+                    a = cov;
+                }
+                // And out past the edge of it, the light it throws: fading to nothing by the
+                // halo's own radius, and never as solid as the lamp itself.
+                if cov <= 0.0 {
+                    let halo = (1.0 - (d - r) / CORE_DOT_HALO).clamp(0.0, 1.0) * 0.55;
+                    if halo > 0.0 {
+                        rgb = LED_LIT;
+                        a = halo;
+                    }
+                }
+            }
+            if a <= 0.0 {
+                continue;
+            }
+            face.rgba[i..i + 3].copy_from_slice(&rgb);
+            face.rgba[i + 3] = (a * 255.0) as u8;
         }
     }
     face

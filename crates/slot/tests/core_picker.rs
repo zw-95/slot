@@ -60,18 +60,28 @@ fn right_from_mgba_sends_one_name_out_and_another_in() {
     assert_eq!(landed.seated, Some(Core::Gpsp));
 }
 
-/// At the end of the machine's list there is nowhere to go. The chip shakes, and nothing else
-/// about the picker changes. Spelled against the last of the Advance's cores rather than naming
-/// one: what is at the end is a machine's business, and the Advance has grown past two.
+/// The list is a **ring**: off the end comes back round to the other end, and the name travels
+/// the same way it does for any other step. Spelled against the last of the Advance's cores
+/// rather than naming one: what is at the end is a machine's business, and the Advance has grown
+/// past two.
+///
+/// It was refused here until 2026-10-24, and a wall is the wrong shape for a list of thirteen the
+/// board shows one of at a time: getting from the last core to the first meant walking back
+/// through twelve, which is not "there is nothing over there" — it is a long way round.
 #[test]
-fn toward_the_end_of_the_list_is_refused_and_only_shakes() {
-    let last = *System::Gba.cores().last().unwrap();
+fn off_the_end_of_the_list_comes_back_round() {
+    let cores = System::Gba.cores();
+    let last = *cores.last().unwrap();
     let mut p = opened(last, 0);
-    assert_eq!(p.press(Press::Right, 400), Outcome::Refused);
-    assert_eq!(p.seat(), last);
-    assert_ne!(p.chip(400).shake, 0.0, "a refusal with no shake");
-    assert_eq!(p.chip(400).seated, Some(last));
-    assert_eq!(p.chip(700).shake, 0.0, "the shake outlived its 300 ms");
+    assert_eq!(p.press(Press::Right, 400), Outcome::Nothing);
+    assert_eq!(p.seat(), cores[0], "the ring did not come back to the front");
+    assert_eq!(p.index(), 0);
+    // And the name travels, so it reads as a movement and not as a jump: the one being left is
+    // the old core and the one arriving is the new one, from the side the hand went.
+    let moving = p.chip(400 + HOP_MS / 2).swap.expect("no name is travelling");
+    assert_eq!((moving.from, moving.to), (last, cores[0]));
+    assert_eq!(moving.dir, 1.0, "a press to the right brings the name in from the right");
+    assert_eq!(p.chip(400 + HOP_MS).seated, Some(cores[0]));
 }
 
 /// Back the other way mid-change, the name picks up from where it is rather than jumping to the
@@ -104,20 +114,14 @@ fn back_mid_change_turns_the_name_round_from_where_it_is() {
     assert_eq!(p.chip(at + HOP_MS).seated, Some(Core::Mgba));
 }
 
-/// Onward again mid-change, with somewhere to go: the walk carries on. Not a refusal — there is
-/// room — and so not a chip shaking over nothing.
+/// Onward again mid-change: the walk carries on from where the name had got to.
 #[test]
-fn onward_mid_change_keeps_walking_and_is_not_a_refusal() {
+fn onward_mid_change_keeps_walking() {
     let cores = System::Gba.cores();
     let mut p = CorePicker::open(cores[0], cores, 0);
     p.start(0);
     p.press(Press::Right, 400);
     assert_eq!(p.press(Press::Right, 450), Outcome::Nothing);
-    assert_eq!(
-        p.chip(450).shake,
-        0.0,
-        "a refusal where there is room to walk"
-    );
     assert_eq!(p.seat(), cores[2], "the walk stopped one core along");
 }
 
@@ -157,15 +161,21 @@ fn a_close_during_the_lift_reverses_from_where_the_lid_had_got_to() {
     );
 }
 
-/// A refusal decays on its own clock and must not survive into a hop that actually happens: two
-/// things shaking at once reads as two separate failures.
+/// A change started a moment after another one still runs from where the first had got to, and
+/// neither of them leaves anything behind for the next: the chip has one name on it at a time and
+/// one travel at a time, so a run of presses reads as one movement.
 #[test]
-fn a_change_started_soon_after_a_refusal_does_not_carry_its_shake() {
-    let mut p = opened(*System::Gba.cores().last().unwrap(), 0);
-    assert_eq!(p.press(Press::Right, 0), Outcome::Refused);
-    assert_eq!(p.press(Press::Left, 100), Outcome::Nothing);
-    assert_eq!(p.chip(100).shake, 0.0, "the refusal rode along on the change");
-    assert_eq!(p.chip(150).shake, 0.0, "the refusal rode along on the change");
+fn a_change_started_soon_after_another_picks_up_where_that_one_was() {
+    let cores = System::Gba.cores();
+    let mut p = opened(cores[0], 0);
+    assert_eq!(p.press(Press::Right, 0), Outcome::Nothing);
+    // Only a quarter of the way through the first travel, and already turning round: the name
+    // goes back the way it came rather than starting again from the far side.
+    assert_eq!(p.press(Press::Left, HOP_MS / 4), Outcome::Nothing);
+    assert_eq!(p.seat(), cores[0]);
+    let turned = p.chip(HOP_MS / 4).swap.expect("the name stopped moving");
+    assert_eq!(turned.dir, -1.0);
+    assert!(p.chip(HOP_MS / 2).swap.is_some(), "the turn did not travel");
 }
 
 #[test]
@@ -232,13 +242,12 @@ fn the_arrows_do_nothing_while_the_picker_waits() {
     assert_eq!(p.press(Press::Right, 100), Outcome::Nothing);
     assert_eq!(p.seat(), Core::Mgba, "a hop started while the cart waited");
     let chip = p.chip(100);
-    assert_eq!((chip.seated, chip.shake), (Some(Core::Mgba), 0.0));
+    assert_eq!(chip.seated, Some(Core::Mgba));
     assert_eq!(
         p.press(Press::Left, 120),
         Outcome::Nothing,
-        "toward its own socket while the cart waited was refused"
+        "the arrows moved a chip nobody can see"
     );
-    assert_eq!(p.chip(120).shake, 0.0);
 
     p.start(200);
     assert_eq!(p.press(Press::Right, 300), Outcome::Nothing);
@@ -264,9 +273,9 @@ fn the_arrows_do_nothing_while_the_picker_waits() {
 
 /// There is no board to fill and no window to roll any more — one chip, one name — so a machine
 /// may offer as many cores as it likes and the picker walks them in the order it was given, one
-/// press at a time, refusing at both ends rather than wrapping to the far side.
+/// press at a time, and round again from the last to the first.
 #[test]
-fn a_long_list_is_walked_one_core_at_a_time_and_stops_at_both_ends() {
+fn a_long_list_is_walked_one_core_at_a_time_and_round_again() {
     let cores = System::Sfc.cores();
     assert!(cores.len() > 3, "this machine is too short to show it");
     let mut p = CorePicker::open(cores[0], cores, 0);
@@ -282,11 +291,17 @@ fn a_long_list_is_walked_one_core_at_a_time_and_stops_at_both_ends() {
         // the place the chip is at, not the place it started.
         assert_eq!(p.index(), i);
     }
+    // And off the end, **back round to the front**: a ring, which is what gets a player from the
+    // last of thirteen to the first without walking the eleven between them.
     assert_eq!(
         p.press(Press::Right, 1_000_000),
-        Outcome::Refused,
-        "the arrow wrapped round to the far end"
+        Outcome::Nothing,
+        "the arrow at the end of the list answered nothing"
     );
+    assert_eq!(p.seat(), cores[0], "the walk did not come back round");
+    assert_eq!(p.index(), 0);
+    // And the other way off the front, to the back.
+    assert_eq!(p.press(Press::Left, 1_000_001), Outcome::Nothing);
     assert_eq!(p.seat(), cores[cores.len() - 1]);
 }
 
@@ -300,8 +315,13 @@ fn opening_at_an_end_leaves_nothing_beyond_it_and_the_rest_behind_it() {
     let mut p = CorePicker::open(last, cores, 0);
     p.start(0);
     assert_eq!(p.seat(), last);
-    assert_eq!(p.press(Press::Right, 100), Outcome::Refused);
+    // Beyond the last is the first, and behind the last is the one before it: both ends of a ring
+    // are somewhere, which is the difference between a ring and a wall.
+    assert_eq!(p.press(Press::Right, 100), Outcome::Nothing);
+    assert_eq!(p.seat(), cores[0]);
     assert_eq!(p.press(Press::Left, 200), Outcome::Nothing);
+    assert_eq!(p.seat(), cores[cores.len() - 1]);
+    assert_eq!(p.press(Press::Left, 300), Outcome::Nothing);
     assert_eq!(p.seat(), cores[cores.len() - 2]);
 }
 
@@ -311,13 +331,14 @@ fn opening_at_an_end_leaves_nothing_beyond_it_and_the_rest_behind_it() {
 fn one_core_is_not_a_choice() {
     // Spelled out rather than taken off a machine: every machine on the card offers more than
     // one now, so the one-socket board has to be made by hand. It is still a shape a machine
-    // could have — the Game Boy had it until this week — and the picker still has to refuse
-    // rather than wrap.
+    // could have — the Game Boy had it until this week — and a ring of one is the one core there
+    // is, pressed at from either side and never moved.
     let cores = [Core::Mgba];
     assert_eq!(cores.len(), 1);
     let mut p = CorePicker::open(cores[0], &cores, 0);
     p.start(0);
-    assert_eq!(p.press(Press::Right, 100), Outcome::Refused);
-    assert_eq!(p.press(Press::Left, 200), Outcome::Refused);
+    assert_eq!(p.press(Press::Right, 100), Outcome::Nothing);
+    assert_eq!(p.press(Press::Left, 200), Outcome::Nothing);
     assert_eq!(p.seat(), cores[0]);
+    assert_eq!(p.index(), 0);
 }

@@ -185,6 +185,13 @@ impl Core {
             // The libretro name, and the short one a hand is likelier to type.
             "mednafen_supafaust" | "supafaust" => Some(Core::Supafaust),
             "snes9x2005_plus" | "snes9x2005plus" => Some(Core::Snes9x2005Plus),
+            // **The one this list was missing**, and the reason a Super Nintendo cart came back
+            // on `snes9x` after `snes9x2010` had been chosen and confirmed: `write_selected_core`
+            // writes `as_str`, which spells this core `snes9x2010`, and a name this function does
+            // not know is a fall back to the machine's default — so the choice was written, shown,
+            // and quietly un-chosen on the next read. A name `as_str` can write must be a name
+            // `parse` can read, which `every_core_round_trips_through_its_own_name` now holds.
+            "snes9x2010" | "snes9x_2010" | "snes9x-2010" => Some(Core::Snes9x2010),
             "snes9x2005" => Some(Core::Snes9x2005),
             "snes9x2002" => Some(Core::Snes9x2002),
             "snes9x" => Some(Core::Snes9x),
