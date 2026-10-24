@@ -83,17 +83,18 @@ pub struct BorderPicker {
 
 impl BorderPicker {
     /// Opens on `selected`, which is the border the cart already wears: the picker answers
-    /// "which is this?" before it asks "which do you want?". `None` — a cart on its machine's own
-    /// shell, or one nobody has chosen for — opens on that shell, which is the first thing in
-    /// the ring.
+    /// "which is this?" before it asks "which do you want?". A cart nobody has chosen for opens
+    /// on the card's first border, which is the ring's own beginning.
     ///
-    /// `numbers` are the borders the card actually holds, in the order they are numbered. One
-    /// border is still a choice of two, because the machine's own shell is always the other one;
-    /// a machine with no borders at all is not a question and `App` does not open the picker.
+    /// `numbers` are the borders the card actually holds, in the order they are numbered, and
+    /// **they are the whole of the ring**: the machine's own shell is what a cart wears until
+    /// somebody picks one, but it is not a thing to pick — the choice is between pictures of
+    /// carts, and a drawing of a shell that no card supplied is not one of them. A machine with
+    /// no borders at all is not a question and `App` does not open the picker.
     pub fn open(selected: Option<u32>, numbers: &[u32], now: Millis) -> Self {
         let mut items = [None; BORDERS_MAX];
-        let mut count = 1;
-        for n in numbers.iter().take(BORDERS_MAX - 1) {
+        let mut count = 0;
+        for n in numbers.iter().take(BORDERS_MAX) {
             items[count] = Some(*n);
             count += 1;
         }
@@ -284,14 +285,14 @@ mod tests {
         BorderPicker::open(None, numbers, 0)
     }
 
-    /// The ring is the machine's own shell and then the card's borders: a cart nobody has chosen
-    /// for opens on the shell, and that is a place in the ring like any other rather than a way
-    /// out of it.
+    /// The ring is **the card's borders and nothing else**: a cart nobody has chosen for opens on
+    /// the first of them. The machine's own shell is what a cart wears until somebody picks one;
+    /// it is not one of the things to pick, so it is not a place in the ring.
     #[test]
-    fn it_opens_on_the_machine_s_own_shell() {
-        let p = ring(&[1, 2, 3]);
-        assert_eq!(p.count(), 4, "the shell and three borders");
-        assert_eq!(p.seat(), None);
+    fn a_cart_nobody_has_chosen_for_opens_on_the_first_border() {
+        let p = ring(&[4, 5, 6]);
+        assert_eq!(p.count(), 3, "three borders, and no shell among them");
+        assert_eq!(p.seat(), Some(4));
         assert_eq!(p.index(), 0);
     }
 
@@ -299,50 +300,48 @@ mod tests {
     /// before it asks which you want.
     #[test]
     fn it_opens_on_the_border_the_cart_wears() {
-        let p = BorderPicker::open(Some(3), &[1, 2, 3], 0);
-        assert_eq!(p.seat(), Some(3));
-        assert_eq!(p.index(), 3);
+        let p = BorderPicker::open(Some(6), &[4, 5, 6], 0);
+        assert_eq!(p.seat(), Some(6));
+        assert_eq!(p.index(), 2);
     }
 
     /// A number the card no longer holds — a card whose borders were edited on a PC — opens on
-    /// the shell rather than on a border that is not there.
+    /// the first border rather than on one that is not there.
     #[test]
-    fn a_border_that_is_not_on_the_card_opens_on_the_shell() {
-        let p = BorderPicker::open(Some(9), &[1, 2], 0);
-        assert_eq!(p.seat(), None);
+    fn a_border_that_is_not_on_the_card_opens_on_the_first_one() {
+        let p = BorderPicker::open(Some(9), &[4, 5], 0);
+        assert_eq!(p.seat(), Some(4));
     }
 
-    /// The ring has no end: a press left off the shell lands on the last border, and a press
-    /// right off the last lands back on the shell. Thirty-two borders and no way to the first
-    /// but walking back through thirty-one is not a list, it is a corridor.
+    /// The ring has no end: a press left off the first lands on the last, and a press right off
+    /// the last comes round to the first. Thirty-five borders and no way to the first but walking
+    /// back through thirty-four is not a list, it is a corridor.
     #[test]
     fn the_ring_comes_round() {
         let mut p = ring(&[1, 2, 3]);
         p.start(0);
         assert_eq!(p.press(Press::Left, 10), Outcome::Nothing);
-        assert_eq!(p.seat(), Some(3), "left of the shell is the last border");
+        assert_eq!(p.seat(), Some(3), "left of the first is the last");
         assert_eq!(p.press(Press::Left, 300), Outcome::Nothing);
         assert_eq!(p.seat(), Some(2));
         p = ring(&[1, 2, 3]);
         p.start(0);
         p.press(Press::Right, 10);
+        assert_eq!(p.seat(), Some(2));
         p.press(Press::Right, 300);
+        assert_eq!(p.seat(), Some(3));
         p.press(Press::Right, 600);
-        assert_eq!(p.seat(), Some(3), "three steps right from the shell");
-        p.press(Press::Right, 900);
-        assert_eq!(p.seat(), None, "and one more comes back to the shell");
+        assert_eq!(p.seat(), Some(1), "and one more comes round to the first");
     }
 
-    /// `A` writes what is in hand, including the shell — which is written as no line at all, so
-    /// a cart put back on its machine's own shell leaves nothing to go stale.
+    /// `A` writes what is in hand, and every place in the ring is a border now, so every place
+    /// writes a number. (The shell used to be written as no line at all; there is no shell to
+    /// choose now, so there is no such write to make.)
     #[test]
     fn a_writes_what_is_in_hand() {
         let mut p = BorderPicker::open(Some(2), &[1, 2, 3], 0);
         p.start(0);
         assert_eq!(p.press(Press::Keep, 10), Outcome::Write(Some(2)));
-        let mut plain = ring(&[1]);
-        plain.start(0);
-        assert_eq!(plain.press(Press::Keep, 10), Outcome::Write(None));
     }
 
     /// `B` writes nothing, and after either of them the arrows are spent: a press on a panel that
@@ -353,7 +352,7 @@ mod tests {
         p.start(0);
         assert_eq!(p.press(Press::Back, 10), Outcome::Nothing);
         assert_eq!(p.press(Press::Right, 20), Outcome::Nothing);
-        assert_eq!(p.seat(), None, "and the ring did not move");
+        assert_eq!(p.seat(), Some(1), "and the ring did not move");
     }
 
     /// While the faces are still being drawn the arrows do nothing, but `A` and `B` still close:
@@ -363,8 +362,8 @@ mod tests {
         let mut p = ring(&[1, 2]);
         assert!(p.waiting());
         assert_eq!(p.press(Press::Right, 10), Outcome::Nothing);
-        assert_eq!(p.seat(), None);
-        assert_eq!(p.press(Press::Keep, 10), Outcome::Write(None));
+        assert_eq!(p.seat(), Some(1));
+        assert_eq!(p.press(Press::Keep, 10), Outcome::Write(Some(1)));
     }
 
     /// The row slides the way the hand went and comes to rest: a press right brings the next
@@ -382,15 +381,16 @@ mod tests {
         assert!(p.pose(1_000).shift < 0.0, "a press left starts to the left");
     }
 
-    /// The neighbours are the ones either side, round the ring: the left of the first is the
-    /// last, and a ring of two has no third place to show.
+    /// The neighbours are the ones either side, **round the ring**: the left of the first is the
+    /// last and the right of the last is the first, because there is no shell at either end to
+    /// come to a stop against.
     #[test]
     fn the_neighbours_come_round_the_ring() {
         let p = BorderPicker::open(Some(1), &[1, 2, 3], 0);
-        assert_eq!(p.item(-1), Some(None), "left of border 1 is the shell");
+        assert_eq!(p.item(-1), Some(Some(3)), "left of the first is the last");
         assert_eq!(p.item(1), Some(Some(2)));
         let last = BorderPicker::open(Some(3), &[1, 2, 3], 0);
-        assert_eq!(last.item(1), Some(None), "right of the last is the shell");
+        assert_eq!(last.item(1), Some(Some(1)), "right of the last is the first");
     }
 
     /// Open, then close, and the close runs out so `App` can let it go.

@@ -144,14 +144,11 @@ impl BorderFaceBuilder {
             .spawn(move || {
                 while let Ok((root, cart, numbers, k, seat)) = inbox.recv() {
                     let key = format!("{}/{}", cart.system().dir_name(), cart.stem);
-                    let count = numbers.len() + 1;
+                    let count = numbers.len();
                     for place in ring_order(seat, count) {
-                        // Place 0 is the machine's own shell, which is what every cart wears
-                        // until somebody picks one; the rest are the card's borders.
-                        let face = match place {
-                            0 => Some(slot_ui::plain_face(&cart, k)),
-                            p => slot_ui::border_face(&root, &cart, numbers[p - 1], k),
-                        };
+                        // Every place is one of the card's own borders: the machine's shell is
+                        // not an entry in this ring, it is what a cart wears until one is picked.
+                        let face = slot_ui::border_face(&root, &cart, numbers[place], k);
                         // A border the card no longer carries draws nothing rather than a hole in
                         // the row: a card edited on a PC can hold fewer than it did.
                         if let Some(face) = face {

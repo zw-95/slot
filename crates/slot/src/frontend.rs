@@ -1841,10 +1841,10 @@ fn sync_border_picker(
                 .iter()
                 .map(|b| b.number)
                 .collect();
-            // The machine's own shell is a place in the ring too, so the row is one wider than
-            // the card's list of borders.
-            app.begin_border_ring(numbers.len() + 1);
-            texes.resize(numbers.len() + 1, None);
+            // The ring is the card's list and nothing more: the machine's own shell is not a
+            // place in it.
+            app.begin_border_ring(numbers.len());
+            texes.resize(numbers.len(), None);
             // Built **from the seat outward**: see `ring_order`.
             builder.request(root, cart, numbers, BORDER_FACE_K, seat);
         }
