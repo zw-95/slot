@@ -4,6 +4,7 @@
 //! they come back. Only the newest request matters: a caret that has moved on has no use for the
 //! cart it passed.
 
+use std::path::PathBuf;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
@@ -25,14 +26,20 @@ pub struct BuiltFaces {
     pub lid: CartFace,
 }
 
+/// What the open cart is built from: **the card, the cart, and the border the card says it is
+/// wearing**, which is the same three things the shelf's own filler is given and for the same
+/// reason — a worker is a thread with a channel, and it has no reach to the card's choices. See
+/// `Dressed`, which this mirrors.
+type Opened = (PathBuf, Cart, Option<u32>);
+
 pub struct FaceBuilder {
-    requests: Sender<Cart>,
+    requests: Sender<Opened>,
     built: Receiver<BuiltFaces>,
 }
 
 impl FaceBuilder {
     pub fn spawn() -> Self {
-        let (requests, inbox) = mpsc::channel::<Cart>();
+        let (requests, inbox) = mpsc::channel::<Opened>();
         let (outbox, built) = mpsc::channel();
         // Named and built the way every other worker in this crate is (`link_start`,
         // `rewind`, `emu`, `audio/host`): a `Builder` rather than the bare `thread::spawn`, so
@@ -40,18 +47,44 @@ impl FaceBuilder {
         let spawned = thread::Builder::new()
             .name("slot-faces".into())
             .spawn(move || {
-                while let Ok(mut cart) = inbox.recv() {
+                while let Ok(mut job) = inbox.recv() {
                     // Straight to the newest: the requests before it were for carts the caret
                     // has already left.
                     while let Ok(newer) = inbox.try_recv() {
-                        cart = newer;
+                        job = newer;
                     }
+                    let (root, cart, dressed) = job;
+                    // **The lid is this cart wearing what the card says it wears.** It used to be
+                    // `cart_face` — the machine's own shell, which is what a cart is before
+                    // anybody picks anything — and a cart that had been given a cover therefore
+                    // lifted the plastic it was born in, at *that* plastic's proportions rather
+                    // than the ones it was wearing on the shelf. The cover comes from the card
+                    // the way the shelf's does, because the cart itself cannot be asked: only the
+                    // card knows what was given.
+                    let worn = match dressed {
+                        Some(number) => {
+                            border_face(&root, &cart, number, FACE_SCALE).unwrap_or_else(|| cart_face(&cart))
+                        }
+                        None => cart_face(&cart),
+                    };
                     let faces = BuiltFaces {
-                        key: format!("{}/{}", cart.system().dir_name(), cart.stem),
+                        // **The cover is part of what these faces are**, and so part of the key: a
+                        // lid wearing another cover is another lid. It was left out until now,
+                        // which is why giving a cart a cover could leave the picker lifting the
+                        // bare shell indefinitely — the key had not changed, so nothing was
+                        // rebuilt, and only walking the caret away and back made it look again.
+                        key: format!(
+                            "{}/{}#{}",
+                            cart.system().dir_name(),
+                            cart.stem,
+                            dressed
+                                .map(|n| n.to_string())
+                                .unwrap_or_else(|| "-".to_string())
+                        ),
                         // The back half is this cart's own machine's shell: a Game Boy cart
                         // opens as a portrait cart, and not as an Advance one.
                         board: board_face(&cart, cart.system()),
-                        lid: padded(&cart_face(&cart), TURN_PAD),
+                        lid: padded(&worn, TURN_PAD),
                     };
                     if outbox.send(faces).is_err() {
                         return;
@@ -69,9 +102,9 @@ impl FaceBuilder {
         FaceBuilder { requests, built }
     }
 
-    pub fn request(&self, cart: Cart) {
+    pub fn request(&self, root: PathBuf, cart: Cart, dressed: Option<u32>) {
         // A worker that has gone has nothing to build with; the picker's own wait gives up.
-        let _ = self.requests.send(cart);
+        let _ = self.requests.send((root, cart, dressed));
     }
 
     /// The newest build finished since the last call, if any.

@@ -6725,6 +6725,19 @@ impl App {
         self.border_choices[slot].as_ref()?.get(&cart.stem).copied()
     }
 
+    /// What the open cart is built from: **the card, the cart under the highlight, and the cover
+    /// the card says it is wearing.** One ask rather than three, because the three only mean
+    /// anything together and the frontend has no business assembling them — see
+    /// `FaceBuilder::request`, whose key carries the same three.
+    pub fn core_picker_target(
+        &mut self,
+    ) -> Option<(std::path::PathBuf, slot_store::Cart, Option<u32>)> {
+        let root = self.root.clone()?;
+        let cart = self.selected_cart()?.clone();
+        let number = self.border_number_for(&cart);
+        Some((root, cart, number))
+    }
+
     /// The picker's faces, one per place in its ring, uploaded by the frontend when they are
     /// built. Held here because the arrows must be able to move through the whole ring without
     /// waiting for a rasterise: the row is pictures, and a picture that takes 70 ms to draw is

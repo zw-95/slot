@@ -1787,23 +1787,35 @@ fn sync_core_picker(
     lid: &mut Option<TexId>,
     built: &mut Option<String>,
 ) {
-    // Machine and stem, not a stem: the same stem on another machine's shelf is another cart,
-    // and the board and lid are that machine's shell as much as this cart's label.
-    let highlighted = app.faces_key();
-    if highlighted.is_some() && *asked != highlighted {
-        // The cart in hand, and not a hunt through the library for a matching stem: `carts()` is
-        // every machine's carts, and two machines holding a game of the same name is two carts
-        // answering to one stem. A board and lid built from the other one is this cart's lid
-        // opening as the wrong machine's shell — a Game Boy cart with a Family Computer front.
-        if let Some(cart) = app.selected_cart() {
-            builder.request(cart.clone());
+    // **Machine, stem and cover**, and not a stem: the same stem on another machine's shelf is
+    // another cart, and the same cart wearing another cover is another *lid* to lift. The cover
+    // used not to count, so giving a cart one left this asking for a lid it had already been given
+    // — the key had not moved, so nothing was rebuilt, and the picker went on lifting the shell
+    // the cart was born in until the caret walked away and came back.
+    let target = app.core_picker_target();
+    let highlighted = target.as_ref().map(|(_, cart, dressed)| {
+        format!(
+            "{}/{}#{}",
+            cart.system().dir_name(),
+            cart.stem,
+            dressed
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "-".to_string())
+        )
+    });
+    if let Some(key) = highlighted.clone() {
+        if *asked != Some(key.clone()) {
+            if let Some((root, cart, dressed)) = target {
+                builder.request(root, cart, dressed);
+            }
+            *asked = Some(key);
         }
-        *asked = highlighted.clone();
     }
     let Some(faces) = builder.take() else {
         return;
     };
-    // A build for a cart the caret has since left is dropped; the one it is on is on its way.
+    // A build for a cart the caret has since left **or a cover it has since changed** is dropped;
+    // the one it is wearing now is on its way.
     if highlighted.as_deref() != Some(faces.key.as_str()) || *built == highlighted {
         return;
     }
@@ -1816,9 +1828,9 @@ fn sync_core_picker(
     );
     let lid_id = upload_rgba(compositor, lid, faces.lid.w, faces.lid.h, &faces.lid.rgba);
     app.set_core_board_faces(board_id, lid_id);
-    // The same key the app recorded them against, and for the same reason: a board and lid are
-    // one machine's cart, and a stem alone names two of them.
-    *built = app.faces_key();
+    // The same key, and the key carries the cover now: a board and a lid are one machine's cart
+    // wearing one thing, and neither a stem alone nor a machine-and-stem names both.
+    *built = highlighted;
 }
 
 /// The border picker's ring, rasterised off the frame loop: the cart under the highlight wearing

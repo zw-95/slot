@@ -29,12 +29,24 @@ use crate::shell::{Finish, Shell};
 /// Where the card keeps it.
 const DIR: &str = "System/Carts";
 
-/// The magenta the label slot is marked with: bright, with green held well down. It comes back
-/// through a paint program, so the edges are tolerance rather than equality — see `MARK_SKEW`
-/// for the half of the test that actually decides it.
-const MARK_R: u8 = 235;
-const MARK_G: u8 = 20;
-const MARK_B: u8 = 235;
+/// The magenta the label slot is marked with: **bright enough, with red and blue nearly equal and
+/// green held well down.** Which of those three does the deciding is `MARK_SKEW` below; these are
+/// only the floors.
+///
+/// They used to be 235, and that is where "the pink ones and the purple ones come out as a flat
+/// wash" came from. A slot painted in a paint program does not reach the card unmolested — indexing
+/// it, filtering it, round-tripping it through another editor all pull the three channels inwards,
+/// and a mark that arrives as `220,40,210` is the same mark. Held to 235 it is not a mark at all:
+/// `find_label` finds nothing, so there is no slot, so **every pixel in the picture is plastic**, so
+/// the shell colour is painted over the whole of it — which is exactly what "covered by a solid
+/// colour" looks like. The art has done nothing wrong; the floor asked it for a purer colour than
+/// the file it travelled in can carry.
+///
+/// Lowering the floor does not let the pinks in. A shell is separated from the marker by *how far
+/// apart its own red and blue sit* — see `MARK_SKEW` — and that is untouched here.
+const MARK_R: u8 = 200;
+const MARK_G: u8 = 60;
+const MARK_B: u8 = 200;
 
 /// How bright the plastic is taken to be, as a percentile of its own pixels. Applied as
 /// `colour * (luma / this)`, so anything at or below the reference keeps the shell colour's
@@ -261,6 +273,297 @@ fn read(path: &Path, tint: bool) -> Option<Art> {
     })
 }
 
+
+/// The colours a shell comes in, in the order the card counts them.
+///
+/// **Their order is a contract, not a list somebody may rearrange.** What a cart stores about its
+/// cover is a number, and that number is a place in this array — so a colour inserted anywhere but
+/// the end leaves every choice made before it naming the shell that used to sit there. The same is
+/// true of how many covers a machine offers, which is templates times colours: add a shape and
+/// every number after it shifts.
+///
+/// The fourth thing each one carries is how solid it is. `Clear` and `ClearSmoke` are shells you
+/// can see through, and `AtomicPurple` nearly so; a drawing recoloured as one of them is recoloured
+/// as a thing with less material in it, which is the only difference between them and the rest.
+pub const SHELLS: [(&str, [u8; 3], f32); 11] = [
+    ("Gray", [156, 156, 156], 1.0),
+    ("Black", [32, 32, 34], 1.0),
+    ("White", [236, 236, 232], 1.0),
+    ("Blue", [44, 52, 148], 1.0),
+    ("Pink", [232, 122, 162], 1.0),
+    ("Red", [168, 44, 44], 1.0),
+    ("Green", [44, 130, 66], 1.0),
+    ("Yellow", [226, 186, 40], 1.0),
+    ("AtomicPurple", [128, 72, 168], 0.82),
+    ("Clear", [176, 196, 200], 0.62),
+    ("ClearSmoke", [96, 100, 104], 0.66),
+];
+
+/// How much of a template's own light and shade the new colour carries. `1.0` is the template's
+/// range exactly; **0.8** is what is in use, because a shell recoloured at full range stops looking
+/// like plastic and starts looking like a photograph of a different object.
+pub const SHELL_CONTRAST: f32 = 0.8;
+
+/// How much light a pixel carries. None of red, green or blue is the light by itself — each of
+/// them takes a turn being the tallest — so the light is whichever of the three is, which is what
+/// makes it the one number a grey drawing can be recoloured by without losing anything.
+fn value_of(px: &[u8]) -> u8 {
+    px[0].max(px[1]).max(px[2])
+}
+
+fn rgb_to_hsv([r, g, b]: [u8; 3]) -> (f32, f32, f32) {
+    let (r, g, b) = (r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+    let hue = if d == 0.0 {
+        0.0
+    } else if max == r {
+        ((g - b) / d).rem_euclid(6.0)
+    } else if max == g {
+        (b - r) / d + 2.0
+    } else {
+        (r - g) / d + 4.0
+    };
+    let sat = if max == 0.0 { 0.0 } else { d / max };
+    (hue / 6.0, sat, max)
+}
+
+fn hsv_to_rgb(h: f32, s: f32, v: f32) -> (u8, u8, u8) {
+    let h6 = h.rem_euclid(1.0) * 6.0;
+    let i = h6 as u32;
+    let f = h6 - i as f32;
+    let p = v * (1.0 - s);
+    let q = v * (1.0 - s * f);
+    let t = v * (1.0 - s * (1.0 - f));
+    let (r, g, b) = match i % 6 {
+        0 => (v, t, p),
+        1 => (q, v, p),
+        2 => (p, v, t),
+        3 => (p, q, v),
+        4 => (t, p, v),
+        _ => (v, p, q),
+    };
+    (
+        (r * 255.0).round() as u8,
+        (g * 255.0).round() as u8,
+        (b * 255.0).round() as u8,
+    )
+}
+
+/// Recolour a drawing of a cart into one shell colour, in place.
+///
+/// Three decisions are buried in here, and all three of them were made the hard way:
+///
+/// * **The light is what survives, not the colour.** Hue and saturation come from `target` and
+///   every pixel takes them; what is left of the template afterwards is its relief and nothing
+///   else. This is the whole of what "being made of coloured plastic" means.
+/// * **Transparent pixels are not plastic.** A cut-out shell is most of its frame empty, and every
+///   one of those pixels lands in bucket zero — which dragged the middle of the histogram down
+///   until each remaining pixel read as a highlight and was pushed towards white.
+/// * **The relief is fitted into the room the picture has, never clipped.** A pale colour sits high
+///   to begin with: `Pink` at 232, `White` at 236. Adding the template's bright half to that walked
+///   sixty-odd steps past 255, and a past-255 is 255 — so the highlights all became one value and
+///   the moulding disappeared into a flat plateau, which is exactly what a border "covered by a
+///   solid colour" looked like on the shelf. The relief is therefore scaled to what fits (`k`) and
+///   then the window is slid down to meet the ceiling (`shift`): **the shape of the light arrives
+///   whole and only its level moves**, which is the difference between recording the plastic and
+///   losing it.
+///
+/// `label` is the slot `find_label` found, and it is painted back to magenta afterwards: the mark
+/// has served its purpose by being found, and recolouring it would leave nothing to paste this
+/// cart's own label into.
+pub fn shell_tint(
+    rgba: &mut [u8],
+    w: u32,
+    label: Option<&Label>,
+    target: [u8; 3],
+    alpha_scale: f32,
+    contrast: f32,
+) {
+    let (hue, sat, light) = rgb_to_hsv(target);
+    let base = light * 255.0;
+
+    // What light the drawing actually has — over its own plastic and nowhere else.
+    let mut hist = [0u32; 256];
+    for px in rgba.chunks_exact(4) {
+        if px[3] != 0 {
+            hist[value_of(px) as usize] += 1;
+        }
+    }
+    hist[0] = 0;
+    let total: u32 = hist.iter().sum();
+    if total == 0 {
+        return;
+    }
+    let mut mid = 0u32;
+    let mut acc = 0u32;
+    for (v, c) in hist.iter().enumerate() {
+        acc += *c;
+        if acc * 2 >= total {
+            mid = v as u32;
+            break;
+        }
+    }
+    let percentile = |p: f32| -> u32 {
+        let want = (total as f32 * p / 100.0).ceil().max(1.0) as u32;
+        let mut a = 0u32;
+        for (v, c) in hist.iter().enumerate() {
+            a += *c;
+            if a >= want {
+                return v as u32;
+            }
+        }
+        255
+    };
+    let (lo, hi) = (percentile(1.0), percentile(99.0));
+
+    // Fit the relief to the room, then slide the window down to the ceiling.
+    let up = (hi as f32 - mid as f32) * contrast;
+    let dn = (mid as f32 - lo as f32) * contrast;
+    let span = up + dn;
+    let k = if span > 255.0 { 255.0 / span } else { 1.0 };
+    let mut shift = 0.0;
+    if base + up * k > 255.0 {
+        shift = 255.0 - (base + up * k);
+    }
+    if base - dn * k + shift < 0.0 {
+        shift = dn * k - base;
+    }
+
+    let rows = rgba.len() / 4 / (w.max(1) as usize);
+    for y in 0..rows as u32 {
+        for x in 0..w {
+            let at = ((y * w + x) * 4) as usize;
+            let px = &mut rgba[at..at + 4];
+            if px[3] == 0 {
+                continue;
+            }
+            let v = base + (value_of(px) as f32 - mid as f32) * contrast * k + shift;
+            let (r, g, b) = hsv_to_rgb(hue, sat, v.clamp(0.0, 255.0) / 255.0);
+            px[0] = r;
+            px[1] = g;
+            px[2] = b;
+            if alpha_scale < 1.0 {
+                px[3] = (px[3] as f32 * alpha_scale).round() as u8;
+            }
+        }
+    }
+
+    if let Some(l) = label {
+        for y in l.y0..=l.y1 {
+            for x in l.x0..=l.x1 {
+                if l.mask[(y * w + x) as usize] != 0 {
+                    let at = ((y * w + x) * 4) as usize;
+                    rgba[at] = 255;
+                    rgba[at + 1] = 0;
+                    rgba[at + 2] = 255;
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests_shell_tint {
+    use super::*;
+
+    /// One drawing to recolour: **opaque grey plastic shading left to right**, with the label
+    /// slot's magenta in the middle of it. Fifty across and twenty down is enough to have a
+    /// histogram with a middle worth finding, which is all the arithmetic asks of a picture.
+    fn sample() -> (Vec<u8>, u32, u32) {
+        let (w, h) = (50u32, 20u32);
+        let mut rgba = vec![0u8; (w * h * 4) as usize];
+        for y in 0..h {
+            for x in 0..w {
+                let at = ((y * w + x) * 4) as usize;
+                let v = (40 + x * 4) as u8;
+                let slot = y >= 8 && y < 12 && x >= 20 && x < 30;
+                let here: [u8; 4] = if slot { [255, 0, 255, 255] } else { [v, v, v, 255] };
+                rgba[at..at + 4].copy_from_slice(&here);
+            }
+        }
+        (rgba, w, h)
+    }
+
+    /// Every pixel that is plastic: opaque, and not the magenta the slot was painted back to.
+    fn plastic(px: &[u8]) -> bool {
+        px[3] != 0 && !(px[0] == 255 && px[1] == 0 && px[2] == 255)
+    }
+
+    /// The one this was all for: **a pale shell used to come out as a solid colour.** `Pink` sits
+    /// at 232, and adding the drawing's own relief to that ran off the top of the byte, so every
+    /// highlight became exactly 255 and the moulding went with it. Neither may be true now.
+    #[test]
+    fn a_pale_shell_keeps_its_relief() {
+        let (mut rgba, w, h) = sample();
+        let label = find_label(&rgba, w, h).expect("the magenta in the middle is the slot");
+        let (_, pink, alpha) = SHELLS[4];
+        shell_tint(&mut rgba, w, Some(&label), pink, alpha, SHELL_CONTRAST);
+
+        let all: Vec<&[u8]> = rgba.chunks_exact(4).filter(|p| plastic(p)).collect();
+        let ceiling = all.iter().filter(|p| value_of(p) == 255).count();
+        let relief = all
+            .iter()
+            .map(|p| (p[0], p[1], p[2]))
+            .collect::<std::collections::HashSet<_>>()
+            .len();
+        assert!(
+            ceiling * 100 / all.len() < 5,
+            "{} of {} pixels sit exactly on the ceiling: the highlights have been clipped flat",
+            ceiling,
+            all.len()
+        );
+        assert!(
+            relief > 30,
+            "only {relief} distinct colours are left: the light has been lost"
+        );
+    }
+
+    /// The slot is the only thing in the picture that is not plastic, and it has to survive being
+    /// recoloured — it is where this cart's own label goes.
+    #[test]
+    fn the_slot_is_magenta_still() {
+        let (mut rgba, w, h) = sample();
+        let label = find_label(&rgba, w, h).unwrap();
+        let (_, black, alpha) = SHELLS[1];
+        shell_tint(&mut rgba, w, Some(&label), black, alpha, SHELL_CONTRAST);
+        for y in label.y0..=label.y1 {
+            for x in label.x0..=label.x1 {
+                if label.mask[(y * w + x) as usize] == 0 {
+                    continue;
+                }
+                let at = ((y * w + x) * 4) as usize;
+                assert_eq!(
+                    &rgba[at..at + 4],
+                    &[255, 0, 255, 255],
+                    "the slot recoloured itself, and has nowhere left to paste a label"
+                );
+            }
+        }
+    }
+
+    /// A translucent shell is **thinner**, not merely paler: less material between the eye and the
+    /// dark behind it. This is the only difference between `Clear` and the ten opaque colours, and
+    /// losing it leaves a `Clear` cart looking like a white one.
+    #[test]
+    fn a_translucent_shell_is_thinner() {
+        let (mut rgba, w, h) = sample();
+        let label = find_label(&rgba, w, h);
+        let (_, clear, alpha) = SHELLS[9];
+        shell_tint(&mut rgba, w, label.as_ref(), clear, alpha, SHELL_CONTRAST);
+        let seen = rgba
+            .chunks_exact(4)
+            .filter(|p| plastic(p))
+            .next()
+            .expect("there is plastic in the sample");
+        assert!(
+            seen[3] < 255,
+            "a Clear shell came out opaque: {} has no give in it",
+            seen[3]
+        );
+    }
+}
 
 fn find_label(rgba: &[u8], w: u32, h: u32) -> Option<Label> {
     let (mut x0, mut y0, mut x1, mut y1) = (u32::MAX, u32::MAX, 0, 0);
