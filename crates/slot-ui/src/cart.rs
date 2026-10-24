@@ -347,7 +347,8 @@ pub fn plain_face(cart: &Cart, k: u32) -> CartFace {
 pub fn border_face(root: &Path, cart: &Cart, number: u32, k: u32) -> Option<CartFace> {
     let system = cart.system();
     let art = crate::cart_art::border_art(root, system, number)?;
-    Some(face_at(cart, scaled(system, k), Some(&art)))
+    let (art_w, art_h) = art.extent();
+    Some(face_at(cart, sized(system, k, art_w, art_h), Some(&art)))
 }
 
 /// The cart at `k` times the size the shelf stands it at: the picker shows one large enough to
@@ -364,6 +365,27 @@ fn scaled(system: slot_store::System, k: u32) -> CartSize {
         h: size.h * k,
         ..size
     }
+}
+
+/// The cart at `k` times the size the shelf stands it at, **and in the shape of the picture being
+/// drawn**: `art_w`×`art_h` is the border's own size, and the face is built to its proportions.
+///
+/// One machine's borders are not one shape. The Family Computer carries three — the yellow cart
+/// is half again as wide as it is tall, the Subor wider still, and the NES shell is very nearly
+/// square — and building all three at the machine's own width and height is drawing three carts
+/// that are not the carts in the pictures: a yellow Family Computer cart squeezed into the NES
+/// shell's proportions is neither of the two, and the sticker on it is squeezed along with it.
+///
+/// **The height is what is held**, because a row stands its carts on a line and that line is the
+/// one thing a row of different carts has in common; the width takes the art's own proportions.
+/// `pitch`, `middle` and `side` stay the machine's: a cart is placed by the row it stands in, and
+/// a cart wider than its neighbour is not given more room than one to walk through.
+fn sized(system: slot_store::System, k: u32, art_w: u32, art_h: u32) -> CartSize {
+    let size = size_for(system);
+    let k = k.max(1);
+    let h = size.h * k;
+    let w = ((h as f32 * art_w as f32 / art_h.max(1) as f32).round() as u32).max(1);
+    CartSize { w, h, ..size }
 }
 
 /// One cart's face, from the art it is wearing or from the machine's own shell when it is wearing

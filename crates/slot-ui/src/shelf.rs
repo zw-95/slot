@@ -88,6 +88,20 @@ struct Glide {
 ///
 /// The row's layout, stated once and read twice: `draw_row` draws the faces from it, and the
 /// favourites star is placed from it, so a mark on a cart cannot drift off the cart it marks.
+/// One cart's face on the GPU: **the texture and the shape it was built in.**
+///
+/// The shape has to travel with it. A border is not always the machine's shape — the Family
+/// Computer's three are three shapes, and the widest is two thirds again as wide as the squarest
+/// — so a face is rasterised in the proportions of the art it is drawing (see
+/// `cart::border_face`). A quad drawn at the machine's own width and height then stretches that
+/// picture back into a shape it is not, which is the whole of what the shape is for.
+#[derive(Copy, Clone)]
+pub struct Face {
+    pub tex: TexId,
+    pub w: u32,
+    pub h: u32,
+}
+
 pub struct SlotRect {
     pub cart: usize,
     pub x: f32,
@@ -148,7 +162,7 @@ pub struct Shelf {
     /// shelf is born showing placeholders and fills in behind the caret: rasterising every
     /// cart up front costs about 70 ms each on this hardware, which is seven seconds on a
     /// hundred-game card spent before the first frame.
-    faces: Vec<Option<TexId>>,
+    faces: Vec<Option<Face>>,
     /// The cart silhouette in black, drawn under a dimmed cart. One texture for the whole
     /// row: every cart is the same shape.
     shadow: Option<TexId>,
@@ -267,13 +281,33 @@ impl Shelf {
 
     /// Face textures in `carts` order. The caller uploads them because only the compositor
     /// can mint a `TexId`.
-    pub fn set_faces(&mut self, faces: Vec<Option<TexId>>) {
+    pub fn set_faces(&mut self, faces: Vec<Option<Face>>) {
         self.faces = faces;
     }
 
     /// The texture a cart is holding, if its face has been built and not since released.
-    pub fn face_of(&self, i: usize) -> Option<TexId> {
+    pub fn face_of(&self, i: usize) -> Option<Face> {
         self.faces.get(i).copied().flatten()
+    }
+
+    /// **How big this cart is drawn**: the height the row gives it, and the width its own picture
+    /// asks for.
+    ///
+    /// The row is a line the carts stand on, and the height is what puts them on it — so the
+    /// height is the machine's, scaled for where in the row the cart is standing. The width comes
+    /// from the face, because that is where the shape of the cart is: a Family Computer cart
+    /// wearing the square NES shell is square, and one wearing the yellow cart is half again as
+    /// wide as it is tall, and both stand on the same line at the same height.
+    ///
+    /// A cart whose face has not arrived yet is drawn in the machine's own shape, which is what
+    /// the placeholder is.
+    fn drawn(&self, i: usize, size: CartSize, scale: f32) -> (f32, f32) {
+        let h = size.h as f32 * scale;
+        let w = match self.faces.get(i).copied().flatten() {
+            Some(f) if f.h > 0 => h * f.w as f32 / f.h as f32,
+            _ => size.w as f32 * scale,
+        };
+        (w, h)
     }
 
     /// Drops one face back to its placeholder. The caller releases the texture; this only
@@ -286,7 +320,7 @@ impl Shelf {
 
     /// One face, as it arrives. The list is grown to the cartridge count first, because the
     /// background filler answers out of order and an index can land before its turn.
-    pub fn set_face(&mut self, i: usize, tex: Option<TexId>) {
+    pub fn set_face(&mut self, i: usize, tex: Option<Face>) {
         if self.faces.len() < self.carts.len() {
             self.faces.resize(self.carts.len(), None);
         }
@@ -296,7 +330,7 @@ impl Shelf {
     }
 
     /// In `hints` order.
-    pub fn find(&self, stem: &str) -> Option<(&Cart, Option<TexId>)> {
+    pub fn find(&self, stem: &str) -> Option<(&Cart, Option<Face>)> {
         let i = self.carts.iter().position(|c| c.stem == stem)?;
         Some((&self.carts[i], self.faces.get(i).copied().flatten()))
     }
@@ -711,12 +745,12 @@ impl Shelf {
                 }
             }
             out.push(match self.faces.get(r.cart).copied().flatten() {
-                Some(tex) => Draw::Tex {
+                Some(face) => Draw::Tex {
                     x: r.x,
                     y: r.y,
                     w: r.w,
                     h: r.h,
-                    tex,
+                    tex: face.tex,
                     alpha: r.alpha * dim,
                 },
                 // A cart whose face has not been uploaded still holds its place, and as a cart.
@@ -842,7 +876,7 @@ impl Shelf {
             let size = self.size();
             let scale = size.middle + (size.side - size.middle) * t;
             let mut alpha = (1.0 + (SIDE_ALPHA - 1.0) * t) * (1.0 - recede);
-            let (w, h) = (size.w as f32 * scale, size.h as f32 * scale);
+            let (w, h) = self.drawn(i, size, scale);
             // Away from the middle, and further the further out it already was, so the row
             // opens rather than sliding sideways.
             let away = offset.signum() * (1.0 + offset.abs());

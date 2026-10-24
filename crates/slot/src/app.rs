@@ -2311,13 +2311,16 @@ impl App {
 
     /// Face textures in `carts` order; `None` where the face is still being rasterised.
     /// Only the compositor can mint a `TexId`.
-    pub fn set_faces(&mut self, faces: Vec<Option<TexId>>) {
+    pub fn set_faces(&mut self, faces: Vec<Option<slot_ui::Face>>) {
         self.shelf.set_faces(faces);
     }
 
     /// One face, uploaded after `set_faces`, as the background filler finishes it.
-    pub fn set_face(&mut self, i: usize, tex: TexId) {
-        self.shelf.set_face(i, Some(tex));
+    ///
+    /// The size comes up with it because it is the shape of the cart and not of the machine: see
+    /// `Face` — a border is not always drawn in its machine's proportions.
+    pub fn set_face(&mut self, i: usize, tex: TexId, w: u32, h: u32) {
+        self.shelf.set_face(i, Some(slot_ui::Face { tex, w, h }));
     }
 
     /// Forgets a face whose texture has been released.
@@ -2326,7 +2329,7 @@ impl App {
     }
 
     /// Which face texture a cart is currently holding, if any.
-    pub fn face_of(&self, i: usize) -> Option<TexId> {
+    pub fn face_of(&self, i: usize) -> Option<slot_ui::Face> {
         self.shelf.face_of(i)
     }
 
@@ -3007,8 +3010,8 @@ impl App {
     /// another shelf draws nothing rather than the wrong plastic.
     fn shelf_face_for_current(&self) -> Option<TexId> {
         let here = self.shelf.current_cart()?;
-        let (cart, tex) = self.shelf.find(&here.stem)?;
-        (cart.system() == here.system()).then_some(tex)?
+        let (cart, face) = self.shelf.find(&here.stem)?;
+        (cart.system() == here.system()).then_some(face?.tex)
     }
 
     /// The cart under the highlight itself. `selected_stem` is only its name, and a name is not a
@@ -4199,7 +4202,7 @@ impl App {
         let alpha = self.alert_alpha();
         SlotChrome {
             cart,
-            face,
+            face: face.map(|f| f.tex),
             seat: self.seat(),
             alert: self.alert_face.filter(|_| alpha > 0.0).map(|t| (t, alpha)),
             dim,
@@ -4755,17 +4758,27 @@ impl App {
             return;
         };
         let size = size_for(cart.system());
-        let (cw, ch) = (size.w as f32 * size.middle, size.h as f32 * size.middle);
+        // The height every cart in the row is drawn at: the row stands them on a line, and that
+        // line is the one measure they share. The width is **each cart's own**, taken from its
+        // face below, because a machine's borders are not all one shape.
+        let ch = size.h as f32 * size.middle;
         let cx = OUT_W as f32 / 2.0;
         let cy = OUT_H as f32 / 2.0;
-        let spacing = cw * BORDER_SPACING;
+        // How far apart the places are: the machine's own width, so the row slides a steady step
+        // whatever shape the cart standing in it happens to be.
+        let spacing = size.w as f32 * size.middle * BORDER_SPACING;
         for offset in [-1isize, 0, 1] {
             let Some(i) = picker.item_at(offset) else {
                 continue;
             };
-            let Some((tex, _, _)) = self.border_faces.get(i).copied().flatten() else {
+            let Some((tex, fw, fh)) = self.border_faces.get(i).copied().flatten() else {
                 continue;
             };
+            // The width **this** picture asks for at the row's height. A Family Computer cart
+            // wearing the square NES shell is square and one wearing the yellow cart is half
+            // again as wide as it is tall, and a row that drew both at the machine's width is a
+            // row that stretched one of them into a shape it is not.
+            let cw = ch * fw as f32 / fh.max(1) as f32;
             // Where this one stands: its own place in the row, and the whole row slid by
             // however far the press has carried it.
             let d = offset as f32 + pose.shift;

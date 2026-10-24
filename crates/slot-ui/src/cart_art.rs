@@ -401,6 +401,16 @@ impl Art {
         ))
     }
 
+    /// The picture's own proportions, so a caller about to build a face can build one **the shape
+    /// of the art it is drawing** rather than the shape the machine is.
+    ///
+    /// A machine's borders are not all one shape: the Family Computer's are three of them, and
+    /// the widest is two thirds again as wide as the squarest. See `cart::border_face`, which is
+    /// why this exists.
+    pub fn extent(&self) -> (u32, u32) {
+        (self.w, self.h)
+    }
+
     /// The label slot in face pixels, so the caller can mint a label of the right size. The
     /// target face is the machine's own, which is why this cannot be a constant: the same art
     /// drawn on a taller cart has a taller slot.

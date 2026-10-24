@@ -300,10 +300,15 @@ impl Frontend {
         } else {
             window
         };
-        let mut faces: Vec<Option<TexId>> = vec![None; count];
+        let mut faces: Vec<Option<slot_ui::Face>> = vec![None; count];
         for &i in &window {
             let f = cart_face(&self.session.app().carts()[i]);
-            faces[i] = Some(compositor.create_texture(f.w, f.h, &f.rgba));
+            let tex = compositor.create_texture(f.w, f.h, &f.rgba);
+            faces[i] = Some(slot_ui::Face {
+                tex,
+                w: f.w,
+                h: f.h,
+            });
         }
         let fixed_at = Instant::now();
         self.session.boot_note(&format!(
@@ -699,9 +704,9 @@ impl Frontend {
             if window.contains(&i) {
                 let f = cart_face(&self.session.app().carts()[i]);
                 let tex = compositor.create_texture(f.w, f.h, &f.rgba);
-                self.session.app_mut().set_face(i, tex);
-            } else if let Some(tex) = self.session.app().face_of(i) {
-                compositor.release_texture(tex);
+                self.session.app_mut().set_face(i, tex, f.w, f.h);
+            } else if let Some(face) = self.session.app().face_of(i) {
+                compositor.release_texture(face.tex);
                 self.session.app_mut().clear_face(i);
             }
         }
@@ -832,7 +837,7 @@ impl Frontend {
         self.sync_resident_faces(compositor);
         for (i, f) in self.shelf_faces.drain() {
             let id = compositor.create_texture(f.w, f.h, &f.rgba);
-            self.session.app_mut().set_face(i, id);
+            self.session.app_mut().set_face(i, id, f.w, f.h);
         }
         if self.shelf_faces.busy() || self.shelf_missing.is_empty() {
             return;
@@ -889,8 +894,8 @@ impl Frontend {
         // stale — so the choice lands on the row as well as on the card.
         if self.session.app_mut().take_shelf_face_stale() {
             let i = self.session.app().shelf_index();
-            if let Some(tex) = self.session.app().face_of(i) {
-                compositor.release_texture(tex);
+            if let Some(face) = self.session.app().face_of(i) {
+                compositor.release_texture(face.tex);
                 self.session.app_mut().clear_face(i);
             }
             if !self.shelf_missing.contains(&i) {
@@ -924,8 +929,8 @@ impl Frontend {
                 _ => {}
             }
         }
-        for (i, tex) in released {
-            compositor.release_texture(tex);
+        for (i, face) in released {
+            compositor.release_texture(face.tex);
             self.session.app_mut().clear_face(i);
             self.shelf_missing.push(i);
         }
