@@ -111,16 +111,23 @@ pub const fn size_for(system: slot_store::System) -> CartSize {
             // would be a sticker on a generic box; this placement is the reference shell's.
             label: [64, 176, 936, 624],
         },
+        // A Family Computer cart is a **landscape** shell, and the card's own borders say how
+        // landscape: every one of them is drawn about 1.4 wide to 1 high (the American cart
+        // 512x364, the Subor 511x312), which at the row's width is a cart 170 high. Stood 212
+        // high it was a cart a fifth taller than the picture on it — the shell stretched away
+        // from its own label, and 1.5x on the shelf put 318 px of it on a 480 px panel, which
+        // is nearer a screen than a cart.
         slot_store::System::Fc => CartSize {
             w: CART_W,
-            h: 212,
+            h: 170,
             pitch: 360.0,
             middle: 1.5,
             side: 1.0,
             // A Family Computer label is a big blue panel pasted over most of the shell's
             // face, running wider than it is tall — the reference shell's sits from just
             // under the top edge to about four fifths down, clear of the mould lines below.
-            // The band it leaves at the foot is where those lines live.
+            // The band it leaves at the foot is where those lines live. Per mille of the face,
+            // so it went down with it and needed no new measuring.
             label: [80, 150, 920, 720],
         },
         slot_store::System::Gb | slot_store::System::Gbc => CartSize {

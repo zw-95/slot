@@ -163,9 +163,13 @@ pub fn open_core_for(
         | Core::BsnesMercuryPerformance
         | Core::BsnesCplusplus98
         | Core::ChimeraSnes
-        // fceumm's own defaults are the ones a Family Computer wants: it needs no BIOS, its
-        // palette is the console's, and it draws no border of its own.
-        | Core::Fceumm => vec![],
+        // The three Family Computer cores want nothing said to them: none needs a BIOS, each
+        // draws the console's own palette, and none frames the picture with a border of its
+        // own. Nestopia's one tempting option is its palette, which is the machine's by
+        // default and is left alone for that reason — the same reason `fceumm` is.
+        | Core::Fceumm
+        | Core::Nestopia
+        | Core::QuickNes => vec![],
     };
     for path in paths {
         if !path.exists() {

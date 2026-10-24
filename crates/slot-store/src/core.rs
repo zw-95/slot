@@ -66,10 +66,20 @@ pub enum Core {
     /// but it costs nothing to leave it in the list.
     ChimeraSnes,
     /// FCEUmm, the Family Computer core: muOS's own default for the machine — `default =
-    /// fceumm` in that archive's global.ini — and the only NES core worth the space on a
-    /// handheld this size. The one entry on its machine's list, so the machine opens no
-    /// picker: a question with one answer is not a question.
+    /// fceumm` in that archive's global.ini — and the core that runs essentially all of the
+    /// card's largest library. First on its machine's list for that reason, and not alone on
+    /// it: one entry is not a choice, and the machine's board had no picker to draw.
     Fceumm,
+    /// Nestopia, the accurate one: cycle-checked where FCEUmm is compatible, and the core to
+    /// reach for when a cart behaves wrongly rather than slowly. Five megabytes against
+    /// FCEUmm's four, which is the price of the accuracy and the reason it is second.
+    Nestopia,
+    /// QuickNES, the cheap one: a megabyte and a third, and the fastest of the three on a
+    /// machine this size. It gives up accuracy at the edges — a handful of mappers and some
+    /// of the audio — which is a fair trade on a handheld and a bad one on a desktop, so it
+    /// sits last rather than first: the cores are offered best-first, and a player who wants
+    /// the small fast one should have to walk past the two that are better.
+    QuickNes,
 }
 
 impl Core {
@@ -77,7 +87,7 @@ impl Core {
     /// `migrate_states` walks this rather than spelling the variant list out a second time,
     /// so a third core added here does not also have to be remembered at every call site
     /// that needs to tell a core's own directory apart from a cart's.
-    pub const ALL: [Core; 23] = [
+    pub const ALL: [Core; 25] = [
         Core::Mgba,
         Core::Gpsp,
         Core::Gambatte,
@@ -101,6 +111,8 @@ impl Core {
         Core::BsnesCplusplus98,
         Core::ChimeraSnes,
         Core::Fceumm,
+        Core::Nestopia,
+        Core::QuickNes,
     ];
 
     pub fn as_str(&self) -> &'static str {
@@ -130,6 +142,8 @@ impl Core {
             Core::BsnesCplusplus98 => "bsnes_cplusplus98",
             Core::ChimeraSnes => "chimerasnes",
             Core::Fceumm => "fceumm",
+            Core::Nestopia => "nestopia",
+            Core::QuickNes => "quicknes",
         }
     }
 
@@ -168,6 +182,8 @@ impl Core {
             Core::BsnesCplusplus98 => "bsnes C++98",
             Core::ChimeraSnes => "ChimeraSNES",
             Core::Fceumm => "FCEUmm",
+            Core::Nestopia => "Nestopia",
+            Core::QuickNes => "QuickNES",
         }
     }
 
@@ -203,6 +219,8 @@ impl Core {
             "bsnes_cplusplus98" => Some(Core::BsnesCplusplus98),
             "chimerasnes" | "chimera" => Some(Core::ChimeraSnes),
             "fceumm" | "fceum" => Some(Core::Fceumm),
+            "nestopia" => Some(Core::Nestopia),
+            "quicknes" | "quick_nes" => Some(Core::QuickNes),
             _ => None,
         }
     }
@@ -275,11 +293,17 @@ impl System {
                 Core::ChimeraSnes,
                 Core::Snes9x2005,
             ],
-            // One core, because the machine's library is the card's largest and fceumm runs
-            // essentially all of it: Nestopia is the only other core here that would earn the
-            // space, and it is five megabytes for the same compatibility. One entry is not a
-            // choice — the machine's board has no picker to draw, and no socket to hop.
-            System::Fc => &[Core::Fceumm],
+            // Three, which is every Family Computer core muOS ships that a handheld this size
+            // has any use for: `mesen` (3.1 M) and `bnes` (0.25 M) are on the card too, and
+            // both are out — the first because its name is the Super Nintendo's `mesen-s`
+            // with the suffix dropped, so a line naming it would be read back as that core,
+            // and the second because it is higan's, which wants more machine than this is.
+            //
+            // FCEUmm first, as muOS has it: compatible with essentially the whole library,
+            // and the machine's is the card's largest. Then the accurate one, then the cheap
+            // one — best first, so that the two a player should not have to reach past are
+            // the two they meet first.
+            System::Fc => &[Core::Fceumm, Core::Nestopia, Core::QuickNes],
         }
     }
 

@@ -161,7 +161,7 @@ impl Row {
 /// actually carries, not with the one that happened to be on the desk when the card was written;
 /// the measuring script takes the font as `SLOT_FONT`.
 #[cfg(not(feature = "lang-en"))]
-pub const ROWS: [Row; 40] = [
+pub const ROWS: [Row; 41] = [
     // The keys that answer on every screen, and the only section that is about the device rather
     // than about a screen: the two levels, and the power button. None of them needs a screen to be
     // under it, so none of them belongs to one.
@@ -224,6 +224,14 @@ pub const ROWS: [Row; 40] = [
     ),
     Row::Key(&[Seg::Sep("长按"), Seg::Btn("Y")], "切换机种货架"),
     Row::Key(&[Seg::Btn("START")], "为这张卡挑一个模拟器"),
+    // Which of the card's borders this cart wears. The card may hold dozens — one machine has
+    // thirty-two — and the first thing in the ring is the machine's own shell, which is what
+    // every cart wears until somebody picks one, so the row has to say "or none" as plainly as
+    // it says "pick": a cart put back on its own machine's shell is not unset, it is chosen.
+    Row::Key(
+        &[Seg::Btn("SELECT"), Seg::Sep("+"), Seg::Btn("X")],
+        "换卡带外壳（含机种原壳）",
+    ),
     Row::Key(&[Seg::Btn("MENU")], "关于页与快捷键说明"),
     // SELECT+START lands here and nowhere else: the case and the index are what the other
     // mode reprints, and both of them are on this screen.
@@ -380,7 +388,7 @@ pub const ROWS: [Row; 40] = [
 /// is what it is: the order, the key lines and the counts are identical, and only the words move.
 /// Measured against the column budget above, not eyeballed — see the note on the Chinese table.
 #[cfg(feature = "lang-en")]
-pub const ROWS: [Row; 40] = [
+pub const ROWS: [Row; 41] = [
     // The keys that answer on every screen — see the note on the Chinese table.
     Row::Head("On any screen"),
     Row::Key(
@@ -419,6 +427,12 @@ pub const ROWS: [Row; 40] = [
     ),
     Row::Key(&[Seg::Sep("Hold"), Seg::Btn("Y")], "Cycle the machine"),
     Row::Key(&[Seg::Btn("START")], "Pick the core"),
+    // Which border this cart wears — see the note on the Chinese table. "or none" is in it
+    // because the machine's own shell is the ring's first entry and a real choice.
+    Row::Key(
+        &[Seg::Btn("SELECT"), Seg::Sep("+"), Seg::Btn("X")],
+        "Pick a shell (or none)",
+    ),
     Row::Key(&[Seg::Btn("MENU")], "About & shortcuts"),
     Row::Key(
         &[Seg::Btn("SELECT"), Seg::Sep("+"), Seg::Btn("START")],
