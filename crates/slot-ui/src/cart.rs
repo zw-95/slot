@@ -117,9 +117,14 @@ pub const fn size_for(system: slot_store::System) -> CartSize {
         // high it was a cart a fifth taller than the picture on it — the shell stretched away
         // from its own label, and 1.5x on the shelf put 318 px of it on a 480 px panel, which
         // is nearer a screen than a cart.
+        //
+        // **150 and not 170**: the row's own geometry puts the top of a cart this tall under the
+        // band the title stands in, so the shell's top edge ran behind the title rather than
+        // under it. The height is the row's, and the width is each border's own (see
+        // `cart::sized`), so a shorter cart is three shapes still rather than one squeezed one.
         slot_store::System::Fc => CartSize {
             w: CART_W,
-            h: 170,
+            h: 150,
             pitch: 360.0,
             middle: 1.5,
             side: 1.0,
