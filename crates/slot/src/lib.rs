@@ -1,5 +1,6 @@
 pub mod app;
 pub mod audio;
+pub mod border_picker;
 pub mod build_info;
 pub mod core;
 pub mod core_picker;

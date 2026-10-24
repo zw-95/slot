@@ -113,6 +113,19 @@ pub fn art_for(system: System) -> Option<&'static Art> {
     }
 }
 
+/// One border, by number, read off the card there and then.
+///
+/// The shelf keeps one picture per machine and the picker shows every one the card has, so the
+/// rest are read when they are asked for rather than held for the whole of a boot: a machine
+/// with thirty-two borders is thirty-two photographs, and holding all of them for a shelf that
+/// draws one is the wrong bargain. A border nobody has looked at costs nothing at all.
+pub fn border_art(root: &Path, system: System, number: u32) -> Option<Art> {
+    let border = slot_store::borders::borders(root, system)
+        .into_iter()
+        .find(|b| b.number == number)?;
+    read(&border.path, false)
+}
+
 /// Read whatever the card offers. A missing, unreadable or index-coloured file is simply not
 /// there: the built-in cart is a perfectly good cart.
 pub fn load(root: &Path) -> CartArt {

@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use slot_store::{clean_label, Cart};
 
 use crate::art;
@@ -320,12 +322,55 @@ fn cart_shell(system: slot_store::System, code: &str) -> Shell {
 
 pub fn cart_face(cart: &Cart) -> CartFace {
     let system = cart.system();
-    let shell = cart_shell(system, &cart.code);
+    face_at(cart, size_for(system), crate::cart_art::art_for(system))
+}
+
+/// The cart as the machine itself shells it: **the built-in outline and the machine's own
+/// plastic, with no border on it at all.** What every cart wears until somebody picks one, and
+/// the first thing in the picker's ring for exactly that reason — a cart put back on its
+/// machine's own shell is a cart with nothing written down about it.
+pub fn plain_face(cart: &Cart, k: u32) -> CartFace {
+    let system = cart.system();
+    face_at(cart, scaled(system, k), None)
+}
+
+/// The cart wearing the border numbered `number`, drawn `k` times the size the shelf stands it
+/// at. `None` when the card carries no such border: a card edited on a PC may hold fewer borders
+/// than the choice written on it, and the honest drawing of a border that is not there is none.
+pub fn border_face(root: &Path, cart: &Cart, number: u32, k: u32) -> Option<CartFace> {
+    let system = cart.system();
+    let art = crate::cart_art::border_art(root, system, number)?;
+    Some(face_at(cart, scaled(system, k), Some(&art)))
+}
+
+/// The cart at `k` times the size the shelf stands it at: the picker shows one large enough to
+/// read the difference between two shells, and a face built at the shelf's size and stretched is
+/// a face whose label is stretched along with it.
+fn scaled(system: slot_store::System, k: u32) -> CartSize {
     let size = size_for(system);
+    let k = k.max(1);
+    // Only the two that decide the face: `pitch`, `middle` and `side` place a cart in a row of
+    // them, and there is no row here. The label panel is per mille of the face, so it scales
+    // with it and is left alone.
+    CartSize {
+        w: size.w * k,
+        h: size.h * k,
+        ..size
+    }
+}
+
+/// One cart's face, from the art it is wearing or from the machine's own shell when it is wearing
+/// none. `art` is passed in rather than looked up because the picker asks for a face the shelf
+/// never asked for — one particular border, of the dozens the card may hold.
+fn face_at(cart: &Cart, size: CartSize, art: Option<&crate::cart_art::Art>) -> CartFace {
+    let system = cart.system();
+    let shell = cart_shell(system, &cart.code);
     // A card that supplies its own cart art is drawn from that instead of from the built-in
     // silhouette: see `cart_art`. Nothing below changes for a card that does not.
-    if let Some(face) = card_face(cart, &shell, size) {
-        return face;
+    if let Some(art) = art {
+        if let Some(face) = art_face(cart, &shell, size, art) {
+            return face;
+        }
     }
     // Past the card's own art the built-in shell answers to the theme as well: on the light
     // theme it takes the housing's colour, which is the same rule `card_face` has just applied
@@ -568,8 +613,12 @@ fn paste_label(face: &mut CartFace, label: &[u8], panel: (u32, u32, u32, u32)) {
 /// The card's own cart art, when it supplies any for this machine. The label it gets is set at
 /// the size of the slot the art marks out rather than at the built-in one, because the art is
 /// the thing that says where its label goes.
-fn card_face(cart: &Cart, shell: &Shell, size: CartSize) -> Option<CartFace> {
-    let art = crate::cart_art::art_for(cart.system())?;
+fn art_face(
+    cart: &Cart,
+    shell: &Shell,
+    size: CartSize,
+    art: &crate::cart_art::Art,
+) -> Option<CartFace> {
     let (lw, lh) = art.label_size(size)?;
     let label = match cart.label.as_deref().and_then(|p| art::cover(p, lw, lh)) {
         Some(rgba) => rgba,

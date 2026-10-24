@@ -40,7 +40,7 @@ pub use board::{
     SHADOW_H,
     SHADOW_W, SLIDE_SHARE, SLIDE_UP, SOCKET_H, SOCKET_U, SOCKET_V, SOCKET_W, TURN_PAD,
 };
-pub use cart::face_profile;
+pub use cart::{border_face, face_profile, plain_face};
 pub use cart_art::{
     art_for as cart_art_for, install as install_cart_art, label_share as cart_label_share,
     load as load_cart_art, summary as cart_art_summary,
