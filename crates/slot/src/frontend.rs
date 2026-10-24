@@ -689,22 +689,24 @@ impl Frontend {
         self.switcher = Switcher::default();
         self.clocks = Clocks::default();
         self.about = AboutFace::default();
-        // Cart faces: **let go of every one**, including the window the row is drawing right now.
+        // Cart faces: **only the ones that are not wearing a cover.**
         //
-        // A theme change used to rebuild that window here in place, and in doing so it built each
-        // cart the way `cart_face` builds one — **the machine's own shell** — because this call
-        // site has a cart and nothing else. What a cart wears is the border the card says it
-        // wears, and the only thing that asks the card that question is the worker's own dress
-        // (`dress_for`): asking it here is asking it a second time and being told "nothing". So a
-        // theme flip took every cart out of the cover it had been given and put it back in the
-        // plastic it was born in, while the choice itself sat untouched on the card — which is
-        // why opening the picker still highlighted the number it was left on.
+        // A cart in a cover is wearing a picture, and nothing the palette owns is in that picture —
+        // it is artwork off the card, already coloured before it was cut. Rebuilding it because the
+        // mode moved is pure loss: it costs the worker a face and it takes the cover the player
+        // chose off the row, which is exactly what the version before this one did. So it stays.
         //
-        // Dropping them puts them on the same queue every other cart uses, which is the one that
-        // knows what each has been given. `resident_at = None` is what makes the pump walk the
-        // library again this frame instead of waiting for the caret to move.
+        // A **bare** cart is the theme's business and not its own: light mode paints it in the
+        // housing's colour (`cart::themed_shell`), so the shells on the shelf have to follow the
+        // mode or they are wearing the other one's colour. Those are let go and come back through
+        // the pump — which is the pump that asks `dress_for` what a cart is wearing, so nothing
+        // has to be remembered here about how a face is built.
         let count = self.session.app().carts().len();
         for i in 0..count {
+            let cart = self.session.app().carts()[i].clone();
+            if self.session.app_mut().border_number_for(&cart).is_some() {
+                continue;
+            }
             if let Some(face) = self.session.app().face_of(i) {
                 compositor.release_texture(face.tex);
                 self.session.app_mut().clear_face(i);

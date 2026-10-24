@@ -832,22 +832,20 @@ impl DisplayFilter {
     /// or blue. A picture's own pixels therefore keep their colour where the grille darkens them,
     /// which a plain shadow cannot do — that is the whole of the difference between the two, and
     /// why both are on the ring rather than one.
+    /// RetroArch's **retro v2**: a grid — rows *and* columns — so the picture reads as sitting
+    /// behind a shadow mask rather than behind a set of lines.
+    ///
+    /// **It tints nothing.** This had coloured columns once, each passing one channel and holding
+    /// the other two down, which is what makes white out of three colours on a real tube — but a
+    /// real tube has those three side by side inside *one* source pixel and this panel does not:
+    /// at anything but a whole-number scale a column lands wherever it lands, so the three stopped
+    /// cancelling and the picture went purple. A grille that cannot be trusted to divide evenly is
+    /// not a grille; it is a colour cast nobody asked for. Every channel is treated alike here,
+    /// which is what makes it a shadow instead of a filter.
     const RETRO_V2_MASK: [[[u8; 3]; 3]; 3] = [
-        [
-            [255u8, 150u8, 150u8],
-            [150u8, 255u8, 150u8],
-            [150u8, 150u8, 255u8],
-        ],
-        [
-            [150u8, 110u8, 110u8],
-            [110u8, 150u8, 110u8],
-            [110u8, 110u8, 150u8],
-        ],
-        [
-            [255u8, 150u8, 150u8],
-            [150u8, 255u8, 150u8],
-            [150u8, 150u8, 255u8],
-        ],
+        [[120u8; 3], [120u8; 3], [120u8; 3]],
+        [[120u8; 3], [255u8; 3], [255u8; 3]],
+        [[120u8; 3], [255u8; 3], [255u8; 3]],
     ];
     fn new(
         lcd3x: [[[u8; 3]; 3]; 3],
