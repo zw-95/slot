@@ -75,6 +75,67 @@ impl FaceBuilder {
     }
 }
 
+/// The border picker's faces: **one cart wearing every border the card holds**, built off the
+/// render thread when the picker opens.
+///
+/// A cart face costs about 70 ms, and the ring holds one per border — thirty-three on a card
+/// with thirty-two of them. Built on the frame loop that is two seconds of frozen shelf, so the
+/// whole ring is built in one go off it, and held until the panel closes: the arrows then move
+/// through the whole ring without waiting for anything, which is the only way a press can answer
+/// at once.
+pub struct BuiltBorders {
+    pub stem: String,
+    /// The machine's own shell first, then one per border, in the ring's own order.
+    pub faces: Vec<CartFace>,
+}
+
+pub struct BorderFaceBuilder {
+    requests: Sender<(std::path::PathBuf, Cart, Vec<u32>, u32)>,
+    built: Receiver<BuiltBorders>,
+}
+
+impl BorderFaceBuilder {
+    pub fn spawn() -> Self {
+        let (requests, inbox) = mpsc::channel::<(std::path::PathBuf, Cart, Vec<u32>, u32)>();
+        let (outbox, built) = mpsc::channel();
+        let spawned = thread::Builder::new()
+            .name("slot-border-faces".into())
+            .spawn(move || {
+                while let Ok((root, cart, numbers, k)) = inbox.recv() {
+                    // The machine's own shell first: it is the first thing in the ring, being
+                    // what every cart wears until somebody picks one.
+                    let mut faces = vec![slot_ui::plain_face(&cart, k)];
+                    for number in numbers {
+                        if let Some(face) = slot_ui::border_face(&root, &cart, number, k) {
+                            faces.push(face);
+                        }
+                    }
+                    let stem = cart.stem.clone();
+                    if outbox.send(BuiltBorders { stem, faces }).is_err() {
+                        return;
+                    }
+                }
+            });
+        if let Err(e) = spawned {
+            eprintln!("slot: border faces: worker thread failed to start: {e}");
+        }
+        BorderFaceBuilder { requests, built }
+    }
+
+    pub fn request(&self, root: std::path::PathBuf, cart: Cart, numbers: Vec<u32>, k: u32) {
+        let _ = self.requests.send((root, cart, numbers, k));
+    }
+
+    /// The newest ring finished since the last call, if any.
+    pub fn take(&self) -> Option<BuiltBorders> {
+        let mut newest = None;
+        while let Ok(done) = self.built.try_recv() {
+            newest = Some(done);
+        }
+        newest
+    }
+}
+
 /// The shelf's faces, rasterised off the frame loop one cart at a time.
 ///
 /// A cart face costs about 70 ms here, measured, and the shelf draws three carts either side

@@ -19,6 +19,7 @@ use slot_ui::{
 };
 
 use crate::audio::{Profile, Sfx};
+use crate::border_picker::{BorderPicker, Outcome as BorderOutcome, Press as BorderPress};
 use crate::core_picker::{swap_pose, Chip, CorePicker, Outcome, Press};
 use crate::link_radio::LinkRole;
 use crate::link_start::{link_port, LinkFail, LinkProgress, LinkStarter, LinkStep};
@@ -257,6 +258,21 @@ impl LinkRow {
         }
     }
 }
+
+/// How much of the shelf's own size the border picker draws a cart at: large enough to read the
+/// difference between two shells, which is the only reason the panel exists.
+pub const BORDER_FACE_K: u32 = 2;
+/// How far apart the picker's ring stands its neighbours, as a share of a cart's own width.
+/// Wider and the two beside it leave the panel; narrower and they read as one wide cart.
+const BORDER_SPACING: f32 = 1.18;
+/// How solid a neighbour is, against the one in hand's full.
+const BORDER_SIDE_A: f32 = 0.45;
+/// How far the shelf dims behind the row.
+const BORDER_VEIL: f32 = 0.62;
+/// The row of lamps under the cart, and its lift off the cart's foot.
+const BORDER_DOT: f32 = 6.0;
+const BORDER_DOT_GAP: f32 = 7.0;
+const BORDER_DOT_LIFT: f32 = 26.0;
 
 #[derive(Debug)]
 pub enum Phase {
@@ -1141,6 +1157,15 @@ pub struct App {
     core_lid_face: Option<TexId>,
     /// The cart the uploaded board and lid were built for.
     core_faces_stem: Option<String>,
+    /// The border picker: which of the card's borders the cart under the highlight is wearing.
+    /// Its own clock and nothing else — see `border_picker`.
+    border_picker: Option<BorderPicker>,
+    /// One face per place in the picker's ring, in the ring's own order: the machine's own shell
+    /// first, then one per border the card holds. Built by the frontend when the picker opens and
+    /// held until it closes, which is what lets the arrows move without waiting for a rasterise.
+    border_faces: Vec<Option<(TexId, u32, u32)>>,
+    /// The cart those faces were built for.
+    border_faces_stem: Option<String>,
     /// The chip: **one** face and not one per core, because it is one chip — the same shape
     /// whichever core is in hand, and what tells two of them apart is the name written on it
     /// rather than the picture. Uploaded at boot.
@@ -1462,6 +1487,9 @@ impl App {
             core_board_face: None,
             core_lid_face: None,
             core_faces_stem: None,
+            border_picker: None,
+            border_faces: Vec::new(),
+            border_faces_stem: None,
             core_chip_face: None,
             core_name_faces: Vec::new(),
             core_dot_off: None,
@@ -3034,6 +3062,15 @@ impl App {
                 // Ahead of the shelf's own movement, so an open picker takes the arrows
                 // before the row of carts underneath it does.
                 _ if self.core_picker.is_some() => self.core_picker_input(action),
+                // SELECT+X. The chord is the game panel's on every other screen — it walks
+                // that screen's own art — and on the shelf it was bound to nothing at all.
+                // Here it is the border picker: which of the card's borders this cart is
+                // wearing, the machine's own shell being one of the answers.
+                Action::MaskCycle if self.border_picker.is_none() => self.open_border_picker(),
+                // And while it is up it takes the arrows before the row underneath does, for
+                // the reason the core picker does: a row that moved behind an open panel would
+                // be choosing a border for a cart that is no longer under it.
+                _ if self.border_picker.is_some() => self.border_picker_input(action),
                 Action::ShelfLeft | Action::GbaDown(Btn::Left) => self.shelf.hold_left(now),
                 Action::ShelfRight | Action::GbaDown(Btn::Right) => self.shelf.hold_right(now),
                 // L and R are the whole of the index, and the only pair of keys that could be:
@@ -3351,6 +3388,17 @@ impl App {
         // The lid is back on, so the shelf is the shelf again.
         if self.core_picker.is_some_and(|p| p.finished(now)) {
             self.core_picker = None;
+        }
+        // The same for the border picker: it opens once the ring's faces are on the GPU, and a
+        // build that never lands opens it anyway rather than leaving a panel that never comes.
+        let border_ready = self.border_faces_ready();
+        if let Some(picker) = &mut self.border_picker {
+            if picker.waiting() && (border_ready || picker.waited(now) >= FACES_WAIT_MS) {
+                picker.start(now);
+            }
+        }
+        if self.border_picker.is_some_and(|p| p.finished(now)) {
+            self.border_picker = None;
         }
         // A direction still held as the shelf leaves the screen is not held when it comes
         // back: the row repeats only while it is the thing being looked at.
@@ -3866,6 +3914,12 @@ impl App {
         // phases that own the whole panel have already returned.
         if let Some(picker) = self.core_picker_shown() {
             self.draw_core_picker(&picker, out);
+        }
+        // Over the shelf, for the same reason and after it: the row dims under the picker
+        // rather than being replaced by it, because what is being chosen is a border for the
+        // cart still standing there.
+        if let Some(picker) = self.border_picker_shown() {
+            self.draw_border_picker(&picker, out);
         }
         // Over the game and under the HUD, for the same reason the picker is over the shelf:
         // it is a menu about the thing still on screen behind it, and the level bars have to
@@ -4480,6 +4534,83 @@ impl App {
     }
 
     /// The power menu's rows, at its pitch, in its materials — the third menu on the device
+    /// The border picker, once it has started opening: `None` while it still waits on the ring's
+    /// faces, so nothing of it is on screen and the shelf has not dimmed for it yet.
+    fn border_picker_shown(&self) -> Option<BorderPicker> {
+        self.border_picker.filter(|p| !p.waiting())
+    }
+
+    /// The cart under the highlight, large, wearing the border in hand, with its neighbours
+    /// either side of it and the shelf dimmed behind the whole row.
+    ///
+    /// Three carts and not one: a border is being chosen, which means it is being *compared*, and
+    /// a comparison is between this one and the one beside it. The neighbours stand back and
+    /// part-through so the row still reads as one cart being chosen rather than as three.
+    fn draw_border_picker(&self, picker: &BorderPicker, out: &mut Vec<Draw>) {
+        let now = self.now();
+        let pose = picker.pose(now);
+        if pose.openness <= 0.0 {
+            return;
+        }
+        // The shelf dims rather than going away: what is being dressed is the cart still
+        // standing there, and a panel that hid it would be choosing a border for nothing.
+        out.push(Draw::Rect {
+            x: 0.0,
+            y: 0.0,
+            w: OUT_W as f32,
+            h: OUT_H as f32,
+            colour: [0.0, 0.0, 0.0, BORDER_VEIL * pose.openness],
+        });
+        // Every face in the ring is the same cart at the same size, so one of them gives the
+        // whole row its geometry.
+        let Some((_, fw, fh)) = self.border_faces.iter().find_map(|f| *f) else {
+            return;
+        };
+        let cx = OUT_W as f32 / 2.0;
+        let cy = OUT_H as f32 / 2.0;
+        let spacing = fw as f32 * BORDER_SPACING;
+        for offset in [-1isize, 0, 1] {
+            let Some(i) = picker.item_at(offset) else {
+                continue;
+            };
+            let Some((tex, w, h)) = self.border_faces.get(i).copied().flatten() else {
+                continue;
+            };
+            // Where this one stands: its own place in the row, and the whole row slid by
+            // however far the press has carried it.
+            let d = offset as f32 + pose.shift;
+            let near = (1.0 - d.abs()).clamp(0.0, 1.0);
+            let alpha = (BORDER_SIDE_A + (1.0 - BORDER_SIDE_A) * near) * pose.openness;
+            if alpha <= 0.01 {
+                continue;
+            }
+            out.push(Draw::Tex {
+                x: (cx + d * spacing - w as f32 / 2.0).round(),
+                y: (cy - h as f32 / 2.0).round(),
+                w: w as f32,
+                h: h as f32,
+                tex,
+                alpha,
+            });
+        }
+        // Where the hand is in the ring, and the light travelling between two lamps while a
+        // change is in flight — a row that blinked would be a different row every press.
+        let n = picker.count();
+        let row = n as f32 * BORDER_DOT + (n - 1) as f32 * BORDER_DOT_GAP;
+        let x0 = cx - row / 2.0;
+        let y = cy + fh as f32 / 2.0 + BORDER_DOT_LIFT;
+        for i in 0..n {
+            let lit = picker.dot_lit(i, now);
+            out.push(Draw::Rect {
+                x: x0 + i as f32 * (BORDER_DOT + BORDER_DOT_GAP),
+                y,
+                w: BORDER_DOT,
+                h: BORDER_DOT,
+                colour: [1.0, 1.0, 1.0, (0.22 + 0.78 * lit) * pose.openness],
+            });
+        }
+    }
+
     /// and the third to be the same object. What differs is where it goes in the frame and
     /// what it is drawn over: this one goes over the paused game, which is still on screen
     /// behind it and is what the player gets back by cancelling.
@@ -5894,6 +6025,113 @@ impl App {
     /// Both the read that positions the highlight and the write that follows need the card.
     /// Without one there is nothing to configure and nowhere to put an answer, so the button
     /// stays inert rather than raising a menu whose choice would evaporate.
+    /// Opens the border picker over the cart under the highlight: **which of the card's borders
+    /// this cart is wearing**, and the machine's own shell is one of the answers.
+    ///
+    /// A machine whose card carries no borders gets no picker at all: with nothing on the card
+    /// there is nothing to choose between, and the machine's own shell is not an answer to a
+    /// question — it is the state every cart is already in.
+    fn open_border_picker(&mut self) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        // Nothing to dress with no cart under the highlight, and a picker that wrote to an
+        // empty stem would leave a line for a cart that is not there.
+        let Some(cart) = self.shelf.current_cart() else {
+            return;
+        };
+        let system = cart.system();
+        let numbers: Vec<u32> = slot_store::borders::borders(&root, system)
+            .iter()
+            .map(|b| b.number)
+            .collect();
+        if numbers.is_empty() {
+            return;
+        }
+        // Which one this cart already wears, so the picker opens on it: it answers "which is
+        // this?" before it asks "which do you want?".
+        let selected = slot_store::borders::read_selected(&root, system)
+            .get(&cart.stem)
+            .copied();
+        let now = self.now();
+        let mut picker = BorderPicker::open(selected, &numbers, now);
+        if self.border_faces_ready() {
+            picker.start(now);
+        }
+        self.border_picker = Some(picker);
+        // Whatever the shelf had armed belonged to the row underneath, not to the cart now open
+        // over it.
+        self.shelf.release_hold();
+        self.play_held = None;
+        self.fav_held = None;
+        self.sys_held = None;
+    }
+
+    /// Whether the faces on the GPU are the highlighted cart's, so the picker can start opening.
+    fn border_faces_ready(&self) -> bool {
+        self.border_faces_stem
+            .as_deref()
+            .is_some_and(|stem| self.selected_stem() == Some(stem))
+    }
+
+    /// The picker takes the arrows and both face buttons while it is up: a row that went on
+    /// moving behind it would be choosing a border for a cart that is no longer under it, and
+    /// `A` and `B` are this panel's to answer.
+    fn border_picker_input(&mut self, action: Action) {
+        let press = match action {
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => BorderPress::Left,
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => BorderPress::Right,
+            Action::GbaDown(Btn::A) => BorderPress::Keep,
+            Action::GbaDown(Btn::B) => BorderPress::Back,
+            _ => return,
+        };
+        let now = self.now();
+        let Some(picker) = &mut self.border_picker else {
+            return;
+        };
+        if let BorderOutcome::Write(number) = picker.press(press, now) {
+            self.write_border(number);
+        }
+    }
+
+    /// The choice, onto the card: `System/Borders/<machine>.txt`, one file per machine, so a
+    /// machine added later is a file added later. `None` — the machine's own shell — writes no
+    /// line at all, which is what leaves a cart with nothing recorded about it.
+    fn write_border(&self, number: Option<u32>) {
+        let (Some(root), Some(cart)) = (self.root.clone(), self.shelf.current_cart()) else {
+            return;
+        };
+        if let Err(e) =
+            slot_store::borders::write_selected(&root, cart.system(), &cart.stem, number)
+        {
+            eprintln!(
+                "slot: borders: could not write {}.txt: {e}",
+                cart.system().dir_name().to_ascii_lowercase()
+            );
+        }
+    }
+
+    /// The picker's faces, one per place in its ring, uploaded by the frontend when they are
+    /// built. Held here because the arrows must be able to move through the whole ring without
+    /// waiting for a rasterise: the row is pictures, and a picture that takes 70 ms to draw is
+    /// not one a press can wait for.
+    pub fn set_border_faces(&mut self, faces: Vec<(TexId, u32, u32)>, stem: String) {
+        self.border_faces = faces.into_iter().map(Some).collect();
+        self.border_faces_stem = Some(stem);
+    }
+
+    /// Whether the picker is up, which is the frontend's cue to have its faces built.
+    pub fn border_picker_open(&self) -> bool {
+        self.border_picker.is_some()
+    }
+
+    /// The card and the cart the picker is about, for the frontend to build faces from.
+    pub fn border_picker_target(&self) -> Option<(std::path::PathBuf, slot_store::Cart)> {
+        let root = self.root.clone()?;
+        let cart = self.shelf.current_cart()?.clone();
+        Some((root, cart))
+    }
+
     fn open_core_picker(&mut self) {
         let Some(root) = self.root.clone() else {
             return;

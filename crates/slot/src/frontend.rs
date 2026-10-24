@@ -18,9 +18,9 @@ use slot_ui::{
     ALERT_PX, BOLT_PX, HUD_ICON_PX, LEGEND, PALETTE_FOOT_PX, SHORTCUT_ROWS,
 };
 
-use crate::app::{App, GameRow, LinkRow, Phase};
+use crate::app::{App, GameRow, LinkRow, Phase, BORDER_FACE_K};
 use crate::build_info::Build;
-use crate::face_builder::{shelf_window, FaceBuilder, ShelfFaceFiller};
+use crate::face_builder::{shelf_window, BorderFaceBuilder, FaceBuilder, ShelfFaceFiller};
 use crate::link_start::{LinkFail, LinkStep};
 use crate::root;
 use crate::session::Session;
@@ -88,6 +88,14 @@ pub struct Frontend {
     core_board_tex: Option<TexId>,
     core_lid_tex: Option<TexId>,
     core_built: Option<String>,
+    /// Builds the border picker's ring off the frame loop: one cart wearing every border.
+    border_faces: BorderFaceBuilder,
+    /// The cart last asked for, the ring's textures in the ring's own order, and which cart they
+    /// were built for. A slot per place rather than one texture for the row, so a ring of two and
+    /// a ring of thirty-three both hold only what they have.
+    border_asked: Option<String>,
+    border_texes: Vec<Option<TexId>>,
+    border_built: Option<String>,
     /// The undo cap's label, which changes with what is on offer.
     undo_tex: Option<TexId>,
     switcher: Switcher,
@@ -183,6 +191,10 @@ impl Frontend {
             core_board_tex: None,
             core_lid_tex: None,
             core_built: None,
+            border_faces: BorderFaceBuilder::spawn(),
+            border_asked: None,
+            border_texes: Vec::new(),
+            border_built: None,
             undo_tex: None,
             switcher: Switcher::default(),
             fit_thumb_texes: Vec::new(),
@@ -1002,6 +1014,14 @@ impl Frontend {
             &mut self.core_lid_tex,
             &mut self.core_built,
         );
+        sync_border_picker(
+            self.session.app_mut(),
+            compositor,
+            &self.border_faces,
+            &mut self.border_asked,
+            &mut self.border_texes,
+            &mut self.border_built,
+        );
         sync_switcher(
             self.session.app_mut(),
             compositor,
@@ -1594,6 +1614,55 @@ fn sync_core_picker(
     let lid_id = upload_rgba(compositor, lid, faces.lid.w, faces.lid.h, &faces.lid.rgba);
     app.set_core_board_faces(board_id, lid_id);
     *built = Some(faces.stem);
+}
+
+/// The border picker's ring, rasterised off the frame loop: the cart under the highlight wearing
+/// every border the card holds, plus the machine's own shell. Asked for when the picker opens and
+/// held until it closes, so that the arrows answer at once however long the ring took to draw.
+fn sync_border_picker(
+    app: &mut App,
+    compositor: &mut Compositor,
+    builder: &BorderFaceBuilder,
+    asked: &mut Option<String>,
+    texes: &mut Vec<Option<TexId>>,
+    built: &mut Option<String>,
+) {
+    if !app.border_picker_open() {
+        // Nothing is up, so nothing is being held: the ring is asked for again next time, which
+        // is the point — a cart whose borders were changed on a PC is a different ring.
+        *asked = None;
+        return;
+    }
+    let highlighted = app.selected_stem().map(str::to_string);
+    if highlighted.is_some() && *asked != highlighted {
+        if let Some((root, cart)) = app.border_picker_target() {
+            let system = cart.system();
+            let numbers: Vec<u32> = slot_store::borders::borders(&root, system)
+                .iter()
+                .map(|b| b.number)
+                .collect();
+            builder.request(root, cart, numbers, BORDER_FACE_K);
+        }
+        *asked = highlighted.clone();
+    }
+    let Some(ring) = builder.take() else {
+        return;
+    };
+    // A ring for a cart the caret has since left is dropped, as the open cart's is.
+    if highlighted.as_deref() != Some(ring.stem.as_str()) {
+        return;
+    }
+    texes.resize(ring.faces.len(), None);
+    let mut faces = Vec::with_capacity(ring.faces.len());
+    for (slot, face) in texes.iter_mut().zip(ring.faces.iter()) {
+        faces.push((
+            upload_rgba(compositor, slot, face.w, face.h, &face.rgba),
+            face.w,
+            face.h,
+        ));
+    }
+    app.set_border_faces(faces, ring.stem.clone());
+    *built = Some(ring.stem);
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {

@@ -151,14 +151,23 @@ impl BorderPicker {
     /// the last is the first. `None` only when the ring has fewer than three things in it and a
     /// place is being asked for twice.
     pub fn item(&self, offset: isize) -> Option<Option<u32>> {
+        Some(self.items[self.item_at(offset)?])
+    }
+
+    /// Which **place in the ring** sits `offset` from the one in hand, round the ring. The place
+    /// and not the border's number, because what the drawing wants is the face that was built
+    /// for that place, and the number is only what the place is standing for.
+    pub fn item_at(&self, offset: isize) -> Option<usize> {
         if self.count == 0 {
             return None;
         }
         let at = (self.seat as isize + offset).rem_euclid(self.count as isize) as usize;
+        // A ring of two has no third place to show: asking for the neighbour either side would
+        // draw the one in hand twice, once as itself and once as its own neighbour.
         if offset != 0 && self.count < 3 && at == self.seat {
             return None;
         }
-        Some(self.items[at])
+        Some(at)
     }
 
     /// How lit the `i`th lamp is: `1.0` for the border in hand, and — while a change is in
