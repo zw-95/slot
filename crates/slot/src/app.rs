@@ -1539,6 +1539,14 @@ pub struct App {
     /// not, so the same number means different things on the two shelves.
     overlay_slot: usize,
     overlay_index: usize,
+    /// **Whether this cart's machine has an overlay set at all.** Clearing a set used to leave
+    /// nothing behind but the pixels: `overlay_slot` and `overlay_index` kept the numbers the
+    /// previous machine was using, so anything that asked for a re-decode found them still pointing
+    /// into Game Boy's ring — and a model is resolved from the number alone, with no look at
+    /// whether there is a set to belong to. Changing how the picture fits asks exactly that, which
+    /// is why SELECT+B on a Super Nintendo could bring a Game Boy's case art back onto the screen
+    /// after it had been taken off. The ring's numbers mean nothing without this.
+    overlay_has_set: bool,
     /// Which overlay each system last showed, GB then GBC, persisted to `System/overlay.txt` so
     /// the choice survives a boot. Clamped against the current list length when it is applied.
     overlay_indices: [usize; 2],
@@ -1663,6 +1671,7 @@ impl App {
             overlay_list: Vec::new(),
             overlay_slot: 0,
             overlay_index: 0,
+            overlay_has_set: false,
             overlay_indices: [0, 0],
             shelf_system: System::Gba,
             fav_view: false,
@@ -2379,6 +2388,12 @@ impl App {
     pub(crate) fn clear_overlay_set(&mut self) {
         self.overlay_pixels = None;
         self.overlay_dirty = true;
+        // **And forget the ring itself**, numbers and all. Leaving them was how a Family Computer
+        // ended up wearing Game Boy art: see `overlay_has_set` above.
+        self.overlay_list.clear();
+        self.overlay_slot = 0;
+        self.overlay_index = 0;
+        self.overlay_has_set = false;
     }
 
     /// Hand the seated cart's overlay set to the app, from `Session::spawn_core`: every
@@ -2397,6 +2412,7 @@ impl App {
             self.overlay_indices[slot].min(choices - 1)
         };
         self.refresh_overlay_pixels();
+        self.overlay_has_set = true;
     }
 
     /// How many overlay choices a system has. A Game Boy's three models come first and the card's
@@ -2433,13 +2449,18 @@ impl App {
     /// `None` pixels (`None` from a missing/corrupt file, or an empty list) is a real answer:
     /// the frontend reads it as "release the texture", so the built-in look stands.
     fn refresh_overlay_pixels(&mut self) {
-        // **A full-screen picture wears no frame.** The overlay is the machine's own case art
-        // drawn *around* the screen — that is what it is, and the whole of what it is — and a
-        // picture pulled to the panel's edges leaves it nothing to be around. Left up it is art
-        // laid over the game it was framing, hiding the edges of a picture the player asked to
-        // see all of. `overlay_index` is left alone, so stepping off the full fit puts the frame
-        // back exactly where they had it.
-        if self.display.fit == Fit::Full {
+        // **Nothing wears a frame but a whole-pixel picture.** The overlay is the machine's own case
+        // art, drawn *around* the screen at the scale that art was drawn for; at any other scale it
+        // is a picture in the wrong place, sitting over the edges of the one the player is looking
+        // at. So it belongs to the integer fit and to nothing else — left up at either fractional
+        // one, a Game Boy at its own shape carried Game Boy case art onto a frame-sized window and
+        // simply covered what the picture ended with. `overlay_index` is left alone either way, so
+        // stepping back to the integer fit puts the frame back where they had it.
+        //
+        // **And nothing wears a frame whose machine has none.** `overlay_has_set` is what says so;
+        // without it a leftover index still answers "which model is this" for a machine with no
+        // overlay set at all.
+        if !self.overlay_has_set || self.display.fit != Fit::Integer {
             self.overlay_pixels = None;
             self.overlay_dirty = true;
             return;
