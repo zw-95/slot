@@ -689,23 +689,23 @@ impl Frontend {
         self.switcher = Switcher::default();
         self.clocks = Clocks::default();
         self.about = AboutFace::default();
-        // Cart faces: the visible window is rebuilt in place; everything outside it is released
-        // and cleared so the resident pump rebuilds it on demand. `resident_at = None` forces
-        // `sync_resident_faces` to rescan on the next frame and re-queue the dropped faces.
+        // Cart faces: **let go of every one**, including the window the row is drawing right now.
+        //
+        // A theme change used to rebuild that window here in place, and in doing so it built each
+        // cart the way `cart_face` builds one — **the machine's own shell** — because this call
+        // site has a cart and nothing else. What a cart wears is the border the card says it
+        // wears, and the only thing that asks the card that question is the worker's own dress
+        // (`dress_for`): asking it here is asking it a second time and being told "nothing". So a
+        // theme flip took every cart out of the cover it had been given and put it back in the
+        // plastic it was born in, while the choice itself sat untouched on the card — which is
+        // why opening the picker still highlighted the number it was left on.
+        //
+        // Dropping them puts them on the same queue every other cart uses, which is the one that
+        // knows what each has been given. `resident_at = None` is what makes the pump walk the
+        // library again this frame instead of waiting for the caret to move.
         let count = self.session.app().carts().len();
-        let index = self.session.app().shelf_index();
-        let window = self.session.app().shelf_draw_window();
-        let window = if window.is_empty() {
-            shelf_window(index, count)
-        } else {
-            window
-        };
         for i in 0..count {
-            if window.contains(&i) {
-                let f = cart_face(&self.session.app().carts()[i]);
-                let tex = compositor.create_texture(f.w, f.h, &f.rgba);
-                self.session.app_mut().set_face(i, tex, f.w, f.h);
-            } else if let Some(face) = self.session.app().face_of(i) {
+            if let Some(face) = self.session.app().face_of(i) {
                 compositor.release_texture(face.tex);
                 self.session.app_mut().clear_face(i);
             }
