@@ -813,6 +813,42 @@ impl DisplayFilter {
     /// A horizontal scanline overlay: the top row of each 3-line cell is the dark gap, the other
     /// two are lit. Used at full strength for mode 4; mode 3 is this lerped halfway from FLAT.
     const SCANLINE_MASK: [[[u8; 3]; 3]; 3] = [[[0u8; 3]; 3], [[255u8; 3]; 3], [[255u8; 3]; 3]];
+    /// RetroArch's **dot mask**: one dark dot in the middle of every source pixel, which is what a
+    /// real LCD looks like from close enough to see the gaps between its pixels. **Nothing here is
+    /// coloured** — this is a panel casting its own shadow, not three colours of light, and that is
+    /// what sets it apart from the two below it.
+    const DOT_MASK: [[[u8; 3]; 3]; 3] = [
+        [[255u8; 3]; 3],
+        [[255u8; 3], [136u8; 3], [255u8; 3]],
+        [[255u8; 3]; 3],
+    ];
+    /// RetroArch's **retro v2**, the one most people mean by "the CRT look": a trio of coloured
+    /// bands across every source pixel — an aperture grille — with the middle row stood down for
+    /// the gap between the rows above and below it.
+    ///
+    /// Where `DOT_MASK` *shades* white towards black, this one **makes** white out of three
+    /// colours: each column passes one channel through and holds the other two part-way down, so
+    /// the three side by side are the colour the picture asked for while each alone is red, green
+    /// or blue. A picture's own pixels therefore keep their colour where the grille darkens them,
+    /// which a plain shadow cannot do — that is the whole of the difference between the two, and
+    /// why both are on the ring rather than one.
+    const RETRO_V2_MASK: [[[u8; 3]; 3]; 3] = [
+        [
+            [255u8, 150u8, 150u8],
+            [150u8, 255u8, 150u8],
+            [150u8, 150u8, 255u8],
+        ],
+        [
+            [150u8, 110u8, 110u8],
+            [110u8, 150u8, 110u8],
+            [110u8, 110u8, 150u8],
+        ],
+        [
+            [255u8, 150u8, 150u8],
+            [150u8, 255u8, 150u8],
+            [150u8, 150u8, 255u8],
+        ],
+    ];
     fn new(
         lcd3x: [[[u8; 3]; 3]; 3],
         nocolor_cc: [[f32; 3]; 3],
@@ -866,11 +902,13 @@ impl DisplayFilter {
     fn preset_mask(&self, preset: u8) -> [[[u8; 3]; 3]; 3] {
         match preset {
             0 => Self::FLAT_MASK,
-            1 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.25),
-            2 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.50),
-            3 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.75),
-            4 => self.lcd3x,
-            5 => lerp_mask(&Self::FLAT_MASK, &Self::SCANLINE_MASK, 0.50),
+            1 => Self::DOT_MASK,
+            2 => Self::RETRO_V2_MASK,
+            3 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.25),
+            4 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.50),
+            5 => lerp_mask(&Self::FLAT_MASK, &self.lcd3x, 0.75),
+            6 => self.lcd3x,
+            7 => lerp_mask(&Self::FLAT_MASK, &Self::SCANLINE_MASK, 0.50),
             _ => Self::SCANLINE_MASK,
         }
     }
@@ -882,11 +920,13 @@ impl DisplayFilter {
     fn preset_name(preset: u8) -> &'static str {
         match preset {
             0 => "OFF",
-            1 => "LCD 25",
-            2 => "LCD 50",
-            3 => "LCD 75",
-            4 => "LCD 100",
-            5 => "SCAN 50",
+            1 => "DOT",
+            2 => "RETRO V2",
+            3 => "LCD 25",
+            4 => "LCD 50",
+            5 => "LCD 75",
+            6 => "LCD 100",
+            7 => "SCAN 50",
             _ => "SCAN 100",
         }
     }
@@ -942,7 +982,7 @@ impl DisplayFilter {
     /// their `SELECT+X` walks the overlay ring, which is the art they have and the Advance does
     /// not. The hold opens the board on either machine.
     fn mask_ring(_machine: System) -> &'static [u8] {
-        &[0, 1, 2, 3, 4, 5, 6]
+        &[0, 1, 2, 3, 4, 5, 6, 7, 8]
     }
     /// Step the colour correction of one of the **colour** machines, wrapping at the end of its
     /// list of three (grayscale, AGB-001, NDS).

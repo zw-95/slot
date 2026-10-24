@@ -436,14 +436,19 @@ impl GamePass {
             gl::UseProgram(self.prog);
             gl::Uniform4f(self.u_rect, x, y, w, h);
             gl::Uniform1f(self.u_bright, screen_brightness(self.power));
-            // The mask rides on the fit: a whole number of panel pixels per source pixel is the
-            // only scale its triads mean anything at, and at 2.7 of them a triad lands across a
-            // pixel's edge — smeared rows of colour rather than a lattice. Stand it down and let
-            // the picture through clean; the grade keeps doing its work either way.
-            gl::Uniform1f(
-                self.u_mask_on,
-                if System::whole(self.fit) { 1.0 } else { 0.0 },
-            );
+            // The mask used to be **switched off whenever the fit was not whole**. A triad is one
+            // RGB triple per *source* pixel, and no whole number of panel pixels under each of them
+            // means the three do not divide evenly: a Family Computer is 256 across on a 720 panel,
+            // 2.8 pixels each, so a triad lands across a pixel's edge and the lattice comes out as
+            // uneven bands of colour rather than a grid. Standing it down was the tidy answer.
+            //
+            // It was also the answer that made SELECT+X look broken: the switch lived in the fit,
+            // and the fit is not a control anybody thinks of as a control. Every machine whose
+            // picture fills the panel — which is most of them — pressed the key, saw nothing, and
+            // concluded the key does nothing. An uneven lattice is what a real one looks like at a
+            // scale that is not whole, and an unevenness that can be *seen* can be stepped past;
+            // nothing at all cannot be told apart from a broken key.
+            gl::Uniform1f(self.u_mask_on, 1.0);
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, tex);
             gl::ActiveTexture(gl::TEXTURE1);

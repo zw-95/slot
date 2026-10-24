@@ -292,8 +292,8 @@ pub fn color_correction(root: &Path) -> Option<[[f32; 3]; 3]> {
 /// file** — "mask cc" from before the colour choice went per machine — and that one value is
 /// applied to all three, so a card written by the previous build keeps the look it was set to
 /// (remapped onto the new list by `migrate_display_modes`).
-/// How many aperture presets `display.txt`'s first number may name: OFF, four strengths of the
-/// LCD3x table, the scanline at two.
+/// How many aperture presets `display.txt`'s first number may name: nothing, RetroArch's dot mask
+/// and retro v2, four strengths of the LCD3x table, and the scanline at two.
 ///
 /// **It lives here and not beside the ring it describes**, because this is the file that indexes
 /// it: `read` clamps against this number and `DisplayFilter::MASK_STATES` — the count of arms in
@@ -304,7 +304,7 @@ pub fn color_correction(root: &Path) -> Option<[[f32; 3]; 3]> {
 /// It was never raised when the scanline was added, so a card that saved the scanline (5 or 6) was
 /// read back as LCD3x 100% on the next boot: the two newest presets were written, shown, persisted
 /// and then silently replaced. `tests/display.rs` now walks the whole ring through the file.
-pub const MASK_STATES: usize = 7;
+pub const MASK_STATES: usize = 9;
 
 /// How many fits the file may name, clamped exactly as `MASK_STATES` is. The ring itself lives
 /// in `DisplayFilter::FITS` on the other side of the crate boundary, and this is the count the
