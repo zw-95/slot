@@ -3198,7 +3198,14 @@ impl App {
                 // every one of those chords; waiting out the 600 ms window instead would put
                 // that delay in front of the menu. START is bound to nothing here and reaches
                 // no core from the shelf, so it costs neither.
-                Action::GbaDown(Btn::Start) if self.core_picker.is_none() => {
+                // **Not while the border picker is up.** Both of them open over the cart under the
+                // highlight and both of them take the whole screen to do it, and a START that
+                // answered would stand a board inside a cover: the lid comes off a cart that is
+                // mid-change, which is a cart that is about to be a different cart. The cover
+                // picker owns every button while it is open, START included.
+                Action::GbaDown(Btn::Start)
+                    if self.core_picker.is_none() && self.border_picker.is_none() =>
+                {
                     self.open_core_picker()
                 }
                 // Colour correction (SELECT+Y) is the game panel's now: the shelf no longer
@@ -6640,6 +6647,13 @@ impl App {
             None => map.remove(&stem),
         };
         self.shelf_face_stale = true;
+        // **And the lid the core picker lifts, which is the same cart in the same cover.** It was
+        // rasterised in the border the cart wore before this press, and `core_faces_ready` asks
+        // only whether it was built for *this cart* — machine and stem, which a new border does
+        // not change — so it answered yes and opened the old cover over the new one. Dropping the
+        // key says the lid is not this cart's any more: it is rebuilt, and until it arrives the
+        // picker lifts the row's own face, which is the face that was just given.
+        self.core_faces_key = None;
     }
 
     /// Whether the row's face for the cart under the highlight is the one it should be wearing,
