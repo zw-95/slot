@@ -1155,8 +1155,9 @@ pub struct App {
     /// so it can be turned. Rebuilt by the frontend when the highlighted cart changes.
     core_board_face: Option<TexId>,
     core_lid_face: Option<TexId>,
-    /// The cart the uploaded board and lid were built for.
-    core_faces_stem: Option<String>,
+    /// The cart the uploaded board and lid were built for, as `faces_key` spells one — machine
+    /// and stem, because a lid is a machine's shell and a stem alone names two carts at once.
+    core_faces_key: Option<String>,
     /// The border picker: which of the card's borders the cart under the highlight is wearing.
     /// Its own clock and nothing else — see `border_picker`.
     border_picker: Option<BorderPicker>,
@@ -1164,8 +1165,9 @@ pub struct App {
     /// first, then one per border the card holds. Built by the frontend when the picker opens and
     /// held until it closes, which is what lets the arrows move without waiting for a rasterise.
     border_faces: Vec<Option<(TexId, u32, u32)>>,
-    /// The cart those faces were built for.
-    border_faces_stem: Option<String>,
+    /// The cart those faces were built for, as `faces_key` spells one — the ring is one machine's
+    /// borders on one machine's cart, and a stem alone would call the other machine's ring ready.
+    border_faces_key: Option<String>,
     /// The chip: **one** face and not one per core, because it is one chip — the same shape
     /// whichever core is in hand, and what tells two of them apart is the name written on it
     /// rather than the picture. Uploaded at boot.
@@ -1486,10 +1488,10 @@ impl App {
             core_picker: None,
             core_board_face: None,
             core_lid_face: None,
-            core_faces_stem: None,
+            core_faces_key: None,
             border_picker: None,
             border_faces: Vec::new(),
-            border_faces_stem: None,
+            border_faces_key: None,
             core_chip_face: None,
             core_name_faces: Vec::new(),
             core_dot_off: None,
@@ -2881,6 +2883,41 @@ impl App {
         self.shelf.current_cart().map(|c| c.stem.as_str())
     }
 
+    /// The shelf's own face for the highlighted cart, if it has one — and only that cart's.
+    ///
+    /// `Shelf::find` searches the whole library by stem, and a stem is not a cart: `Tank (C)` is
+    /// a file on the Game Boy shelf and another on the Family Computer's, and the face hanging
+    /// off the second is a Family Computer shell with the right name on it. The machine is
+    /// checked against the cart actually under the highlight, and a stem that only matches on
+    /// another shelf draws nothing rather than the wrong plastic.
+    fn shelf_face_for_current(&self) -> Option<TexId> {
+        let here = self.shelf.current_cart()?;
+        let (cart, tex) = self.shelf.find(&here.stem)?;
+        (cart.system() == here.system()).then_some(tex)?
+    }
+
+    /// The cart under the highlight itself. `selected_stem` is only its name, and a name is not a
+    /// cart — see `faces_key`. Anything about to *build* something from the cart in hand wants
+    /// this rather than a hunt through `carts()` for a matching stem.
+    pub fn selected_cart(&self) -> Option<&slot_store::Cart> {
+        self.shelf.current_cart()
+    }
+
+    /// The cart under the highlight **as a machine and a stem**, which is the only form that is
+    /// safe to say "these faces were built for this" in.
+    ///
+    /// A stem is not a cart: `Tank (C)` sits on the Game Boy shelf and on the Family Computer's,
+    /// and two files with the same stem on two machines are two carts. A face is a machine's
+    /// shell as much as it is a game's label, so anything that asks "is what is on the GPU this
+    /// cart's?" has to ask about the machine too — a lid built for the Family Computer's cart
+    /// opened over the Game Boy's is the wrong plastic on the screen with the right name on it.
+    /// This is the same key `slot_store::core` writes its core choices under, so the two agree
+    /// about what a cart is called.
+    pub fn faces_key(&self) -> Option<String> {
+        let cart = self.shelf.current_cart()?;
+        Some(format!("{}/{}", cart.system().dir_name(), cart.stem))
+    }
+
     /// Which machine's picture belongs on the panel.
     ///
     /// The card's four shelves collapse into the renderer's three here, because Game Boy and
@@ -4077,11 +4114,12 @@ impl App {
         self.power_menu_faces = faces;
     }
 
-    /// Recorded against the highlighted cart, since that is the only cart they are ever built for.
+    /// Recorded against the highlighted cart, since that is the only cart they are ever built for
+    /// — and against its machine as well as its stem, which `faces_key` gives the reason for.
     pub fn set_core_board_faces(&mut self, board: TexId, lid: TexId) {
         self.core_board_face = Some(board);
         self.core_lid_face = Some(lid);
-        self.core_faces_stem = self.selected_stem().map(str::to_string);
+        self.core_faces_key = self.faces_key();
     }
 
     /// One chip, and `names` in `Core::ALL` order.
@@ -4491,9 +4529,7 @@ impl App {
                     turn,
                 });
             }
-        } else if let Some((_, Some(tex))) =
-            self.selected_stem().and_then(|stem| self.shelf.find(stem))
-        {
+        } else if let Some(tex) = self.shelf_face_for_current() {
             // The cap ran out before this cart's own lid arrived. The shelf's own face for the
             // cart is the only thing left to lift — not `core_lid_face`, which would still be
             // whatever cart the worker built last — and it is drawn unpadded: unlike a face
@@ -6069,9 +6105,9 @@ impl App {
 
     /// Whether the faces on the GPU are the highlighted cart's, so the picker can start opening.
     fn border_faces_ready(&self) -> bool {
-        self.border_faces_stem
+        self.border_faces_key
             .as_deref()
-            .is_some_and(|stem| self.selected_stem() == Some(stem))
+            .is_some_and(|key| self.faces_key().as_deref() == Some(key))
     }
 
     /// The picker takes the arrows and both face buttons while it is up: a row that went on
@@ -6115,9 +6151,13 @@ impl App {
     /// built. Held here because the arrows must be able to move through the whole ring without
     /// waiting for a rasterise: the row is pictures, and a picture that takes 70 ms to draw is
     /// not one a press can wait for.
-    pub fn set_border_faces(&mut self, faces: Vec<(TexId, u32, u32)>, stem: String) {
+    ///
+    /// Recorded against the highlighted cart, and against its machine — the ring is one machine's
+    /// borders, and a stem alone would call another machine's ring ready the moment a game with
+    /// the same name turned up there.
+    pub fn set_border_faces(&mut self, faces: Vec<(TexId, u32, u32)>) {
         self.border_faces = faces.into_iter().map(Some).collect();
-        self.border_faces_stem = Some(stem);
+        self.border_faces_key = self.faces_key();
     }
 
     /// Whether the picker is up, which is the frontend's cue to have its faces built.
@@ -6169,10 +6209,11 @@ impl App {
     }
 
     /// Whether the board and lid on the GPU are the highlighted cart's, so its open can start.
+    /// Compared on `faces_key`: the same stem on another machine is another cart's lid.
     fn core_faces_ready(&self) -> bool {
-        self.core_faces_stem
+        self.core_faces_key
             .as_deref()
-            .is_some_and(|stem| self.selected_stem() == Some(stem))
+            .is_some_and(|key| self.faces_key().as_deref() == Some(key))
     }
 
     /// The picker owns every button while it is up, including the arrows the shelf uses: a

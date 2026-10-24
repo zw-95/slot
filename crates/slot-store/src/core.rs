@@ -249,18 +249,17 @@ impl System {
                 Core::MednafenGba,
                 Core::MgbaRumble,
             ],
-            System::Gb | System::Gbc => &[
-                // muOS's default for both of these, and so now this one's: `default = gambatte`
-                // in that archive's `global.ini`. It takes mGBA's place, mGBA having been the
-                // only core these machines had rather than the best one for them — and it is
-                // asked for a greyscale base the same way mGBA is, so the colour correction
-                // still has a monochrome picture to work from.
-                Core::Gambatte,
-                Core::Mgba,
-                Core::SameBoy,
-                Core::Gearboy,
-                Core::Vbam,
-            ],
+            // **Two of the five are gone.** `gambatte` and `mgba` were the first two on this
+            // list — the first being muOS's own default for both machines — and both are wrong
+            // on a Game Boy cart on this device: the game comes up and comes up *mis*drawn,
+            // which is a worse failure than a cart that refuses to start, because it reads as
+            // the cart being broken. They are out rather than moved down: a core that draws a
+            // Game Boy game wrongly is not a fallback for anything.
+            //
+            // What is left is three, and SameBoy is first: accurate, and the one of the three
+            // that has never been reported wrong here. Then Gearboy, then VBA-M — which also
+            // runs the Advance, where it stays where it is, this list being a Game Boy's.
+            System::Gb | System::Gbc => &[Core::SameBoy, Core::Gearboy, Core::Vbam],
             // Thirteen, which is every Super Nintendo core muOS ships, and in the order a
             // player should meet them rather than the order the archives list them: the one
             // that has been tested first, then the accurate-but-cheap Snes9x branches, then the

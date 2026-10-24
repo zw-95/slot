@@ -311,6 +311,8 @@ const LID_REST: Placed = Placed {
     h: 81.0,
 };
 const LID_ZOOM: f32 = 144.0 / 240.0;
+/// The most a lid may stand tall, whatever the width's own factor asks for — see `lid_rest`.
+const LID_MAX_H: f32 = 120.0;
 
 /// The board's enlargement: the Advance board's own 372 over its 240. Capped by
 /// `BOARD_MAX_H` for the portrait machines — see `board_size`.
@@ -404,9 +406,15 @@ pub fn lid_at(progress: f32, system: slot_store::System) -> (Placed, f32) {
 /// machine's own proportions.
 fn lid_rest(system: slot_store::System) -> Placed {
     let size = size_for(system);
+    // Capped by height, the way a board is. A portrait cart at the width's own factor is a lid
+    // 166 tall, which hangs from `LID_REST`'s y down to 196 — across the row of lamps above the
+    // chip, which is how a machine with five cores says which one is in hand. The lid is the
+    // cart's own front and it is what the eye is meant to be reading; the lamps are what the
+    // panel is *for*, so a lid over them is the cart covering the reason it was opened.
+    let zoom = LID_ZOOM.min(LID_MAX_H / size.h as f32);
     Placed {
-        w: size.w as f32 * LID_ZOOM,
-        h: size.h as f32 * LID_ZOOM,
+        w: size.w as f32 * zoom,
+        h: size.h as f32 * zoom,
         ..LID_REST
     }
 }

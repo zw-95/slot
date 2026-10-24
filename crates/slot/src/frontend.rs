@@ -1586,13 +1586,15 @@ fn sync_core_picker(
     lid: &mut Option<TexId>,
     built: &mut Option<String>,
 ) {
-    let highlighted = app.selected_stem().map(str::to_string);
+    // Machine and stem, not a stem: the same stem on another machine's shelf is another cart,
+    // and the board and lid are that machine's shell as much as this cart's label.
+    let highlighted = app.faces_key();
     if highlighted.is_some() && *asked != highlighted {
-        if let Some(cart) = app
-            .carts()
-            .iter()
-            .find(|c| highlighted.as_deref() == Some(c.stem.as_str()))
-        {
+        // The cart in hand, and not a hunt through the library for a matching stem: `carts()` is
+        // every machine's carts, and two machines holding a game of the same name is two carts
+        // answering to one stem. A board and lid built from the other one is this cart's lid
+        // opening as the wrong machine's shell — a Game Boy cart with a Family Computer front.
+        if let Some(cart) = app.selected_cart() {
             builder.request(cart.clone());
         }
         *asked = highlighted.clone();
@@ -1613,7 +1615,9 @@ fn sync_core_picker(
     );
     let lid_id = upload_rgba(compositor, lid, faces.lid.w, faces.lid.h, &faces.lid.rgba);
     app.set_core_board_faces(board_id, lid_id);
-    *built = Some(faces.stem);
+    // The same key the app recorded them against, and for the same reason: a board and lid are
+    // one machine's cart, and a stem alone names two of them.
+    *built = app.faces_key();
 }
 
 /// The border picker's ring, rasterised off the frame loop: the cart under the highlight wearing
@@ -1633,7 +1637,9 @@ fn sync_border_picker(
         *asked = None;
         return;
     }
-    let highlighted = app.selected_stem().map(str::to_string);
+    // Machine and stem, as the core picker's is: a ring is one machine's borders on one
+    // machine's cart, and the same stem elsewhere is a ring that must be built again.
+    let highlighted = app.faces_key();
     if highlighted.is_some() && *asked != highlighted {
         if let Some((root, cart)) = app.border_picker_target() {
             let system = cart.system();
@@ -1648,8 +1654,9 @@ fn sync_border_picker(
     let Some(ring) = builder.take() else {
         return;
     };
-    // A ring for a cart the caret has since left is dropped, as the open cart's is.
-    if highlighted.as_deref() != Some(ring.stem.as_str()) {
+    // A ring for a cart the caret has since left is dropped, as the open cart's is — and the
+    // key is what says "since left", machine included.
+    if highlighted.as_deref() != Some(ring.key.as_str()) {
         return;
     }
     texes.resize(ring.faces.len(), None);
@@ -1661,8 +1668,8 @@ fn sync_border_picker(
             face.h,
         ));
     }
-    app.set_border_faces(faces, ring.stem.clone());
-    *built = Some(ring.stem);
+    app.set_border_faces(faces);
+    *built = Some(ring.key);
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {

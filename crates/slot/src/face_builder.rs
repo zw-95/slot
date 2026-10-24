@@ -84,7 +84,11 @@ impl FaceBuilder {
 /// through the whole ring without waiting for anything, which is the only way a press can answer
 /// at once.
 pub struct BuiltBorders {
-    pub stem: String,
+    /// Which cart this ring was built for, as `App::faces_key` spells one — machine *and* stem,
+    /// because a stem is not a cart. Checked when the faces land rather than when they were
+    /// asked for: a caret that moved while the worker was drawing is a ring for a cart that is
+    /// no longer under it, and two machines with a game of the same name is two rings.
+    pub key: String,
     /// The machine's own shell first, then one per border, in the ring's own order.
     pub faces: Vec<CartFace>,
 }
@@ -110,8 +114,8 @@ impl BorderFaceBuilder {
                             faces.push(face);
                         }
                     }
-                    let stem = cart.stem.clone();
-                    if outbox.send(BuiltBorders { stem, faces }).is_err() {
+                    let key = format!("{}/{}", cart.system().dir_name(), cart.stem);
+                    if outbox.send(BuiltBorders { key, faces }).is_err() {
                         return;
                     }
                 }
