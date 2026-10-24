@@ -5733,6 +5733,9 @@ impl App {
         let view = slot_ui::PaletteView {
             page: self.pal_page,
             cursor,
+            // Nothing to override: a colour is an area, not a picture, and it fills whatever the
+            // row leaves it.
+            cell_h: None,
             pages: slot_ui::palette_pages(total, per),
             rows: slot_ui::palette_rows(per),
             swatches: &swatches,
@@ -5894,6 +5897,9 @@ impl App {
         let view = slot_ui::PaletteView {
             page,
             cursor: cursor.min(n.saturating_sub(1)),
+            // Every cell here is the game that is up, seen through one look: three across to two
+            // down, whatever the page's arithmetic would have made them.
+            cell_h: Some(slot_ui::palette_cell_screen()),
             pages: slot_ui::palette_pages(total, APERTURE_PER_PAGE),
             rows: slot_ui::palette_rows(APERTURE_PER_PAGE),
             swatches: &swatches,
@@ -5995,7 +6001,8 @@ impl App {
         let n = slot_store::len_on(self.aperture_page, total, APERTURE_PER_PAGE);
         let (cw, ch) = (
             slot_ui::palette_cell_w(),
-            slot_ui::palette_cell_h(slot_ui::palette_rows(APERTURE_PER_PAGE), true),
+            // The cell is the panel, so it is the panel's shape, not the row's.
+            slot_ui::palette_cell_screen(),
         );
         Some(
             (base..base + n)
@@ -6048,9 +6055,9 @@ impl App {
                         Some((rgba, *w, *h)),
                         system.screen_rect(*fit),
                         slot_ui::palette_cell_w(),
-                        // One row, and named — which is exactly the shape the board is drawn at,
-                        // so a thumbnail arrives at the size it is drawn at and is not stretched.
-                        slot_ui::palette_cell_h(1, true),
+                        // The screen's own shape, which is what the cell is a picture of — see
+                        // `palette_cell_screen`.
+                        slot_ui::palette_cell_screen(),
                     )
                 })
                 .collect(),
@@ -6125,6 +6132,7 @@ impl App {
             page: 0,
             cursor: cursor.min(ring.len() - 1),
             pages: 1,
+            cell_h: Some(slot_ui::palette_cell_screen()),
             rows: 1,
             swatches: &swatches,
             names: &names,
@@ -6319,7 +6327,10 @@ impl App {
         let _board = self.overlay_board?;
         let (rgba, w, h) = self.shot.as_ref()?;
         let rect = self.screen_system().screen_rect(self.display_fit());
-        let (cw, ch) = (slot_ui::palette_cell_w(), slot_ui::palette_cell_h(1, true));
+        let (cw, ch) = (
+            slot_ui::palette_cell_w(),
+            slot_ui::palette_cell_screen(),
+        );
         Some(
             self.overlay_looks()
                 .into_iter()
@@ -6381,6 +6392,7 @@ impl App {
             page: 0,
             cursor: cursor.min(looks.len() - 1),
             pages: 1,
+            cell_h: Some(slot_ui::palette_cell_screen()),
             rows: 1,
             swatches: &swatches,
             names: &self.overlay_names,

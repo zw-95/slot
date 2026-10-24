@@ -1,6 +1,13 @@
 //! The palette browser: three swatches across over a paused game, named **one of two ways
 //! depending on which table is up**.
 //!
+//! The drawing lays the page out through one gateway — `View::geo` — because the app is allowed to
+//! say how tall a cell must be (see `cell_height_screen`), and nothing past that gateway may work
+//! the rows out for itself. The six plotters below are the same sums written for rows alone; the
+//! drawing has left them for the tests to measure the panel against, which is why they are kept
+//! rather than folded in and why this file permits them.
+#![allow(dead_code)]
+//!
 //! Opened by a hold of the palette key and dismissed by B. The panel is the whole of the
 //! screen's furniture while it is up — the game is still behind it, dimmed, because it is
 //! paused rather than gone — and it carries the page of the table, the names on it, and the
@@ -349,6 +356,18 @@ pub fn cell_height(rows: usize, named: bool) -> u32 {
     cell_h(rows, named).round() as u32
 }
 
+/// **The screen's own shape**, which is what a cell holding the screen has to be.
+///
+/// These three boards — the aperture's, the fits' and the overlays' — are not made of colours but
+/// of *pictures of the game that is up*, and a picture of the panel has the panel's proportions:
+/// three across to two down. A cell minted taller than that showed what was behind it, and one
+/// minted shorter cropped the sides off; either way the board was lying about the choice, which is
+/// the one thing a board exists not to do. So the height follows from the width, and the width is
+/// the table's — `cell_w` — which is how the two stay married whichever end changes first.
+pub fn cell_height_screen() -> u32 {
+    (cell_w() * crate::OUT_H as f32 / crate::OUT_W as f32).round() as u32
+}
+
 /// The height of a cell: whatever the panel has left once the names are paid for.
 ///
 /// `named` is whether the cells carry names of their own — see `View::names`. A named page fills:
@@ -444,6 +463,10 @@ pub struct View<'a> {
     /// and one that does not has its swatch — the board is up a frame before the frontend has
     /// minted them, and a shape without a picture beats an empty cell.
     pub thumbs: &'a [(TexId, u32, u32)],
+    /// The height the app wants these cells drawn at, **overriding the one the panel's arithmetic
+    /// reaches**. Set only where a cell is a picture rather than a colour: see
+    /// `cell_height_screen`. `None` everywhere else, and nothing about the named panels moves.
+    pub cell_h: Option<u32>,
 }
 
 impl View<'_> {
@@ -451,13 +474,40 @@ impl View<'_> {
     fn named(&self) -> bool {
         !self.names.is_empty()
     }
+
+    /// The panel's whole arithmetic for one page, as `(cell height, panel height, panel top, grid
+    /// top, row pitch)`.
+    ///
+    /// Gathered in one place because the drawing is two functions — the grid and the page pips —
+    /// and both have to agree about where the panel is. The height is **`View::cell_h` when the
+    /// app has set one** and the rows' own sum otherwise, and nothing past this line knows the
+    /// difference: a board of pictures is laid out exactly like a board of colours, with one
+    /// number changed. See `cell_height_screen` for who wants that and why.
+    fn geo(&self) -> (f32, f32, f32, f32, f32) {
+        let rows = self.rows.max(1);
+        let named = self.named();
+        let ch = match self.cell_h {
+            Some(h) => h as f32,
+            None => cell_h(rows, named),
+        };
+        let (band, foot) = if named {
+            (NAME_BAND, 0.0)
+        } else {
+            (0.0, FOOT_BAND)
+        };
+        let block = rows as f32 * (ch + band) + (rows - 1) as f32 * ROW_GAP;
+        let ph = PANEL_PAD + PIP_H + PIP_GAP_Y + block + foot + PANEL_PAD;
+        let py = (OUT_H as f32 - ph) / 2.0;
+        let gy = py + PANEL_PAD + PIP_H + PIP_GAP_Y;
+        (ch, ph, py, gy, ch + band + ROW_GAP)
+    }
 }
 
 pub fn draw(v: &View, out: &mut Vec<Draw>) {
     let rows = v.rows.max(1);
-    let named = v.named();
-    let ch = cell_h(rows, named);
-    let py = panel_y(rows, named);
+    // **The cells' height, which the app may have decided** — see `View::geo`.
+    let (ch, ph, py, gy, pitch) = v.geo();
+    let block = rows as f32 * pitch - ROW_GAP;
 
     out.push(Draw::Rect {
         x: 0.0,
@@ -470,14 +520,14 @@ pub fn draw(v: &View, out: &mut Vec<Draw>) {
         x: PANEL_X - RIM,
         y: py - RIM,
         w: PANEL_W + 2.0 * RIM,
-        h: panel_h(rows, named) + 2.0 * RIM,
+        h: ph + 2.0 * RIM,
         colour: edge(),
     });
     out.push(Draw::Rect {
         x: PANEL_X,
         y: py,
         w: PANEL_W,
-        h: panel_h(rows, named),
+        h: ph,
         colour: opening(),
     });
     draw_pips(v, out);
@@ -488,7 +538,7 @@ pub fn draw(v: &View, out: &mut Vec<Draw>) {
         if row >= rows {
             break;
         }
-        let (x, y) = (cell_x(i % COLS), row_y(row, rows, named));
+        let (x, y) = (cell_x(i % COLS), gy + row as f32 * pitch);
         // The caret first, so the bands sit inside it and the highlight is a frame rather than a
         // shift of the colours under it — the swatch has to show the palette, not the caret. Two
         // rects, because the ring and the swatch must not touch: the ink, then the panel punched
@@ -570,7 +620,7 @@ pub fn draw(v: &View, out: &mut Vec<Draw>) {
     if let Some((tex, w, h)) = v.foot {
         out.push(Draw::Tex {
             x: PANEL_X + (PANEL_W - w as f32) / 2.0,
-            y: grid_y(rows, named) + block_h(rows, named) + FOOT_GAP_Y + (FOOT_H - h as f32) / 2.0,
+            y: gy + block + FOOT_GAP_Y + (FOOT_H - h as f32) / 2.0,
             w: w as f32,
             h: h as f32,
             tex,
@@ -608,7 +658,7 @@ fn draw_pips(v: &View, out: &mut Vec<Draw>) {
         return;
     }
     let mut x = PANEL_X + (PANEL_W - row) / 2.0;
-    let y = panel_y(v.rows.max(1), v.named()) + PANEL_PAD + (PIP_H - PIP) / 2.0;
+    let y = v.geo().2 + PANEL_PAD + (PIP_H - PIP) / 2.0;
     for i in 0..v.pages {
         out.push(Draw::Rect {
             x,
