@@ -221,8 +221,19 @@ mod tests {
     use super::*;
 
     /// Every test in the crate shares one mode, so a test that moves it has to put it back or
-    /// the next one to run sees a light palette it never asked for.
-    struct Restore(Mode);
+    /// the next one to run sees a light palette it never asked for — **and has to hold the mode
+    /// for the whole of what it asserts, or two tests pinning it at the same moment simply
+    /// overwrite one another.**
+    ///
+    /// That second half is not theory: it is a test that fails one run in five and passes the
+    /// rest, because the assertion after a `set_mode` reads whichever mode was written last by
+    /// whichever thread got there. The lock is inside the pin rather than around the test because
+    /// the mode is global and not the test's: it is *pinning* that has to be exclusive, and a
+    /// test that only reads the mode is welcome to run alongside any other.
+    ///
+    /// Dropped after the mode is put back, so a test waiting on the lock never sees the previous
+    /// test's mode as its starting point.
+    struct Restore(Mode, std::sync::MutexGuard<'static, ()>);
 
     impl Drop for Restore {
         fn drop(&mut self) {
@@ -231,9 +242,11 @@ mod tests {
     }
 
     fn pinned(m: Mode) -> Restore {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
         let was = mode();
         set_mode(m);
-        Restore(was)
+        Restore(was, guard)
     }
 
     #[test]

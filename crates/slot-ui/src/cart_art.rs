@@ -36,6 +36,17 @@ const MARK_R: u8 = 200;
 const MARK_G: u8 = 60;
 const MARK_B: u8 = 200;
 
+/// How far above green the red and the blue have to sit before a pixel is called **magenta that
+/// did not quite make it** — the soft half of `is_mark`.
+///
+/// Measured as a spread rather than as three thresholds, because what makes a pixel magenta is not
+/// that it is bright but that its red and its blue are both far from its green: a grey is nothing
+/// apart, a red is wide on the red and nothing at all on the blue, and a magenta blended halfway
+/// into a grey shell — which is the whole of what an antialiased slot edge is — is still well
+/// apart on both. Spelled this way the test cannot be fooled by a light shell, which a threshold
+/// on red alone would call a mark on every pale cart on the card.
+const MARK_SPREAD: u8 = 60;
+
 /// How bright the plastic is taken to be, as a percentile of its own pixels. Applied as
 /// `colour * (luma / this)`, so anything at or below the reference keeps the shell colour's
 /// value and only the true highlights may exceed it. The *median* was the first choice and it
@@ -224,6 +235,70 @@ fn bleed_edge(rgba: &mut [u8], w: u32, h: u32) {
     }
 }
 
+/// The magenta that bled out of the slot.
+///
+/// A slot's edge that came back through a paint program is **half magenta and half shell**, and a
+/// half is not enough to pass `is_mark` — so those pixels lie *outside* the rectangle the code
+/// found. Outside it they are neither filled with the recess nor covered by the label, and a
+/// border is art that is not tinted, so they go out in the colour they arrived in: a bright pink
+/// rim round every cover on every border, which is the one thing on the cart the eye goes to and
+/// the one thing that is not supposed to be there.
+///
+/// Re-coloured with the **median of the opaque, unmagenta pixels beside them** — the shell colour
+/// the mix was made from, which is what the pixel would have been had the edge not been softened.
+/// The median and not the mean because the neighbourhood straddles the boundary: a mean of half
+/// shell and half magenta is another pink, and a median of is one or the other.
+///
+/// Alpha is left alone, as in `bleed_edge`: only the colour under it changes, so the outline the
+/// art cuts is the outline it cut before. **And the slot is found after this**, so the pure
+/// magenta inside is untouched and the geometry of the slot does not move — the pixels this
+/// touches were never in it.
+fn clean_mark(rgba: &mut [u8], w: u32, h: u32) {
+    let src = rgba.to_vec();
+    for y in 0..h {
+        for x in 0..w {
+            let i = ((y * w + x) * 4) as usize;
+            if !is_mark_soft(&src[i..i + 4]) {
+                continue;
+            }
+            let mut samples: Vec<[u8; 3]> = Vec::new();
+            // Two out and not one: a softened edge is more than a pixel wide, and a ring one
+            // pixel out on an edge two pixels wide is still all magenta.
+            for dy in -2i32..=2 {
+                for dx in -2i32..=2 {
+                    let (nx, ny) = (x as i32 + dx, y as i32 + dy);
+                    if nx < 0 || ny < 0 || nx >= w as i32 || ny >= h as i32 {
+                        continue;
+                    }
+                    let j = ((ny as u32 * w + nx as u32) * 4) as usize;
+                    let p = &src[j..j + 4];
+                    // Opaque, and not magenta on either test: the colour the shell really is,
+                    // rather than the colour it is mixed with here.
+                    if p[3] > 0 && !is_mark(p) && !is_mark_soft(p) {
+                        samples.push([p[0], p[1], p[2]]);
+                    }
+                }
+            }
+            if samples.is_empty() {
+                continue; // Magenta all the way out: nothing here to take a colour from.
+            }
+            for c in 0..3 {
+                let mut v: Vec<u8> = samples.iter().map(|s| s[c]).collect();
+                v.sort_unstable();
+                rgba[i + c] = v[v.len() / 2];
+            }
+        }
+    }
+}
+
+/// A pixel somebody mixed magenta into, but not enough of it to be the slot: see `clean_mark`.
+fn is_mark_soft(p: &[u8]) -> bool {
+    if p[3] == 0 || is_mark(p) {
+        return false;
+    }
+    p[0].saturating_sub(p[1]) >= MARK_SPREAD && p[2].saturating_sub(p[1]) >= MARK_SPREAD
+}
+
 fn read(path: &Path, tint: bool) -> Option<Art> {
     let (rgba, w, h) = art::decode_rgba(path)?;
     if w < 8 || h < 8 || rgba.len() < (w * h * 4) as usize {
@@ -231,6 +306,10 @@ fn read(path: &Path, tint: bool) -> Option<Art> {
     }
     let mut rgba = rgba;
     bleed_edge(&mut rgba, w, h);
+    // And the magenta the slot's own soft edge left lying outside it, which no amount of covering
+    // the slot can reach: see `clean_mark`. Before `find_label`, because the slot is what is left
+    // once the bleed is gone.
+    clean_mark(&mut rgba, w, h);
     // Note: hardening this alpha was tried and made things worse. A cut-out's antialiased edge is
     // partly transparent, and a side slot draws its cart at 0.7 over a black silhouette, so the
     // silhouette shows through that band as a dark rim on a light theme. Pushing the edge to 0 or
@@ -535,5 +614,54 @@ impl Art {
             w: face_w,
             h: face_h,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Three pixels of one row: the shell, the softened edge of the slot, and the slot itself.
+    ///
+    /// The middle one is half magenta and half shell, which is what an antialiased edge is — too
+    /// magenta to be left alone and not magenta enough to be the slot, which is the whole of why
+    /// it used to show: nothing covers it. It takes the shell's colour and the slot is untouched.
+    #[test]
+    fn the_softened_edge_takes_the_shells_colour() {
+        let mut rgba = vec![
+            40, 40, 40, 255, // The shell it was mixed with.
+            220, 130, 220, 255, // Half of each: wide on red and blue, short of the mark.
+            255, 0, 255, 255, // The slot, which is not ours to touch.
+        ];
+        clean_mark(&mut rgba, 3, 1);
+        assert_eq!(&rgba[4..8], &[40, 40, 40, 255]);
+        assert_eq!(&rgba[8..12], &[255, 0, 255, 255]);
+    }
+
+    /// A pale shell is nowhere near magenta. The test is a *spread* and not a brightness for
+    /// exactly this: every pale cart on the card would be washed to its own colour otherwise.
+    #[test]
+    fn a_grey_shell_is_left_alone() {
+        let mut rgba = vec![200, 200, 200, 255, 210, 205, 208, 255];
+        clean_mark(&mut rgba, 2, 1);
+        assert_eq!(rgba, vec![200, 200, 200, 255, 210, 205, 208, 255]);
+    }
+
+    /// A red is far above its green on the red and not at all on the blue, which is what stops a
+    /// red shell — and a red label, and a red anything — from being called a magenta.
+    #[test]
+    fn a_red_shell_is_left_alone() {
+        let mut rgba = vec![220, 40, 40, 255];
+        clean_mark(&mut rgba, 1, 1);
+        assert_eq!(rgba, vec![220, 40, 40, 255]);
+    }
+
+    /// Magenta all the way out is left as it is: there is no shell beside it to take a colour
+    /// from, and a guess would be a colour the art does not contain.
+    #[test]
+    fn magenta_with_no_shell_beside_it_is_left_alone() {
+        let mut rgba = vec![220, 130, 220, 255];
+        clean_mark(&mut rgba, 1, 1);
+        assert_eq!(rgba, vec![220, 130, 220, 255]);
     }
 }
