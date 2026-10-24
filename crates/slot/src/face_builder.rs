@@ -11,7 +11,16 @@ use slot_store::Cart;
 use slot_ui::{board_face, border_face, cart_face, padded, CartFace, FACE_SCALE, TURN_PAD};
 
 pub struct BuiltFaces {
-    pub stem: String,
+    /// **The cart, not the cart's stem**: a machine and a stem, which is the only form that is
+    /// safe to say "these faces were built for this cart" in — see `App::faces_key`, which is the
+    /// other half of this and has to agree with it exactly.
+    ///
+    /// Called `key` and not `stem` because a stem is not a cart: `Tank (C)` sits on the Game Boy
+    /// shelf and on the Family Computer's, and a lid built for one machine's cart opened over the
+    /// other's is the wrong plastic on the screen with the right name on it. Two builders that
+    /// named this differently is a board that is never found and a picker that opens as a black
+    /// rectangle with no core on it, which is what a mismatch here looks like.
+    pub key: String,
     pub board: CartFace,
     pub lid: CartFace,
 }
@@ -38,7 +47,7 @@ impl FaceBuilder {
                         cart = newer;
                     }
                     let faces = BuiltFaces {
-                        stem: cart.stem.clone(),
+                        key: format!("{}/{}", cart.system().dir_name(), cart.stem),
                         // The back half is this cart's own machine's shell: a Game Boy cart
                         // opens as a portrait cart, and not as an Advance one.
                         board: board_face(&cart, cart.system()),

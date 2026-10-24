@@ -1797,7 +1797,7 @@ fn sync_core_picker(
         return;
     };
     // A build for a cart the caret has since left is dropped; the one it is on is on its way.
-    if highlighted.as_deref() != Some(faces.stem.as_str()) || *built == highlighted {
+    if highlighted.as_deref() != Some(faces.key.as_str()) || *built == highlighted {
         return;
     }
     let board_id = upload_rgba(

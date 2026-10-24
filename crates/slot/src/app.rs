@@ -3971,15 +3971,24 @@ impl App {
                 }
                 // After the row and before the case: it names what the row is showing, so it
                 // belongs to the gap the row leaves rather than to the plastic below it.
-                if let Some((tex, w, _)) = self.shelf_title_face {
-                    out.push(Draw::Tex {
-                        x: (OUT_W as f32 - w as f32) / 2.0,
-                        y: self.shelf_title_y(),
-                        w: w as f32,
-                        h: SHELF_TITLE_H as f32,
-                        tex,
-                        alpha: 1.0,
-                    });
+                //
+                // **Except while a picker is up.** Both of them stand their own line of hints in
+                // that same band — the row's title is centred at `shelf_title_y()` and the hints
+                // at `CORE_LEGEND_Y`, which on a Game Boy cart is 18 pixels of the title's own
+                // forty — and two lines of type in one band is one line too many. The card is
+                // named by what is open over it in any case: a cart lifted out of the row and a
+                // board stood where it was needs no caption underneath.
+                if self.core_picker_shown().is_none() && self.border_picker_shown().is_none() {
+                    if let Some((tex, w, _)) = self.shelf_title_face {
+                        out.push(Draw::Tex {
+                            x: (OUT_W as f32 - w as f32) / 2.0,
+                            y: self.shelf_title_y(),
+                            w: w as f32,
+                            h: SHELF_TITLE_H as f32,
+                            tex,
+                            alpha: 1.0,
+                        });
+                    }
                 }
                 // Last of the shelf's own furniture, because it is printed on the band the
                 // letters are cut into and belongs over it: the clock at one end of the case
