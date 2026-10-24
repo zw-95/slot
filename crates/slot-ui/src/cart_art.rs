@@ -29,12 +29,12 @@ use crate::shell::{Finish, Shell};
 /// Where the card keeps it.
 const DIR: &str = "System/Carts";
 
-/// The magenta the label slot is marked with. The tolerance is generous because the art comes
-/// back through a paint program: `#ff00ff` with green held well below the other two is what
-/// every magenta that is meant as a marker looks like and no shell colour does.
-const MARK_R: u8 = 200;
-const MARK_G: u8 = 60;
-const MARK_B: u8 = 200;
+/// The magenta the label slot is marked with: bright, with green held well down. It comes back
+/// through a paint program, so the edges are tolerance rather than equality — see `MARK_SKEW`
+/// for the half of the test that actually decides it.
+const MARK_R: u8 = 235;
+const MARK_G: u8 = 20;
+const MARK_B: u8 = 235;
 
 /// How bright the plastic is taken to be, as a percentile of its own pixels. Applied as
 /// `colour * (luma / this)`, so anything at or below the reference keeps the shell colour's
@@ -290,10 +290,25 @@ fn find_label(rgba: &[u8], w: u32, h: u32) -> Option<Label> {
     Some(Label { x0, y0, x1, y1, mask })
 }
 
-/// The magenta the card paints where the label slot is. Board art had marks in this colour too,
-/// for the lamps the picker used to fill; that is gone, and this is the label's alone.
+/// How far apart red and blue may sit and still be the marker. Wide enough for a pixel that
+/// came back through the paint program slightly off, narrow enough that no shell reaches it.
+const MARK_SKEW: u8 = 12;
+
+
+/// Every mark of this colour in the art is the label's and nothing else's — board art had marks
+/// in it too, for lamps the picker used to fill, and that is gone.
+///
+/// **Red and blue in equal measure**, which is what tells the marker apart from the shells it
+/// resembles. The old rule rested on green alone — anything red-and-blue with green held well
+/// down — and a pink or a purple shell half satisfies it: wherever either is bright enough it
+/// sails past "green below sixty" and is read as slot. `|r - b|` separates them cleanly: it is
+/// zero for the marker, most of a hundred one way for a pink and as much the other for a purple.
 fn is_mark(p: &[u8]) -> bool {
-    p[3] > 0 && p[0] > MARK_R && p[1] < MARK_G && p[2] > MARK_B
+    p[3] > 0
+        && p[0] > MARK_R
+        && p[1] < MARK_G
+        && p[2] > MARK_B
+        && p[0].abs_diff(p[2]) <= MARK_SKEW
 }
 
 /// The shell's own brightness, ignoring the label slot.
