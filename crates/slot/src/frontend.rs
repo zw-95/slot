@@ -12,14 +12,16 @@ use slot_ui::{
     arrows_hint_face, cart_face, cart_placeholder, cart_shadow, cheat_row_face, chip_face,
     core_dot_face, core_name_face, dialog_line_face, size_for,
     chip_shadow_face, clean_label, clock_face, hhmm, hint_face, icon_face, letters, menu_face,
-    palette_cell_w, palette_name_face, palette_name_h, photo_face, set_clock_hint_face,
-    shelf_folder_face, shelf_title_face, shortcut_hint_face, shortcut_row_face, sticker_face,
+    ff_rate_face, palette_cell_w, palette_name_face, palette_name_h, photo_face,
+    set_clock_hint_face, shelf_count_face, shelf_folder_face, shelf_title_face, shortcut_hint_face,
+    shortcut_row_face, state_slot_face, sticker_face,
     title_face, toast_face, wallpaper_face, word_face, Icon, PowerChoice, StickerFields, Toast,
     ALERT_PX, BOLT_PX, HUD_ICON_PX, LEGEND, PALETTE_FOOT_PX, SHORTCUT_ROWS,
 };
 
 use crate::app::{App, GameRow, LinkRow, Phase, BORDER_FACE_K};
 use crate::build_info::Build;
+use crate::emu::FAST_STEPS;
 use crate::face_builder::{shelf_window, BorderFaceBuilder, FaceBuilder, ShelfFaceFiller};
 use crate::link_start::{LinkFail, LinkStep};
 use crate::root;
@@ -71,6 +73,14 @@ pub struct Frontend {
     /// are, and at no other time.
     shelf_folder_tex: Option<TexId>,
     shelf_foldered: Option<String>,
+    /// The corner's count — which cart of how many — and the words it was built from. Rebuilt
+    /// only when the caret moves or the view changes, which is what the comparison is for.
+    shelf_count_tex: Option<TexId>,
+    shelf_counted: Option<String>,
+    /// The ring place a save came to rest in, and the words it was built from. Built once per
+    /// save at most.
+    save_slot_tex: Option<TexId>,
+    save_slotted: Option<String>,
     /// Builds the open cart's faces off the frame loop.
     faces: FaceBuilder,
     /// Builds the shelf's remaining cart faces off the frame loop, nearest the caret first.
@@ -182,6 +192,10 @@ impl Frontend {
             shelf_titled: None,
             shelf_folder_tex: None,
             shelf_foldered: None,
+            shelf_count_tex: None,
+            shelf_counted: None,
+            save_slot_tex: None,
+            save_slotted: None,
             faces: FaceBuilder::spawn(),
             shelf_faces: ShelfFaceFiller::spawn(),
             shelf_missing: Vec::new(),
@@ -534,6 +548,16 @@ impl Frontend {
             })
             .collect();
         self.session.app_mut().set_toast_faces(toasts);
+        // The rate beside the fast-forward badge: `4x`. The number is the machine's own — how
+        // many times the core is stepped per present — so it is baked once here with the rest of
+        // the fixed type rather than being measured or formatted at run time.
+        let rate = ff_rate_face(&format!("{}x", FAST_STEPS));
+        let rate = (
+            compositor.create_texture(rate.w, rate.h, &rate.rgba),
+            rate.w,
+            rate.h,
+        );
+        self.session.app_mut().set_ff_rate(Some(rate));
         // The cheat table's "this cart has no codes" panel, rasterised at boot like the other
         // fixed strings so opening it never waits on a font.
         let empty = menu_face("NO CHEATS");
@@ -987,6 +1011,18 @@ impl Frontend {
         // cart under the highlight, and walking the row changes it. Cheap — the pass keeps its
         // own answer and does nothing at all until it differs.
         compositor.set_system(self.session.app().screen_system());
+        // The board of fits and the board of apertures both ask for the picture that is up, and
+        // the renderer is the only thing that can hand it over — so the answer is given here,
+        // **before** `frame()` below and not after it.
+        //
+        // `frame()` *takes* the frame out of the buffer, so a `peek` made after it is a peek at
+        // a buffer that was just emptied: it only landed on the frames the core happened to
+        // publish in the few hundred microseconds between the two. Those are rare enough that a
+        // board opened on SELECT+X or SELECT+B stood there empty for about a second before its
+        // thumbnails arrived, which reads as a panel that forgot its own pictures. Asked first,
+        // the frame the core published last is still there and the board is filled on the very
+        // frame it opens.
+        sync_shot(&mut self.session);
         compositor.begin_frame();
         if let Some(frame) = self.session.frame() {
             compositor.upload_game(&frame);
@@ -1004,6 +1040,18 @@ impl Frontend {
             compositor,
             &mut self.shelf_folder_tex,
             &mut self.shelf_foldered,
+        );
+        sync_shelf_count(
+            self.session.app_mut(),
+            compositor,
+            &mut self.shelf_count_tex,
+            &mut self.shelf_counted,
+        );
+        sync_save_slot(
+            self.session.app_mut(),
+            compositor,
+            &mut self.save_slot_tex,
+            &mut self.save_slotted,
         );
         sync_core_picker(
             self.session.app_mut(),
@@ -1052,9 +1100,8 @@ impl Frontend {
             &mut self.aperture_paged,
         );
         sync_overlay(self.session.app_mut(), compositor);
-        // The board of fits asks the renderer for the frame that is up, and the renderer is the
-        // only thing that can hand it over — so the answer is given here, between passes.
-        sync_shot(&mut self.session);
+        // (`sync_shot` used to stand here, after `frame()` had already taken the frame: see the
+        // call above `begin_frame`.)
         sync_fit_thumbs(
             self.session.app_mut(),
             compositor,
@@ -1335,6 +1382,61 @@ fn sync_shelf_folder(
             app.set_shelf_folder_face(Some((id, w, h)));
         }
         None => app.set_shelf_folder_face(None),
+    }
+}
+
+/// The corner's count: which cart of how many, beside the favourites star.
+///
+/// The same deal as the two lines above it — a comparison per frame, and a rasterise only when
+/// the words change. They change on every step of the row, which is the one thing a long library
+/// does constantly, so this is the line that most needs the comparison to be cheap: `text::fit`
+/// on four characters is not free, and the caret can be held down.
+fn sync_shelf_count(
+    app: &mut App,
+    compositor: &mut Compositor,
+    slot: &mut Option<TexId>,
+    shown: &mut Option<String>,
+) {
+    let want = app.shelf_count_text();
+    if *shown == want {
+        return;
+    }
+    *shown = want.clone();
+    match want {
+        Some(text) => {
+            let face = shelf_count_face(&text);
+            let (w, h) = (face.w, face.h);
+            let id = upload(compositor, slot, face);
+            app.set_shelf_count_face(Some((id, w, h)));
+        }
+        None => app.set_shelf_count_face(None),
+    }
+}
+
+/// The number beside the HUD's save line: which place in the ring the save came to rest in.
+///
+/// Built when the app names one, which is once per save. The words are held rather than the
+/// texture being re-uploaded every frame — and the HUD is the one that drops it when the line it
+/// belongs to is replaced, so a number never outlives its sentence.
+fn sync_save_slot(
+    app: &mut App,
+    compositor: &mut Compositor,
+    slot: &mut Option<TexId>,
+    shown: &mut Option<String>,
+) {
+    let want = app.save_slot_text().map(str::to_string);
+    if *shown == want {
+        return;
+    }
+    *shown = want.clone();
+    match want {
+        Some(text) => {
+            let face = state_slot_face(&text);
+            let (w, h) = (face.w, face.h);
+            let id = upload(compositor, slot, face);
+            app.set_save_slot_face(Some((id, w, h)));
+        }
+        None => app.set_save_slot_face(None),
     }
 }
 

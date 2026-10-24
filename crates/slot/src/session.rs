@@ -234,6 +234,19 @@ impl Session {
             Action::FfStart => self.fast = true,
             Action::FfStop => self.fast = false,
             Action::CheatToggle => {
+                // SELECT+A is a **running cart's** chord: the table is that cart's codes, and
+                // there is no cart seated on the shelf. It opened over the row as well, where
+                // the chord means nothing and what came up was a list of cheats for a machine
+                // that was not running — the shelf behind it still showing, and A on a row of
+                // codes that belong to nothing on screen. On the shelf the chord is now nothing
+                // at all, which is what every other key that needs a seated cart is there.
+                //
+                // The phase and not `playing()`: the table is itself an overlay, so by the time
+                // the second press arrives to flip every code at once this device is "held" —
+                // and that press is the one the table exists for.
+                if !matches!(self.app.phase(), Phase::Playing { .. }) {
+                    return;
+                }
                 // SELECT+A opens the cheat table (the browsable, per-code list) rather than only
                 // flipping a master flag. Pressed again while the table is up it flips every code
                 // at once — the old master toggle, now reachable from inside.

@@ -36,6 +36,10 @@ const ICON_GAP: f32 = 10.0;
 
 /// The badge sits in the corner the bar never reaches, so the two never have to negotiate.
 const BADGE_MARGIN: f32 = 12.0;
+/// Between the badge and the rate read beside it.
+const RATE_GAP: f32 = 6.0;
+/// Between a save's line and the ring place beside it.
+const SLOT_GAP: f32 = 8.0;
 
 const BAR_W: f32 = 320.0;
 const BAR_H: f32 = 6.0;
@@ -132,6 +136,13 @@ pub struct Hud {
     icons: Vec<TexId>,
     /// One face per toast, in `Toast::ALL` order.
     toasts: Vec<TexId>,
+    /// Fast forward's rate, read beside the badge. Uploaded once with the rest of the fixed
+    /// furniture: the rate is a constant of the machine, not a setting.
+    ff_rate: Option<(TexId, u32, u32)>,
+    /// What a save's line is followed by: which place in the ring it came to rest in. Set with
+    /// the toast it belongs to and dropped with it, so a number is never left standing beside a
+    /// line that is no longer about a save.
+    slot_note: Option<(TexId, u32, u32)>,
 }
 
 impl Hud {
@@ -148,8 +159,24 @@ impl Hud {
         self.toasts = toasts;
     }
 
+    /// Fast forward's rate. `None` keeps the badge exactly where it has always stood.
+    pub fn set_ff_rate(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.ff_rate = face;
+    }
+
+    /// The number beside a save's line, and only beside a save's line. Passed `None` to take it
+    /// away again.
+    pub fn set_slot_note(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.slot_note = face;
+    }
+
     pub fn toast(&mut self, toast: Toast, now: Millis) {
         self.said = Some((toast, now));
+        // A number standing beside "State Saved" would be a lie beside anything else, and the
+        // HUD is the only thing that knows when the line it belongs to has been replaced.
+        if !matches!(toast, Toast::StateSaved | Toast::StateLoaded) {
+            self.slot_note = None;
+        }
     }
 
 
@@ -276,14 +303,33 @@ impl Hud {
         };
         let (w, h) = icon_box(HUD_ICON_PX);
         let (w, h) = (w as f32, h as f32);
+        // The rate is read to the badge's right, so the badge itself steps left to make room.
+        // Both are right-aligned on the corner, so a badge with no rate beside it lands exactly
+        // where a badge has always stood.
+        let (rw, rh) = self
+            .ff_rate
+            .map(|(_, rw, rh)| (rw as f32, rh as f32))
+            .unwrap_or((0.0, 0.0));
+        let gap = if rw > 0.0 { RATE_GAP } else { 0.0 };
+        let right = OUT_W as f32 - BADGE_MARGIN;
         out.push(Draw::Tex {
-            x: OUT_W as f32 - BADGE_MARGIN - w,
+            x: right - rw - gap - w,
             y: top + (PLATE_H - h) / 2.0,
             w,
             h,
             tex,
             alpha: 1.0,
         });
+        if let Some((tex, _, _)) = self.ff_rate {
+            out.push(Draw::Tex {
+                x: right - rw,
+                y: top + (PLATE_H - rh) / 2.0,
+                w: rw,
+                h: rh,
+                tex,
+                alpha: 1.0,
+            });
+        }
     }
 
     /// No placeholder. A toast is type, and absent type is absent rather than a bar sitting
@@ -311,6 +357,18 @@ impl Hud {
             tex,
             alpha,
         });
+        // And, beside a save's line, which place in the ring it came to rest in — see
+        // `state_slot_face`. On the line's own alpha, so the two leave together.
+        if let Some((tex, nw, nh)) = self.slot_note {
+            out.push(Draw::Tex {
+                x: x + w + SLOT_GAP,
+                y: top + y + (h - nh as f32) / 2.0,
+                w: nw as f32,
+                h: nh as f32,
+                tex,
+                alpha,
+            });
+        }
     }
 
     fn icon(&self) -> Option<TexId> {

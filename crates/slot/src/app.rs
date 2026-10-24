@@ -827,6 +827,10 @@ impl DisplayFilter {
     ///
     /// Split out of `applied_mask` because the board needs it of every look on its ring, not only
     /// of the one that is up: the seven cells are these seven tables, drawn side by side.
+    /// Nothing: the look a cart wears before anybody picks one, and the only one a Game Boy or a
+    /// Game Boy Color is left to its own shader for — see `App::mesh_in_shader`.
+    pub const MASK_OFF: u8 = 0;
+
     fn preset_mask(&self, preset: u8) -> [[[u8; 3]; 3]; 3] {
         match preset {
             0 => Self::FLAT_MASK,
@@ -891,21 +895,22 @@ impl DisplayFilter {
         self.mask_mode = ring[(at + 1) % ring.len()];
     }
 
-    /// The presets `SELECT+X` walks on a machine, in order.
+    /// The presets `SELECT+X` walks on a machine, in order: **all seven, on every machine.**
     ///
-    /// Not every machine can wear all seven: the LCD3x table is one RGB triad per *source*
-    /// pixel, which is only a structure where a source pixel covers 3x3 panel pixels. On a
-    /// machine whose source pixel covers 2x2 it is sampled at three points out of its own
-    /// grid and comes out as noise, so those machines get the two presets that are made of
-    /// whole rows instead of of triads — nothing at all, and the scanline at two strengths.
+    /// They were rationed once — three for every machine but the Advance — and the reason was
+    /// real: the LCD3x table is one RGB triad per *source* pixel, which is only a structure
+    /// where a source pixel covers 3x3 panel pixels, and on a machine whose pixel covers 2x2
+    /// it is sampled at three points out of its own grid and comes out as noise. But a machine
+    /// that is handed three looks and wants the fourth has no way to ask, and "this one may
+    /// not suit you" is a judgement the player is better placed to make than the table is —
+    /// the whole point of a board is that the seven are drawn side by side over the game that
+    /// is up, so a look that is noise here is *seen* as noise in one glance and stepped past.
     ///
-    /// Game Boy and Game Boy Color never come through here at all: their `SELECT+X` walks the
-    /// overlay ring, and they are on `flat` besides.
-    fn mask_ring(machine: System) -> &'static [u8] {
-        match machine {
-            System::Gba => &[0, 1, 2, 3, 4, 5, 6],
-            _ => &[0, 5, 6],
-        }
+    /// Game Boy and Game Boy Color reach this through the board rather than through the tap:
+    /// their `SELECT+X` walks the overlay ring, which is the art they have and the Advance does
+    /// not. The hold opens the board on either machine.
+    fn mask_ring(_machine: System) -> &'static [u8] {
+        &[0, 1, 2, 3, 4, 5, 6]
     }
     /// Step the colour correction of one of the **colour** machines, wrapping at the end of its
     /// list of three (grayscale, AGB-001, NDS).
@@ -1015,6 +1020,8 @@ const SHELF_IND_LEFT: f32 = 20.0;
 /// How tall the bottom-right favourites indicator is drawn. Enlarged on request, to match the
 /// mark a favourite cart wears.
 const FAV_IND_DRAW: f32 = 36.0;
+/// Between the favourites star and the count read to its left.
+const COUNT_GAP: f32 = 8.0;
 /// The top band's own margin: the distance the clock and the battery reading are printed in from
 /// their edges. Repeated here so the two bottom corner marks can stand in the same columns as the
 /// two readings above them.
@@ -1106,6 +1113,13 @@ pub struct App {
     /// The shelf's indicator, unlit and lit: the same star hollow while the ordinary shelf is
     /// up and solid while the favourites are.
     fav_ind: Option<((TexId, u32, u32), (TexId, u32, u32))>,
+    /// Which cart of how many the caret is on — `12 / 137` — for the corner beside the
+    /// favourites star. Named here and rasterised by the frontend, the way the shelf's other
+    /// two lines of type are.
+    shelf_count_face: Option<(TexId, u32, u32)>,
+    /// Which place in the ring a save came to rest in: `3 / 10`. Named here, rasterised by the
+    /// frontend, and handed to the HUD to stand beside the line it belongs to.
+    save_slot_text: Option<String>,
     /// The last refused action, and the only thing that tells an eject apart from a cart
     /// that would not seat: both leave down the same path.
     refusal: Option<Refusal>,
@@ -1471,6 +1485,8 @@ impl App {
             sys_held: None,
             fav_star: None,
             fav_ind: None,
+            shelf_count_face: None,
+            save_slot_text: None,
             refusal: None,
             refused_from: None,
             alert_face: None,
@@ -1672,8 +1688,22 @@ impl App {
     /// (`display_grid`) — which is also why it can be *white*, since a multiply table can only
     /// ever darken. The Advance, which has no overlay to hang a mesh off, is on the table.
     pub fn display_mask(&self) -> [[[u8; 3]; 3]; 3] {
-        self.display
-            .applied_mask(matches!(self.current_machine(), System::Gb | System::Gbc))
+        self.display.applied_mask(self.mesh_in_shader())
+    }
+
+    /// Whether the machine's own mesh should be left to the game shader, and the aperture table
+    /// held neutral: **while the look in hand is off**, which is what these machines have always
+    /// worn.
+    ///
+    /// It used to be "a Game Boy or a Game Boy Color, whatever is chosen", which made every look
+    /// on their ring a dead option — the board offered seven and the picture answered with the
+    /// shader's mesh whichever one was picked, so choosing was indistinguishable from not
+    /// choosing. Now a chosen look is applied like any other machine's, and *off* is the one
+    /// state that still falls back to the shader: the mesh drawn there is made of the picture's
+    /// own four shades, which the table cannot be, so it is the better off.
+    fn mesh_in_shader(&self) -> bool {
+        matches!(self.current_machine(), System::Gb | System::Gbc)
+            && self.display.mask_mode == DisplayFilter::MASK_OFF
     }
 
     /// The Game Boy's four shades right now, whichever of the two tables they came from: a model's
@@ -4963,6 +4993,19 @@ impl App {
             tex,
             alpha: 1.0,
         });
+        // And which cart of how many, to its left. The corner already says what kind of list is
+        // up — hollow for the library, lit for the favourites — and this is the reading that was
+        // missing from it: a row that can be walked from either end owes the player its length.
+        if let Some((tex, cw, ch)) = self.shelf_count_face {
+            out.push(Draw::Tex {
+                x: ind_x - COUNT_GAP - cw as f32,
+                y: y + (sh - ch as f32) / 2.0,
+                w: cw as f32,
+                h: ch as f32,
+                tex,
+                alpha: 1.0,
+            });
+        }
     }
 
     fn eject(&mut self) {
@@ -5501,10 +5544,10 @@ impl App {
     /// through one press at a time, and comparing two of them means going round again to get back to
     /// the first.
     ///
-    /// Refused rather than ignored on a Game Boy and a Game Boy Color: their mask key belongs to
-    /// their overlay art instead — SELECT+X there walks three models of the machine's own case — so
-    /// a board of apertures would be offering looks that machine does not wear. Refused, so the hold
-    /// still reads as answered.
+    /// Open on every machine, a Game Boy and a Game Boy Color included: the ring is the same seven
+    /// looks everywhere now, and the board is how a machine that walks something else with the tap
+    /// gets at them. The tap is unchanged there — it still walks the models of the machine's own
+    /// case, art no other machine has — so the hold is the way in rather than a way round.
     fn open_aperture_browser(&mut self) {
         if self.aperture.is_some() {
             return;
@@ -5512,10 +5555,10 @@ impl App {
         if !matches!(self.phase, Phase::Playing { .. }) {
             return;
         }
-        if matches!(self.current_machine(), System::Gb | System::Gbc) {
-            self.refuse();
-            return;
-        }
+        // A Game Boy and a Game Boy Color get the board too, which they did not: their ring is
+        // every look the Advance has (see `mask_ring`), and the board is the only way to see them
+        // side by side over the game. Their tap still walks the overlay ring — art they have and
+        // the Advance does not — so nothing was taken away to make room for this.
         let ring = DisplayFilter::mask_ring(self.current_machine());
         let at = ring
             .iter()
@@ -5540,8 +5583,8 @@ impl App {
         self.aperture_thumbs.clear();
     }
 
-    /// How many entries the board's table has: the machine's own ring, which is what a machine can
-    /// wear and nothing more — an Advance's seven looks, a Super Nintendo's three.
+    /// How many entries the board's table has: the machine's own ring, which is every look there
+    /// is on every machine — see `mask_ring`.
     fn board_total(&self) -> usize {
         DisplayFilter::mask_ring(self.current_machine()).len()
     }
@@ -6726,6 +6769,14 @@ impl App {
             eprintln!("slot: save: {e}");
             return;
         }
+        // Which place in the ring this one came to rest in, for the line that follows. Read
+        // *after* the push, so it is the ring's own answer rather than a guess at one: the
+        // tenth save is the one that starts costing an older one, and saying so on the line is
+        // the only warning the player gets.
+        self.save_slot_text = ring
+            .list()
+            .ok()
+            .map(|l| format!("{} / {}", l.len(), RING_MAX));
         self.hud.toast(Toast::StateSaved, self.now());
         self.pending = Some((PendingUndo::Save { stamp, evicted }, self.now()));
     }
@@ -6767,6 +6818,39 @@ impl App {
         if let Some(p) = &mut self.polaroids {
             p.set_hint_faces(faces);
         }
+    }
+
+    /// The shelf's place in its own list, as words: `12 / 137`.
+    ///
+    /// Counted in the **view** and not in the library, because the favourites shelf is a subset
+    /// of the card and a count out of every cart on it would read "12 of 900" on a shelf showing
+    /// six. One-based, because that is how somebody standing in a row counts it.
+    pub fn shelf_count_text(&self) -> Option<String> {
+        let cart = self.shelf.current_cart()?;
+        let at = self.shelf.index_of_stem(&cart.stem)?;
+        let total = self.shelf.view_len();
+        (total > 0).then(|| format!("{} / {}", at + 1, total))
+    }
+
+    pub fn set_shelf_count_face(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.shelf_count_face = face;
+    }
+
+    /// Which place in the ring the last save came to rest in, as words. `None` until one has.
+    pub fn save_slot_text(&self) -> Option<&str> {
+        self.save_slot_text.as_deref()
+    }
+
+    /// The number beside the HUD's save line. Handed straight to the HUD, which is the only
+    /// thing that knows when the line it belongs to has been replaced by another.
+    pub fn set_save_slot_face(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.hud.set_slot_note(face);
+    }
+
+    /// Fast forward's rate, read beside the badge: `4x`. Uploaded once at boot, the way the
+    /// icons are — the rate is a property of the machine and not something a player steps.
+    pub fn set_ff_rate(&mut self, face: Option<(TexId, u32, u32)>) {
+        self.hud.set_ff_rate(face);
     }
 
     /// The mark a favourite wears, and the corner indicator on the ordinary shelf and in the

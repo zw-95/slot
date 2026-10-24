@@ -317,6 +317,51 @@ pub fn shelf_folder_face(text: &str) -> UndoFace {
     line_face(text, FOLDER_PX, FOLDER_MIN_PX, FOLDER_MAX_W)
 }
 
+/// The shelf's place in its own list: `12 / 137` — which cart the caret is on, out of how many
+/// the row is showing.
+///
+/// Read to the left of the favourites star. Not because that corner needed filling but because
+/// it is the corner that already says what kind of list is up: hollow for the library, lit for
+/// the favourites — and a row you can walk from either end is the only thing on the screen that
+/// owes the player an answer to *how long the walk is*. A hundred and thirty seven carts with no
+/// count on them is a row with no end in sight.
+const COUNT_PX: f32 = 18.0;
+/// Shrunk rather than clipped: a card holding four figures' worth of carts has to fit the corner
+/// too, and a count that ran under the star would be worse than a small one.
+const COUNT_MIN_PX: f32 = 12.0;
+const COUNT_MAX_W: f32 = 104.0;
+
+pub fn shelf_count_face(text: &str) -> UndoFace {
+    line_face(text, COUNT_PX, COUNT_MIN_PX, COUNT_MAX_W)
+}
+
+/// The rate fast forward runs the core at, read beside the badge: `4x`.
+///
+/// One face for the whole session, because the rate is a property of the machine and not a
+/// setting — see `FAST_STEPS`. What the player chooses is *whether* the core is being run fast,
+/// and that is the badge's own job: hollow while the finger is down, solid once it is latched.
+const FF_RATE_PX: f32 = 20.0;
+const FF_RATE_MIN_PX: f32 = 14.0;
+const FF_RATE_MAX_W: f32 = 64.0;
+
+pub fn ff_rate_face(text: &str) -> UndoFace {
+    line_face(text, FF_RATE_PX, FF_RATE_MIN_PX, FF_RATE_MAX_W)
+}
+
+/// Which place in the ring a save came to rest in, said beside `State Saved`: `3 / 10`.
+///
+/// The ring holds ten, newest first, and a save that would be an eleventh evicts the oldest to
+/// make room. So the number is not a slot number — there are no slots — it is *how much of the
+/// ring is now written in*, which is the figure a player about to press the key again wants: at
+/// `10 / 10` the next save is no longer free.
+const SLOT_PX: f32 = 20.0;
+const SLOT_MIN_PX: f32 = 14.0;
+const SLOT_MAX_W: f32 = 72.0;
+
+pub fn state_slot_face(text: &str) -> UndoFace {
+    line_face(text, SLOT_PX, SLOT_MIN_PX, SLOT_MAX_W)
+}
+
 /// The shelf's line of type: the game under the eye, for the screen below the row. Cut from
 /// the cart's own name rather than the raw filename, so what is set here and what is printed
 /// on the cart are the same words — `slot_store::clean_label` is the one place that decides which
