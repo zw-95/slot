@@ -118,6 +118,13 @@ pub struct Frontend {
     aperture_thumb_texes: Vec<Option<TexId>>,
     /// Which frame and which page those were minted from.
     aperture_thumb_key: Option<u64>,
+    /// The board of screen frames' cells: the game inside each frame, one texture per frame.
+    overlay_thumb_texes: Vec<Option<TexId>>,
+    /// Which frame those were minted from.
+    overlay_thumb_key: Option<u64>,
+    /// The board of screen frames' names, and what they were last rasterised for.
+    overlay_name_texes: Vec<Option<TexId>>,
+    overlay_names_shown: Option<(System, usize)>,
     clocks: Clocks,
     about: AboutFace,
     /// The palette browser's names. A page is read one of two ways and the fields are that pair:
@@ -215,6 +222,10 @@ impl Frontend {
             fit_thumb_key: None,
             aperture_thumb_texes: Vec::new(),
             aperture_thumb_key: None,
+            overlay_thumb_texes: Vec::new(),
+            overlay_thumb_key: None,
+            overlay_name_texes: Vec::new(),
+            overlay_names_shown: None,
             clocks: Clocks::default(),
             about: AboutFace::default(),
             palette_texes: Vec::new(),
@@ -1137,6 +1148,18 @@ impl Frontend {
             &mut self.aperture_thumb_texes,
             &mut self.aperture_thumb_key,
         );
+        sync_overlay_thumbs(
+            self.session.app_mut(),
+            compositor,
+            &mut self.overlay_thumb_texes,
+            &mut self.overlay_thumb_key,
+        );
+        sync_overlay_names(
+            self.session.app_mut(),
+            compositor,
+            &mut self.overlay_name_texes,
+            &mut self.overlay_names_shown,
+        );
         // The screen reflection: handed the overlay texture as its zone mask when the overlay
         // up is a reflective one, `None` otherwise. Set every frame with the rest of the state.
         compositor.set_reflection(if self.session.app().overlay_reflects() {
@@ -1557,6 +1580,52 @@ fn sync_fit_thumbs(
     if let Some(ids) = sync_thumbs(want, || app.fit_thumb_faces(), compositor, pool, key) {
         app.set_fit_thumbs(ids);
     }
+}
+
+/// The board of screen frames' cells: the game that is up, inside each frame the machine can
+/// wear. Minted once per opening, like the fits'.
+fn sync_overlay_thumbs(
+    app: &mut App,
+    compositor: &mut Compositor,
+    pool: &mut Vec<Option<TexId>>,
+    key: &mut Option<u64>,
+) {
+    let want = app.overlay_thumb_key();
+    if let Some(ids) = sync_thumbs(want, || app.overlay_thumb_faces(), compositor, pool, key) {
+        app.set_overlay_thumbs(ids);
+    }
+}
+
+/// The board of screen frames' names. Rasterised when the board opens rather than at boot, being
+/// the card's own filenames: a card edited on a PC renames one, and a name minted at boot would
+/// be the old one for the whole of a session.
+fn sync_overlay_names(
+    app: &mut App,
+    compositor: &mut Compositor,
+    pool: &mut Vec<Option<TexId>>,
+    shown: &mut Option<(System, usize)>,
+) {
+    let key = app.overlay_names_key();
+    if *shown == key {
+        return;
+    }
+    *shown = key;
+    if key.is_none() {
+        app.set_overlay_board_names(Vec::new());
+        return;
+    }
+    let (w, h) = (palette_cell_w(), palette_name_h());
+    let names = app.overlay_board_names();
+    let mut faces = Vec::with_capacity(names.len());
+    for (i, name) in names.iter().enumerate() {
+        let face = palette_name_face(name, w, h);
+        while pool.len() <= i {
+            pool.push(None);
+        }
+        let id = upload_rgba(compositor, &mut pool[i], w, h, &face.rgba);
+        faces.push((id, w, h));
+    }
+    app.set_overlay_board_names(faces);
 }
 
 /// The two boards whose cells are pictures share this: mint them when the key changes, into the

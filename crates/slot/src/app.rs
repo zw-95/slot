@@ -1460,6 +1460,19 @@ pub struct App {
     /// The three fits' thumbnails: the frame that is up, on the panel at each fit. Empty until the
     /// frontend has minted them, which is the frame after the board opens — see `View::thumbs`.
     fit_thumbs: Vec<(TexId, u32, u32)>,
+    /// The board of **screen frames**, opened by holding SELECT+X on a machine that wears them:
+    /// one number and one page, the same shape the fits' board and the looks' board have.
+    ///
+    /// A Game Boy's frames are its three models and the card's own files; a Game Boy Color's are
+    /// the card's own. The one machine that ships no frame — the Advance — answers the same hold
+    /// with its apertures instead, which is the same question asked of a different dial.
+    overlay_board: Option<usize>,
+    /// The frames' names, one face each. Rasterised when the board opens and not at boot: unlike
+    /// the three fits, these are the card's own filenames, which a card edited on a PC changes.
+    overlay_names: Vec<(TexId, u32, u32)>,
+    /// The frames' cells: **the game that is up, inside each frame** — the picture the board is a
+    /// board of. Empty until the frontend has minted them, as the fits' are.
+    overlay_thumbs: Vec<(TexId, u32, u32)>,
     /// The board of looks' cells, one face per entry **on the page that is up**: the frame under
     /// each of this machine's apertures. Empty for the same reason and with the same fallback.
     aperture_thumbs: Vec<(TexId, u32, u32)>,
@@ -1640,6 +1653,9 @@ impl App {
             shot_seq: 0,
             fit_thumbs: Vec::new(),
             aperture_thumbs: Vec::new(),
+            overlay_board: None,
+            overlay_names: Vec::new(),
+            overlay_thumbs: Vec::new(),
             pal_name: None,
         }
     }
@@ -3104,6 +3120,15 @@ impl App {
                 _ => return self.fit_board_input(action),
             }
         }
+        // The board of screen frames is the fifth of the same modal, and the one the machines with
+        // a frame of their own answer SELECT+X with.
+        if self.overlay_board.is_some() {
+            match action {
+                Action::LidClose => return self.doze(),
+                Action::LidOpen => return self.wake(),
+                _ => return self.overlay_board_input(action),
+            }
+        }
         // The lid, the light and the sound belong to the device rather than to whatever is
         // on screen, so they are taken before the phase gets a look at the action.
         match action {
@@ -3284,7 +3309,14 @@ impl App {
                 // held, SELECT+X lays the whole ring out — every look this machine can wear — and
                 // the arrows and shoulders move around it. **Tapped it still steps**, so one key
                 // keeps both ways of finding a look. See `slot_input::gesture::MASK_HOLD_MS`.
-                Action::MaskHold => self.open_aperture_browser(),
+                // Which ring the hold lays out is **whichever ring this machine has**: a Game Boy
+                // and a Game Boy Color wear a frame round the screen, and the Advance has no frame
+                // at all — its screen looks are the aperture presets. One key, and the board is of
+                // the dial the machine up actually carries.
+                Action::MaskHold => match self.current_machine() {
+                    System::Gb | System::Gbc => self.open_overlay_board(),
+                    _ => self.open_aperture_browser(),
+                },
                 Action::ColorCycle => self.cycle_cc(),
                 // The long half of the same key. Held, SELECT+Y opens the browser; tapped, it
                 // walks the page. Both machines want it: a Game Boy's table is hundreds long and
@@ -4016,6 +4048,7 @@ impl App {
                 self.draw_palette_browser(out);
                 self.draw_aperture_browser(out);
                 self.draw_fit_board(out);
+                self.draw_overlay_board(out);
             }
             // The paused game stays underneath, covered by the screenshot the switcher
             // draws over the whole screen.
@@ -6045,6 +6078,247 @@ impl App {
 
     pub fn set_fit_names(&mut self, faces: Vec<(TexId, u32, u32)>) {
         self.fit_names = faces;
+    }
+
+    // -----------------------------------------------------------------------------------
+    // The board of screen frames (SELECT+X held, on a machine that wears them)
+    // -----------------------------------------------------------------------------------
+
+    /// The frames this machine can wear, **one entry per look**: a name and the sheet it is drawn
+    /// from.
+    ///
+    /// A Game Boy Color's ring carries every look `GBC_GRID_STATES` times — the mesh is a state of
+    /// the frame and not a setting beside it — and the board is a board of frames. Three cells of
+    /// one art differing only in a mesh is three cells the eye has to read to find the one it
+    /// wants, so there is one cell per look, and choosing one **keeps the mesh that is up**: the
+    /// board is not the place that question is asked, and the key that walks the ring still asks
+    /// it.
+    fn overlay_looks(&self) -> Vec<(String, Option<std::path::PathBuf>)> {
+        let mut out = Vec::new();
+        let Some(root) = self.root.clone() else {
+            return out;
+        };
+        // A Game Boy's three models come first, being what every cart wears until the card
+        // supplies its own.
+        if self.overlay_slot == 0 {
+            for (name, _) in crate::palettes::GB_MODELS {
+                out.push((
+                    (*name).to_string(),
+                    crate::root::model_overlay(&root, "gb", name),
+                ));
+            }
+        }
+        for file in &self.overlay_list {
+            let name = file
+                .path
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_else(|| "Screen".into());
+            out.push((name, Some(file.path.clone())));
+        }
+        out
+    }
+
+    /// Which of those looks the machine is wearing. The same number as the ring's step on a Game
+    /// Boy, and the ring's step over `GBC_GRID_STATES` on a Game Boy Color.
+    fn overlay_look(&self) -> usize {
+        if self.overlay_slot == 1 {
+            self.overlay_index / DisplayFilter::GBC_GRID_STATES
+        } else {
+            self.overlay_index
+        }
+    }
+
+    /// Which step of the key's ring a look stands at, keeping the mesh that is up.
+    fn overlay_step(&self, look: usize) -> usize {
+        if self.overlay_slot == 1 {
+            look * DisplayFilter::GBC_GRID_STATES
+                + (self.overlay_index % DisplayFilter::GBC_GRID_STATES)
+        } else {
+            look
+        }
+    }
+
+    /// Put a look on, by the same path the tap takes: written to the card, and the live set
+    /// swapped so it is on screen now rather than at the next insert.
+    fn wear_overlay_look(&mut self, look: usize) {
+        let Some(system) = self.shelf.current_cart().map(|c| c.system()) else {
+            return;
+        };
+        let slot = match system {
+            System::Gb => 0,
+            System::Gbc => 1,
+            _ => return,
+        };
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let list = crate::root::overlay_files(&root, if slot == 0 { "gb" } else { "gbc" });
+        let choices = Self::overlay_choices(slot, list.len());
+        if choices == 0 {
+            return;
+        }
+        let step = self.overlay_step(look).min(choices - 1);
+        self.overlay_indices[slot] = step;
+        crate::root::write_overlay_indices(&root, self.overlay_indices);
+        self.overlay_list = list;
+        self.overlay_slot = slot;
+        self.overlay_index = step;
+        self.refresh_overlay_pixels();
+    }
+
+    /// The hold half of SELECT+X on a machine that wears frames: the board, opened on the frame
+    /// that is actually up. **Tapped, the same key still steps the ring** — see `overlay_next`.
+    ///
+    /// Which is the whole of what makes this the same key as the aperture board's: a machine with
+    /// frames lays out its frames, a machine without lays out its apertures, and the board is
+    /// whichever dial this machine actually has.
+    fn open_overlay_board(&mut self) {
+        if self.overlay_board.is_some() {
+            return;
+        }
+        if !matches!(self.phase, Phase::Playing { .. }) {
+            return;
+        }
+        let looks = self.overlay_looks();
+        // One frame is not a choice, and a card that ships none has nothing to lay out: both are
+        // silent, the way a one-entry ring is silent under the tap.
+        if looks.len() < 2 {
+            return;
+        }
+        self.overlay_board = Some(self.overlay_look().min(looks.len() - 1));
+        // And asking for the frame, because a cell is *this game* inside this frame — a board of
+        // last week's picture would be lying about the difference between two sheets of art.
+        self.want_shot = true;
+    }
+
+    fn close_overlay_board(&mut self) {
+        self.overlay_board = None;
+        self.want_shot = false;
+        // The cells go with it, being of a frame that has moved on; the next opening takes its
+        // own. The names stay, being the card's filenames rather than anything about the game.
+        self.overlay_thumbs.clear();
+    }
+
+    /// The board owns every button on the game's side while it is up, exactly as the other three
+    /// do: the arrows move the caret, A wears the frame under it and B leaves without one.
+    fn overlay_board_input(&mut self, action: Action) {
+        let Some(cursor) = self.overlay_board else {
+            return;
+        };
+        let n = self.overlay_looks().len();
+        if n == 0 {
+            return;
+        }
+        match action {
+            Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
+                self.overlay_board = Some((cursor + n - 1) % n)
+            }
+            Action::GbaDown(Btn::Right) | Action::ShelfRight => {
+                self.overlay_board = Some((cursor + 1) % n)
+            }
+            Action::GbaDown(Btn::Up) => self.overlay_board = Some((cursor + n - 1) % n),
+            Action::GbaDown(Btn::Down) => self.overlay_board = Some((cursor + 1) % n),
+            Action::GbaDown(Btn::A) => {
+                self.wear_overlay_look(cursor.min(n - 1));
+                self.close_overlay_board();
+            }
+            Action::GbaDown(Btn::B) => self.close_overlay_board(),
+            _ => {}
+        }
+    }
+
+    /// Which frame the board has under its caret, and `None` while it is shut: the same reading
+    /// the other boards give of themselves, for the same caller.
+    pub fn overlay_board_cursor(&self) -> Option<usize> {
+        self.overlay_board
+    }
+
+    /// What the board's cells are made of, which is how the frontend knows to mint them: `None`
+    /// while there is nothing to draw, and a new number for every new frame.
+    pub fn overlay_thumb_key(&self) -> Option<u64> {
+        match (self.overlay_board, self.shot.as_ref()) {
+            (Some(_), Some(_)) => Some(self.shot_seq),
+            _ => None,
+        }
+    }
+
+    /// The cells: **the game that is up, inside each frame** — the frame's own art laid over the
+    /// panel the way it is laid over the screen, so a cell is the thing a player choosing between
+    /// two frames is actually choosing between.
+    pub fn overlay_thumb_faces(&self) -> Option<Vec<slot_ui::CartFace>> {
+        let _board = self.overlay_board?;
+        let (rgba, w, h) = self.shot.as_ref()?;
+        let rect = self.screen_system().screen_rect(self.display_fit());
+        let (cw, ch) = (slot_ui::palette_cell_w(), slot_ui::palette_cell_h(1, true));
+        Some(
+            self.overlay_looks()
+                .into_iter()
+                .map(|(_, path)| {
+                    let art = path.as_deref().and_then(slot_ui::decode_rgba);
+                    slot_ui::thumb::overlay_thumb(
+                        Some((rgba, *w, *h)),
+                        rect,
+                        art.as_ref().map(|(p, aw, ah)| (p.as_slice(), *aw, *ah)),
+                        cw,
+                        ch,
+                    )
+                })
+                .collect(),
+        )
+    }
+
+    pub fn set_overlay_thumbs(&mut self, thumbs: Vec<(TexId, u32, u32)>) {
+        self.overlay_thumbs = thumbs;
+    }
+
+    /// The frames' names, for the frontend to rasterise when the board opens.
+    pub fn overlay_board_names(&self) -> Vec<String> {
+        self.overlay_looks().into_iter().map(|(n, _)| n).collect()
+    }
+
+    /// What those names are keyed on: the board being up, which machine's frames they are, and
+    /// how many there are. The caret is *not* part of it — moving it re-rasterises nothing.
+    pub fn overlay_names_key(&self) -> Option<(System, usize)> {
+        let _board = self.overlay_board?;
+        Some((self.current_machine(), self.overlay_looks().len()))
+    }
+
+    pub fn set_overlay_board_names(&mut self, faces: Vec<(TexId, u32, u32)>) {
+        self.overlay_names = faces;
+    }
+
+    /// The board over the paused game: the frames side by side, **each cell the game inside one of
+    /// them**. It walks into the palette browser's own panel, as the other three boards do — same
+    /// panel, same place the grid sits, same keys — because four boards of one shape is four times
+    /// the learning of one, and this is the way there is only one to learn.
+    fn draw_overlay_board(&self, out: &mut Vec<Draw>) {
+        let Some(cursor) = self.overlay_board else {
+            return;
+        };
+        let looks = self.overlay_looks();
+        if looks.is_empty() {
+            return;
+        }
+        // Every cell is the same window, and the difference between them is entirely in the art
+        // laid over it — so the swatch under a cell that has not arrived yet is the picture the
+        // frame does not cover, rather than a colour of its own.
+        let rect = self.screen_system().screen_rect(self.display_fit());
+        let swatches: Vec<slot_ui::PaletteSwatch> = looks
+            .iter()
+            .map(|_| slot_ui::PaletteSwatch::window(rect))
+            .collect();
+        let view = slot_ui::PaletteView {
+            page: 0,
+            cursor: cursor.min(looks.len() - 1),
+            pages: 1,
+            rows: 1,
+            swatches: &swatches,
+            names: &self.overlay_names,
+            foot: None,
+            thumbs: &self.overlay_thumbs,
+        };
+        slot_ui::draw_palette_browser(&view, out);
     }
 
     /// Which of the machine's looks is being worn, which is the number `display.txt` keeps. Written
