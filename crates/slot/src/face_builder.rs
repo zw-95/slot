@@ -8,7 +8,7 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use slot_store::Cart;
-use slot_ui::{board_face, cart_face, padded, CartFace, TURN_PAD};
+use slot_ui::{board_face, border_face, cart_face, padded, CartFace, FACE_SCALE, TURN_PAD};
 
 pub struct BuiltFaces {
     pub stem: String,
@@ -83,40 +83,78 @@ impl FaceBuilder {
 /// whole ring is built in one go off it, and held until the panel closes: the arrows then move
 /// through the whole ring without waiting for anything, which is the only way a press can answer
 /// at once.
-pub struct BuiltBorders {
-    /// Which cart this ring was built for, as `App::faces_key` spells one — machine *and* stem,
-    /// because a stem is not a cart. Checked when the faces land rather than when they were
-    /// asked for: a caret that moved while the worker was drawing is a ring for a cart that is
-    /// no longer under it, and two machines with a game of the same name is two rings.
+/// One face of the border picker's ring, **sent the moment it is drawn** rather than with the rest
+/// of the ring behind it.
+pub struct BuiltBorder {
+    /// Which cart this face was built for, as `App::faces_key` spells one — machine *and* stem,
+    /// because a stem is not a cart. Checked when it lands rather than when it was asked for: a
+    /// caret that moved while the worker was drawing is a face for a cart that is no longer under
+    /// it, and two machines with a game of the same name is two rings.
     pub key: String,
-    /// The machine's own shell first, then one per border, in the ring's own order.
-    pub faces: Vec<CartFace>,
+    /// Which place in the ring this is: 0 the machine's own shell, then one per border in the
+    /// order the card numbers them.
+    pub index: usize,
+    pub face: CartFace,
+}
+
+/// The places of a ring of `count`, **from `seat` outward** — the seat, one to its right, one to
+/// its left, and so on until the ring is exhausted.
+///
+/// What lets the panel open on what it is looking at instead of on whatever happens to be first:
+/// the ring is built in the order it will be *read*, so the three faces under the eye are the
+/// first three out of the worker and the panel is up in the time three faces take rather than the
+/// time the whole card's worth of them does.
+fn ring_order(seat: usize, count: usize) -> Vec<usize> {
+    if count == 0 {
+        return Vec::new();
+    }
+    let seat = seat.min(count - 1);
+    let mut out = vec![seat];
+    for step in 1..count {
+        out.push((seat + step) % count);
+        if out.len() >= count {
+            break;
+        }
+        out.push((seat + count - step) % count);
+    }
+    out.truncate(count);
+    out
 }
 
 pub struct BorderFaceBuilder {
-    requests: Sender<(std::path::PathBuf, Cart, Vec<u32>, u32)>,
-    built: Receiver<BuiltBorders>,
+    requests: Sender<(std::path::PathBuf, Cart, Vec<u32>, u32, usize)>,
+    built: Receiver<BuiltBorder>,
 }
 
 impl BorderFaceBuilder {
     pub fn spawn() -> Self {
-        let (requests, inbox) = mpsc::channel::<(std::path::PathBuf, Cart, Vec<u32>, u32)>();
+        let (requests, inbox) = mpsc::channel::<(std::path::PathBuf, Cart, Vec<u32>, u32, usize)>();
         let (outbox, built) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("slot-border-faces".into())
             .spawn(move || {
-                while let Ok((root, cart, numbers, k)) = inbox.recv() {
-                    // The machine's own shell first: it is the first thing in the ring, being
-                    // what every cart wears until somebody picks one.
-                    let mut faces = vec![slot_ui::plain_face(&cart, k)];
-                    for number in numbers {
-                        if let Some(face) = slot_ui::border_face(&root, &cart, number, k) {
-                            faces.push(face);
-                        }
-                    }
+                while let Ok((root, cart, numbers, k, seat)) = inbox.recv() {
                     let key = format!("{}/{}", cart.system().dir_name(), cart.stem);
-                    if outbox.send(BuiltBorders { key, faces }).is_err() {
-                        return;
+                    let count = numbers.len() + 1;
+                    for place in ring_order(seat, count) {
+                        // Place 0 is the machine's own shell, which is what every cart wears
+                        // until somebody picks one; the rest are the card's borders.
+                        let face = match place {
+                            0 => Some(slot_ui::plain_face(&cart, k)),
+                            p => slot_ui::border_face(&root, &cart, numbers[p - 1], k),
+                        };
+                        // A border the card no longer carries draws nothing rather than a hole in
+                        // the row: a card edited on a PC can hold fewer than it did.
+                        if let Some(face) = face {
+                            let done = BuiltBorder {
+                                key: key.clone(),
+                                index: place,
+                                face,
+                            };
+                            if outbox.send(done).is_err() {
+                                return;
+                            }
+                        }
                     }
                 }
             });
@@ -126,17 +164,25 @@ impl BorderFaceBuilder {
         BorderFaceBuilder { requests, built }
     }
 
-    pub fn request(&self, root: std::path::PathBuf, cart: Cart, numbers: Vec<u32>, k: u32) {
-        let _ = self.requests.send((root, cart, numbers, k));
+    /// Build the ring for one cart, starting at `seat` — the place the picker opened on.
+    pub fn request(
+        &self,
+        root: std::path::PathBuf,
+        cart: Cart,
+        numbers: Vec<u32>,
+        k: u32,
+        seat: usize,
+    ) {
+        let _ = self.requests.send((root, cart, numbers, k, seat));
     }
 
-    /// The newest ring finished since the last call, if any.
-    pub fn take(&self) -> Option<BuiltBorders> {
-        let mut newest = None;
+    /// Everything that has finished since the last call, in the order it was drawn.
+    pub fn take(&self) -> Vec<BuiltBorder> {
+        let mut out = Vec::new();
         while let Ok(done) = self.built.try_recv() {
-            newest = Some(done);
+            out.push(done);
         }
-        newest
+        out
     }
 }
 
@@ -150,21 +196,40 @@ impl BorderFaceBuilder {
 ///
 /// One request in flight at a time: the answer is always wanted, and a queue would only let
 /// the worker fall further behind the caret.
+/// What one shelf face is drawn *with*: the card, and the border this cart was last given, if it
+/// was given one.
+///
+/// Carried rather than looked up in the worker, because the worker has no reach to the card's
+/// choices — it is a thread with a channel — and a face is the one thing that has to be drawn
+/// from both. `None` is the machine's own shell, which is every cart's until somebody picks.
+type Dressed = (usize, Cart, Option<(std::path::PathBuf, u32)>);
+
 pub struct ShelfFaceFiller {
-    requests: Sender<(usize, Cart)>,
+    requests: Sender<Dressed>,
     built: Receiver<(usize, CartFace)>,
     outstanding: Option<usize>,
 }
 
 impl ShelfFaceFiller {
     pub fn spawn() -> Self {
-        let (requests, inbox) = mpsc::channel::<(usize, Cart)>();
+        let (requests, inbox) = mpsc::channel::<Dressed>();
         let (outbox, built) = mpsc::channel();
         let spawned = thread::Builder::new()
             .name("slot-shelf-faces".into())
             .spawn(move || {
-                while let Ok((i, cart)) = inbox.recv() {
-                    if outbox.send((i, cart_face(&cart))).is_err() {
+                while let Ok((i, cart, dressed)) = inbox.recv() {
+                    // The cart wearing the border it was given, and the machine's own shell when
+                    // it was given none. A border the card no longer carries falls back to the
+                    // shell rather than to nothing: a cart with a stale number on it still has a
+                    // shape, and the picker is where the number gets put right.
+                    let face = match dressed {
+                        Some((root, number)) => {
+                            border_face(&root, &cart, number, FACE_SCALE)
+                                .unwrap_or_else(|| cart_face(&cart))
+                        }
+                        None => cart_face(&cart),
+                    };
+                    if outbox.send((i, face)).is_err() {
                         return;
                     }
                 }
@@ -188,12 +253,17 @@ impl ShelfFaceFiller {
         self.outstanding
     }
 
-    /// Ask for one. Refused while another is in flight.
-    pub fn request(&mut self, i: usize, cart: Cart) -> bool {
+    /// Ask for one, wearing `border` if it has one. Refused while another is in flight.
+    pub fn request(
+        &mut self,
+        i: usize,
+        cart: Cart,
+        border: Option<(std::path::PathBuf, u32)>,
+    ) -> bool {
         if self.outstanding.is_some() {
             return false;
         }
-        if self.requests.send((i, cart)).is_err() {
+        if self.requests.send((i, cart, border)).is_err() {
             return false;
         }
         self.outstanding = Some(i);

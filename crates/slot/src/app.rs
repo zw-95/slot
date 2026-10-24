@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use slot_gfx::{Fit, System as ScreenSystem, OUT_H, OUT_W};
@@ -11,7 +12,7 @@ use slot_store::{
 use slot_ui::lang;
 use slot_ui::{
     board_at, board_zoom, draw_backdrop, draw_edge_glow, draw_empty_slot, draw_shortcut_row,
-    draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of,
+    draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of, size_for,
     ClockPicker, Draw, FfState, Hud, HudKind, Icon, Letters, Millis, Placed, Polaroids,
     PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W, CORE_DOT,
     CORE_DOT_GAP, CORE_DOT_LIFT, CORE_H, CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H,
@@ -596,6 +597,37 @@ struct DisplayFilter {
 impl DisplayFilter {
     /// The three fits, in the order the key walks them and the board shows them.
     pub const FITS: [Fit; 3] = Fit::ALL;
+
+    /// The fits **one machine** offers, in the order the key walks them.
+    ///
+    /// Not three of them everywhere. A Game Boy's frame divides into the panel a whole number of
+    /// times, so on those two machines "the largest it can be without being stretched" is the
+    /// *same picture* as "the whole number" — the fractional fill buys nothing there that the
+    /// first does not already have, and asking a hand to step through a setting that cannot be
+    /// told from the one before it is asking it to count presses. What those machines do have is
+    /// the whole-number scale and the full panel, and that was always the choice on them.
+    ///
+    /// The machines whose frames do *not* divide into the panel keep all three: on those, the
+    /// three really are three different pictures.
+    pub fn fits_for(machine: System) -> &'static [Fit] {
+        match machine {
+            System::Gb | System::Gbc => &[Fit::Integer, Fit::Full],
+            _ => &Fit::ALL,
+        }
+    }
+
+    /// The next fit round a machine's ring, and back to the front from the last.
+    ///
+    /// A fit this machine does not offer — the fractional one, carried over from a machine that
+    /// does, since the choice is one number for every machine — comes back to the *front* of the
+    /// ring it does offer rather than being walked to somewhere the board cannot show.
+    fn next_fit(fit: Fit, machine: System) -> Fit {
+        let ring = Self::fits_for(machine);
+        match ring.iter().position(|f| *f == fit) {
+            Some(at) => ring[(at + 1) % ring.len()],
+            None => ring[0],
+        }
+    }
 
     /// The one preset that is **no look at all**: the mask left flat, the screen with nothing laid
     /// over it. Every ring begins with it, and the board draws its cell black rather than as the
@@ -1182,6 +1214,14 @@ pub struct App {
     /// The cart those faces were built for, as `faces_key` spells one — the ring is one machine's
     /// borders on one machine's cart, and a stem alone would call the other machine's ring ready.
     border_faces_key: Option<String>,
+    /// Which border every cart of each machine is wearing, read off the card **once per machine**
+    /// and kept. A face is rasterised for every cart the row will ever show, and reading the card
+    /// once per cart would be a read per cart of a nine-hundred-game shelf.
+    border_choices: [Option<HashMap<String, u32>>; 5],
+    /// The row is wearing a shell this cart has just taken off: a border was chosen, and the face
+    /// the shelf is standing there in was rasterised before the press that chose it. The frontend
+    /// rebuilds that one face; the choice itself is already on the card.
+    shelf_face_stale: bool,
     /// The chip: **one** face and not one per core, because it is one chip — the same shape
     /// whichever core is in hand, and what tells two of them apart is the name written on it
     /// rather than the picture. Uploaded at boot.
@@ -1508,6 +1548,8 @@ impl App {
             border_picker: None,
             border_faces: Vec::new(),
             border_faces_key: None,
+            border_choices: [None, None, None, None, None],
+            shelf_face_stale: false,
             core_chip_face: None,
             core_name_faces: Vec::new(),
             core_dot_off: None,
@@ -1921,13 +1963,20 @@ impl App {
     /// SELECT+B: the next way of fitting the picture to the panel, and round again to the first
     /// from the last.
     ///
-    /// A ring of three and not a toggle: the two fractional fits are both useful and neither is
-    /// "on", so a key that turned one of them off would leave no way to say which of the two is
-    /// wanted. Walking is also what the other two screen keys do, so the three answer the same
-    /// way under the same hand.
+    /// A ring and not a toggle: the two fractional fits are both useful and neither is "on", so
+    /// a key that turned one of them off would leave no way to say which of the two is wanted.
+    /// Walking is also what the other two screen keys do, so the three answer the same way under
+    /// the same hand.
+    ///
+    /// **Walked round the machine up's own ring** — see `DisplayFilter::fits_for`. A Game Boy
+    /// steps between its two rather than through a third that looks like the first.
     fn cycle_fit(&mut self) {
-        self.display.fit = self.display.fit.next();
+        self.display.fit = DisplayFilter::next_fit(self.display.fit, self.current_machine());
         self.write_display();
+        // The fit is what decides whether there is room for the machine's frame at all, so the
+        // overlay is re-decoded with it rather than on the next insert: see
+        // `refresh_overlay_pixels`.
+        self.refresh_overlay_pixels();
     }
 
     /// `System/display.txt`: the aperture, the five colour slots and the fit, written together
@@ -1951,10 +2000,19 @@ impl App {
             .unwrap_or(0) as u8
     }
 
-    /// Which of the three the picture is being drawn at. Read by the frontend every frame, as
-    /// the mask and the colour are.
+    /// Which of them the picture is being drawn at. Read by the frontend every frame, as the mask
+    /// and the colour are.
+    ///
+    /// A fit the machine up does not offer — the fractional one, kept from a machine that does,
+    /// since there is one number for every machine — is drawn as the front of the ring it does
+    /// offer, rather than as a fit whose own board has no cell for it.
     pub fn display_fit(&self) -> Fit {
-        self.display.fit
+        let ring = DisplayFilter::fits_for(self.current_machine());
+        if ring.contains(&self.display.fit) {
+            self.display.fit
+        } else {
+            ring[0]
+        }
     }
 
     /// SELECT+Y: advance the colour correction of the machine that is up, and persist all of
@@ -2318,6 +2376,17 @@ impl App {
     /// `None` pixels (`None` from a missing/corrupt file, or an empty list) is a real answer:
     /// the frontend reads it as "release the texture", so the built-in look stands.
     fn refresh_overlay_pixels(&mut self) {
+        // **A full-screen picture wears no frame.** The overlay is the machine's own case art
+        // drawn *around* the screen — that is what it is, and the whole of what it is — and a
+        // picture pulled to the panel's edges leaves it nothing to be around. Left up it is art
+        // laid over the game it was framing, hiding the edges of a picture the player asked to
+        // see all of. `overlay_index` is left alone, so stepping off the full fit puts the frame
+        // back exactly where they had it.
+        if self.display.fit == Fit::Full {
+            self.overlay_pixels = None;
+            self.overlay_dirty = true;
+            return;
+        }
         // A model's art is not in `overlay_list` — `overlay_files` cannot name it and should not
         // — so the model index is resolved to its own file here.
         self.overlay_pixels = match Self::model_of_index(self.overlay_slot, self.overlay_index) {
@@ -4627,19 +4696,32 @@ impl App {
             h: OUT_H as f32,
             colour: [0.0, 0.0, 0.0, BORDER_VEIL * pose.openness],
         });
-        // Every face in the ring is the same cart at the same size, so one of them gives the
-        // whole row its geometry.
-        let Some((_, fw, fh)) = self.border_faces.iter().find_map(|f| *f) else {
+        // Nothing to draw until at least one of the ring's faces is on the GPU.
+        if !self.border_faces.iter().any(|f| f.is_some()) {
+            return;
+        }
+        // Every face in the ring is the same cart at the same size, so **the cart's own measure**
+        // gives the whole row its geometry — and not the face's, which is what this used to read.
+        //
+        // A face is rasterised at `BORDER_FACE_K` times the size it is drawn at, so a row laid
+        // out at the face's pixel width drew every cart twice as large as the shelf ever shows
+        // it: the middle one ran off the top and bottom of the panel and could not be seen whole,
+        // and the two beside it were off the ends of it altogether. The picker is a row of the
+        // shelf's own carts at the shelf's own size — that is the whole of the comparison it
+        // exists to make — so it measures itself the way the shelf does.
+        let Some(cart) = self.shelf.current_cart() else {
             return;
         };
+        let size = size_for(cart.system());
+        let (cw, ch) = (size.w as f32 * size.middle, size.h as f32 * size.middle);
         let cx = OUT_W as f32 / 2.0;
         let cy = OUT_H as f32 / 2.0;
-        let spacing = fw as f32 * BORDER_SPACING;
+        let spacing = cw * BORDER_SPACING;
         for offset in [-1isize, 0, 1] {
             let Some(i) = picker.item_at(offset) else {
                 continue;
             };
-            let Some((tex, w, h)) = self.border_faces.get(i).copied().flatten() else {
+            let Some((tex, _, _)) = self.border_faces.get(i).copied().flatten() else {
                 continue;
             };
             // Where this one stands: its own place in the row, and the whole row slid by
@@ -4651,10 +4733,10 @@ impl App {
                 continue;
             }
             out.push(Draw::Tex {
-                x: (cx + d * spacing - w as f32 / 2.0).round(),
-                y: (cy - h as f32 / 2.0).round(),
-                w: w as f32,
-                h: h as f32,
+                x: (cx + d * spacing - cw / 2.0).round(),
+                y: (cy - ch / 2.0).round(),
+                w: cw,
+                h: ch,
                 tex,
                 alpha,
             });
@@ -4664,7 +4746,7 @@ impl App {
         let n = picker.count();
         let row = n as f32 * BORDER_DOT + (n - 1) as f32 * BORDER_DOT_GAP;
         let x0 = cx - row / 2.0;
-        let y = cy + fh as f32 / 2.0 + BORDER_DOT_LIFT;
+        let y = cy + ch / 2.0 + BORDER_DOT_LIFT;
         for i in 0..n {
             let lit = picker.dot_lit(i, now);
             out.push(Draw::Rect {
@@ -4674,6 +4756,28 @@ impl App {
                 h: BORDER_DOT,
                 colour: [1.0, 1.0, 1.0, (0.22 + 0.78 * lit) * pose.openness],
             });
+        }
+        // And the same three hints the core picker carries, on the same line and in the same
+        // order: it is the same question — which one, of these — and a hand that has answered it
+        // once on the cart's lid should not have to learn a new layout to answer it again here.
+        // Cancel to the left, swap in the middle, choose to the right, each placed by what shows
+        // of it and not by the transparent strip every hint face carries after its label.
+        if let [cancel, swap, choose] = self.core_legend_faces.as_slice() {
+            let seen = |w: u32| w.saturating_sub(HINT_EDGE) as f32;
+            for (tex, w, x) in [
+                (cancel.0, cancel.1, 0.0),
+                (swap.0, swap.1, (OUT_W as f32 - seen(swap.1)) / 2.0),
+                (choose.0, choose.1, OUT_W as f32 - seen(choose.1)),
+            ] {
+                out.push(Draw::Tex {
+                    x: x.round(),
+                    y: CORE_LEGEND_Y,
+                    w: w as f32,
+                    h: HINT_H as f32,
+                    tex,
+                    alpha: pose.openness,
+                });
+            }
         }
     }
 
@@ -5713,8 +5817,15 @@ impl App {
         }
         // Opened **on the fit that is up**, the way the aperture board opens on its own look:
         // the caret is there to mark the one already chosen, so the board can be put away with A
-        // and lose nothing.
-        self.fit_board = Some(Self::fit_index(self.display.fit) as usize);
+        // and lose nothing. Counted in *this machine's* ring, which is the ring the board shows:
+        // a Game Boy's board is two cells, and a caret standing third on it would be standing on
+        // a cell that is not there.
+        let ring = DisplayFilter::fits_for(self.current_machine());
+        let at = ring
+            .iter()
+            .position(|f| *f == self.display_fit())
+            .unwrap_or(0);
+        self.fit_board = Some(at);
         // And asking for the frame, because the board's three cells are the game that is up at
         // each fit — a board that showed last week's picture would be lying about the choice.
         self.want_shot = true;
@@ -5820,13 +5931,15 @@ impl App {
         self.aperture_thumbs = thumbs;
     }
 
-    /// The three cells: the frame that is up, on the panel at each fit, at the size a cell is.
+    /// The cells: the frame that is up, on the panel at each fit **this machine offers**, at the
+    /// size a cell is. Two on a Game Boy and three everywhere else, and the board is the same
+    /// either way — a cell for a fit the key cannot reach would be a choice nobody can make.
     pub fn fit_thumb_faces(&self) -> Option<Vec<slot_ui::CartFace>> {
         let _board = self.fit_board?;
         let (rgba, w, h) = self.shot.as_ref()?;
         let system = self.screen_system();
         Some(
-            DisplayFilter::FITS
+            DisplayFilter::fits_for(self.current_machine())
                 .iter()
                 .map(|fit| {
                     slot_ui::thumb::panel_thumb(
@@ -5854,7 +5967,8 @@ impl App {
         let Some(cursor) = self.fit_board else {
             return;
         };
-        let n = DisplayFilter::FITS.len();
+        let ring = DisplayFilter::fits_for(self.current_machine());
+        let n = ring.len();
         match action {
             Action::GbaDown(Btn::Left) | Action::ShelfLeft => {
                 self.fit_board = Some((cursor + n - 1) % n)
@@ -5863,8 +5977,10 @@ impl App {
             Action::GbaDown(Btn::Up) => self.fit_board = Some((cursor + n - 1) % n),
             Action::GbaDown(Btn::Down) => self.fit_board = Some((cursor + 1) % n),
             Action::GbaDown(Btn::A) => {
-                self.display.fit = DisplayFilter::FITS[cursor.min(n - 1)];
+                self.display.fit = ring[cursor.min(n - 1)];
                 self.write_display();
+                // The overlay rides on the fit: see `refresh_overlay_pixels`.
+                self.refresh_overlay_pixels();
                 self.close_fit_board();
             }
             Action::GbaDown(Btn::B) => self.close_fit_board(),
@@ -5888,17 +6004,28 @@ impl App {
         // directions and an Advance one fills it, so "铺满" is a visible step on the first and
         // nothing at all on the second.
         let system = self.screen_system();
-        let swatches: Vec<slot_ui::PaletteSwatch> = DisplayFilter::FITS
+        // This machine's own ring, and not the whole three: a Game Boy's board is two cells, and
+        // a third — the fractional fill, which on those two machines is the same picture as the
+        // first — would be a cell offering a difference that is not there.
+        let ring = DisplayFilter::fits_for(self.current_machine());
+        let swatches: Vec<slot_ui::PaletteSwatch> = ring
             .iter()
             .map(|f| slot_ui::PaletteSwatch::window(system.screen_rect(*f)))
             .collect();
+        // Their names, out of the three the frontend rasterised at boot: `fit_index` is the
+        // place a fit holds in the whole list of them, which is the order those faces were
+        // uploaded in.
+        let names: Vec<(TexId, u32, u32)> = ring
+            .iter()
+            .filter_map(|f| self.fit_names.get(Self::fit_index(*f) as usize).copied())
+            .collect();
         let view = slot_ui::PaletteView {
             page: 0,
-            cursor: cursor.min(DisplayFilter::FITS.len() - 1),
+            cursor: cursor.min(ring.len() - 1),
             pages: 1,
             rows: 1,
             swatches: &swatches,
-            names: &self.fit_names,
+            names: &names,
             foot: None,
             thumbs: &self.fit_thumbs,
         };
@@ -6146,11 +6273,27 @@ impl App {
         self.sys_held = None;
     }
 
-    /// Whether the faces on the GPU are the highlighted cart's, so the picker can start opening.
+    /// Whether the picker has something to open **on**: the faces it is about to show, which is
+    /// the one in hand and the one either side of it.
+    ///
+    /// Not the whole ring. A card can carry dozens of borders, and a panel that waited for every
+    /// one of them before it would open spent the wait rasterising borders nobody is looking at —
+    /// which is what made this panel feel slow. The rest land while it is already up and being
+    /// used, and the arrows meet them as they arrive.
     fn border_faces_ready(&self) -> bool {
-        self.border_faces_key
-            .as_deref()
-            .is_some_and(|key| self.faces_key().as_deref() == Some(key))
+        let Some(key) = self.border_faces_key.as_deref() else {
+            return false;
+        };
+        if self.faces_key().as_deref() != Some(key) {
+            return false;
+        }
+        let Some(picker) = self.border_picker else {
+            return false;
+        };
+        [-1isize, 0, 1]
+            .into_iter()
+            .filter_map(|o| picker.item_at(o))
+            .all(|i| self.border_faces.get(i).copied().flatten().is_some())
     }
 
     /// The picker takes the arrows and both face buttons while it is up: a row that went on
@@ -6176,18 +6319,50 @@ impl App {
     /// The choice, onto the card: `System/Borders/<machine>.txt`, one file per machine, so a
     /// machine added later is a file added later. `None` — the machine's own shell — writes no
     /// line at all, which is what leaves a cart with nothing recorded about it.
-    fn write_border(&self, number: Option<u32>) {
+    ///
+    /// **And into the row, which is the half that was missing.** The card's answer and the face
+    /// the shelf is showing were two different answers until this: a cart could be written down
+    /// as wearing a border and still be standing in the row wearing its machine's shell, because
+    /// the face on the GPU was rasterised before the press. The choice is kept in memory too —
+    /// so the next face built for this cart is built in what it was just given — and the row's
+    /// is marked for rebuilding.
+    fn write_border(&mut self, number: Option<u32>) {
         let (Some(root), Some(cart)) = (self.root.clone(), self.shelf.current_cart()) else {
             return;
         };
-        if let Err(e) =
-            slot_store::borders::write_selected(&root, cart.system(), &cart.stem, number)
-        {
+        let (stem, system) = (cart.stem.clone(), cart.system());
+        if let Err(e) = slot_store::borders::write_selected(&root, system, &stem, number) {
             eprintln!(
                 "slot: borders: could not write {}.txt: {e}",
-                cart.system().dir_name().to_ascii_lowercase()
+                system.dir_name().to_ascii_lowercase()
             );
         }
+        let slot = DisplayFilter::machine_slot(system);
+        let map = self.border_choices[slot].get_or_insert_with(HashMap::new);
+        match number {
+            Some(n) => map.insert(stem, n),
+            None => map.remove(&stem),
+        };
+        self.shelf_face_stale = true;
+    }
+
+    /// Whether the row's face for the cart under the highlight is the one it should be wearing,
+    /// and taking the answer clears it: the frontend rebuilds that one face and says no more
+    /// about it.
+    pub fn take_shelf_face_stale(&mut self) -> bool {
+        std::mem::take(&mut self.shelf_face_stale)
+    }
+
+    /// Which border the card says this cart is wearing, for the face about to be rasterised.
+    /// `None` is the machine's own shell, which is every cart's until somebody picks one.
+    pub fn border_number_for(&mut self, cart: &slot_store::Cart) -> Option<u32> {
+        let slot = DisplayFilter::machine_slot(cart.system());
+        if self.border_choices[slot].is_none() {
+            let root = self.root.clone()?;
+            self.border_choices[slot] =
+                Some(slot_store::borders::read_selected(&root, cart.system()));
+        }
+        self.border_choices[slot].as_ref()?.get(&cart.stem).copied()
     }
 
     /// The picker's faces, one per place in its ring, uploaded by the frontend when they are
@@ -6195,12 +6370,24 @@ impl App {
     /// waiting for a rasterise: the row is pictures, and a picture that takes 70 ms to draw is
     /// not one a press can wait for.
     ///
-    /// Recorded against the highlighted cart, and against its machine — the ring is one machine's
-    /// borders, and a stem alone would call another machine's ring ready the moment a game with
-    /// the same name turned up there.
-    pub fn set_border_faces(&mut self, faces: Vec<(TexId, u32, u32)>) {
-        self.border_faces = faces.into_iter().map(Some).collect();
+    /// The ring's faces, **one at a time and in the order they are built**, uploaded by the
+    /// frontend as each lands. Held here because the arrows must be able to move through the whole
+    /// ring without waiting for a rasterise: the row is pictures, and a picture that takes tens of
+    /// milliseconds to draw is not one a press can wait for.
+    ///
+    /// Emptying the row and naming the cart it is for come first, and every face after that is
+    /// checked against the same name — a build for a cart the caret has left is dropped, and so is
+    /// one for the same stem on another machine, the ring being one machine's borders.
+    pub fn begin_border_ring(&mut self, count: usize) {
+        self.border_faces = vec![None; count];
         self.border_faces_key = self.faces_key();
+    }
+
+    /// One face of the ring, at the place it was built for.
+    pub fn set_border_face(&mut self, index: usize, face: (TexId, u32, u32)) {
+        if let Some(slot) = self.border_faces.get_mut(index) {
+            *slot = Some(face);
+        }
     }
 
     /// Whether the picker is up, which is the frontend's cue to have its faces built.
@@ -6208,11 +6395,14 @@ impl App {
         self.border_picker.is_some()
     }
 
-    /// The card and the cart the picker is about, for the frontend to build faces from.
-    pub fn border_picker_target(&self) -> Option<(std::path::PathBuf, slot_store::Cart)> {
+    /// The card, the cart the picker is about, **and which place in the ring it opened on** — the
+    /// last being what lets the ring be built from the seat outward rather than from one end, so
+    /// the three faces the panel is actually showing are the three that arrive first.
+    pub fn border_picker_target(&self) -> Option<(std::path::PathBuf, slot_store::Cart, usize)> {
         let root = self.root.clone()?;
         let cart = self.shelf.current_cart()?.clone();
-        Some((root, cart))
+        let seat = self.border_picker.as_ref()?.index();
+        Some((root, cart, seat))
     }
 
     fn open_core_picker(&mut self) {

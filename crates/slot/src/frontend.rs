@@ -848,7 +848,16 @@ impl Frontend {
         };
         let i = self.shelf_missing.swap_remove(pos);
         let cart = self.session.app().carts()[i].clone();
-        self.shelf_faces.request(i, cart);
+        let border = self.dress_for(&cart);
+        self.shelf_faces.request(i, cart, border);
+    }
+
+    /// The border this cart was last given, and the card to find it on. `None` is a cart nobody
+    /// has dressed — the machine's own shell, which is what it is drawn in.
+    fn dress_for(&mut self, cart: &slot_store::Cart) -> Option<(std::path::PathBuf, u32)> {
+        let number = self.session.app_mut().border_number_for(cart)?;
+        let root = self.session.app().root()?.to_path_buf();
+        Some((root, number))
     }
 
     /// Keeps the textures resident to a window around the caret, and the queue of carts still
@@ -863,6 +872,20 @@ impl Frontend {
     /// Runs on the caret's edge rather than every frame: it walks the whole library, and the
     /// caret moves at most a few times a second.
     fn sync_resident_faces(&mut self, compositor: &mut Compositor) {
+        // A border was chosen for the cart under the highlight, and the face the row is standing
+        // there in was rasterised before the press: it is still wearing the shell that cart has
+        // just taken off. Rebuilt here — released and queued like any other face that has gone
+        // stale — so the choice lands on the row as well as on the card.
+        if self.session.app_mut().take_shelf_face_stale() {
+            let i = self.session.app().shelf_index();
+            if let Some(tex) = self.session.app().face_of(i) {
+                compositor.release_texture(tex);
+                self.session.app_mut().clear_face(i);
+            }
+            if !self.shelf_missing.contains(&i) {
+                self.shelf_missing.push(i);
+            }
+        }
         let count = self.session.app().carts().len();
         if count == 0 {
             return;
@@ -1743,35 +1766,38 @@ fn sync_border_picker(
     // machine's cart, and the same stem elsewhere is a ring that must be built again.
     let highlighted = app.faces_key();
     if highlighted.is_some() && *asked != highlighted {
-        if let Some((root, cart)) = app.border_picker_target() {
+        if let Some((root, cart, seat)) = app.border_picker_target() {
             let system = cart.system();
             let numbers: Vec<u32> = slot_store::borders::borders(&root, system)
                 .iter()
                 .map(|b| b.number)
                 .collect();
-            builder.request(root, cart, numbers, BORDER_FACE_K);
+            // The machine's own shell is a place in the ring too, so the row is one wider than
+            // the card's list of borders.
+            app.begin_border_ring(numbers.len() + 1);
+            texes.resize(numbers.len() + 1, None);
+            // Built **from the seat outward**: see `ring_order`.
+            builder.request(root, cart, numbers, BORDER_FACE_K, seat);
         }
         *asked = highlighted.clone();
     }
-    let Some(ring) = builder.take() else {
-        return;
-    };
-    // A ring for a cart the caret has since left is dropped, as the open cart's is — and the
-    // key is what says "since left", machine included.
-    if highlighted.as_deref() != Some(ring.key.as_str()) {
-        return;
+    // Each face is uploaded the moment it lands rather than with the ring behind it, so the panel
+    // comes up on the three it is showing instead of waiting for a card's worth of borders nobody
+    // has looked at yet.
+    for done in builder.take() {
+        // A face for a cart the caret has since left is dropped, as the open cart's is — and the
+        // key is what says "since left", machine included.
+        if highlighted.as_deref() != Some(done.key.as_str()) {
+            continue;
+        }
+        let face = done.face;
+        let Some(slot) = texes.get_mut(done.index) else {
+            continue;
+        };
+        let tex = upload_rgba(compositor, slot, face.w, face.h, &face.rgba);
+        app.set_border_face(done.index, (tex, face.w, face.h));
     }
-    texes.resize(ring.faces.len(), None);
-    let mut faces = Vec::with_capacity(ring.faces.len());
-    for (slot, face) in texes.iter_mut().zip(ring.faces.iter()) {
-        faces.push((
-            upload_rgba(compositor, slot, face.w, face.h, &face.rgba),
-            face.w,
-            face.h,
-        ));
-    }
-    app.set_border_faces(faces);
-    *built = Some(ring.key);
+    *built = highlighted;
 }
 
 fn upload(compositor: &mut Compositor, slot: &mut Option<TexId>, face: slot_ui::UndoFace) -> TexId {
