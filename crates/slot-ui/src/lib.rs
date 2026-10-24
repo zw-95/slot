@@ -42,8 +42,8 @@ pub use board::{
 };
 pub use cart::face_profile;
 pub use cart_art::{
-    install as install_cart_art, label_share as cart_label_share, load as load_cart_art,
-    summary as cart_art_summary,
+    art_for as cart_art_for, install as install_cart_art, label_share as cart_label_share,
+    load as load_cart_art, summary as cart_art_summary,
 };
 // Re-exported rather than defined here: the rule that turns a file name into a title belongs
 // with the scan, because the ring's letter is decided from it and a scan cannot ask the ui.

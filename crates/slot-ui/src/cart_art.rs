@@ -18,7 +18,7 @@
 //! is why it lives in a `OnceLock` rather than being passed down.
 
 use std::path::Path;
-use std::sync::OnceLock;
+
 
 use slot_store::System;
 
@@ -63,6 +63,13 @@ pub struct Art {
     /// The colour just outside the label slot, so the slot can be filled before the label is
     /// pasted and its corners read as recess rather than as a hole.
     recess: [u8; 3],
+    /// Whether the shell colour is painted through this art at all.
+    ///
+    /// A drawing in `System/Carts` is a shell waiting to be coloured — it is grey, and the colour
+    /// a cart's plastic happens to be is what makes two carts of one machine two carts. A border
+    /// in `System/Borders` is a picture of a particular cart, sticker and all: it brought its own
+    /// colour, and painting a shell colour over it would paint over the thing it is a picture of.
+    tint: bool,
 }
 
 #[derive(Default)]
@@ -79,15 +86,24 @@ pub struct CartArt {
     fc: Option<Art>,
 }
 
-static ART: OnceLock<CartArt> = OnceLock::new();
+/// What the card offered, once somebody has offered it.
+///
+/// Re-settable rather than a `OnceLock`: it is installed once at boot and never again in the
+/// program, but a test that cannot install a second card is a test that can only ever ask about
+/// the first one, and the whole of what is worth testing here is the difference one card makes
+/// from another.
+static ART: std::sync::RwLock<Option<&'static CartArt>> = std::sync::RwLock::new(None);
 
 /// Called once, at boot, before the face builder starts.
 pub fn install(cart_art: CartArt) {
-    let _ = ART.set(cart_art);
+    if let Ok(mut slot) = ART.write() {
+        *slot = Some(Box::leak(Box::new(cart_art)));
+    }
 }
 
 pub fn art_for(system: System) -> Option<&'static Art> {
-    let all = ART.get()?;
+    let guard = ART.read().ok()?;
+    let all = (*guard)?;
     match system {
         System::Gb => all.gb.as_ref(),
         System::Gbc => all.gbc.as_ref(),
@@ -102,18 +118,37 @@ pub fn art_for(system: System) -> Option<&'static Art> {
 pub fn load(root: &Path) -> CartArt {
     let dir = root.join(DIR);
     CartArt {
-        gb: read(&dir.join("cart_gb.png")),
-        gbc: read(&dir.join("cart_gbc.png")),
-        gba: read(&dir.join("cart_gba.png")),
-        sfc: read(&dir.join("cart_sfc.png")),
-        fc: read(&dir.join("cart_fc.png")),
+        gb: pick(root, System::Gb, &dir.join("cart_gb.png")),
+        gbc: pick(root, System::Gbc, &dir.join("cart_gbc.png")),
+        gba: pick(root, System::Gba, &dir.join("cart_gba.png")),
+        sfc: pick(root, System::Sfc, &dir.join("cart_sfc.png")),
+        fc: pick(root, System::Fc, &dir.join("cart_fc.png")),
     }
+}
+
+/// What one machine's carts are drawn as: **a border off the card, and only then the drawing in
+/// `System/Carts`.**
+///
+/// A border is a picture of a real cart, so it is both the better shell and the truer outline —
+/// and the outline is the part that used to be drawn in code from a description, which is how a
+/// Family Computer cart came out as the shape somebody wrote down for it rather than the shape
+/// the thing has. This way one picture on the card is the shell, the label slot and the outline
+/// all at once, and a machine with no border at all is exactly what it was before.
+fn pick(root: &Path, system: System, drawn: &Path) -> Option<Art> {
+    let border = slot_store::borders::borders(root, system)
+        .into_iter()
+        .find_map(|b| read(&b.path, false));
+    border.or_else(|| read(drawn, true))
 }
 
 /// What the card has, for the startup log: a card with art that was refused has nothing else to
 /// say so.
 pub fn summary() -> String {
-    match ART.get() {
+    let guard = match ART.read() {
+        Ok(g) => g,
+        Err(_) => return "none".to_string(),
+    };
+    match *guard {
         None => "none".to_string(),
         Some(all) => [
             ("gb", &all.gb),
@@ -176,7 +211,7 @@ fn bleed_edge(rgba: &mut [u8], w: u32, h: u32) {
     }
 }
 
-fn read(path: &Path) -> Option<Art> {
+fn read(path: &Path, tint: bool) -> Option<Art> {
     let (rgba, w, h) = art::decode_rgba(path)?;
     if w < 8 || h < 8 || rgba.len() < (w * h * 4) as usize {
         return None;
@@ -202,6 +237,7 @@ fn read(path: &Path) -> Option<Art> {
         label,
         luma,
         recess,
+        tint,
     })
 }
 
@@ -301,6 +337,38 @@ pub fn label_share(system: System) -> Option<(f32, f32, f32, f32)> {
 }
 
 impl Art {
+    /// The cart's own outline, at whatever size the caller is drawing: **the alpha of this art**,
+    /// which is the shape a real cart has — the notch, the bulge, the corners — rather than the
+    /// shape written down for it in code. The picker's board is cut with it, so a cart opened to
+    /// change its core is the same shape as the cart on the shelf.
+    pub fn outline(&self, w: u32, h: u32) -> Vec<u8> {
+        let mut out = vec![0u8; (w * h) as usize];
+        let sx = self.w as f32 / w as f32;
+        let sy = self.h as f32 / h as f32;
+        for y in 0..h {
+            // Four samples rather than one: an outline taken at one point per pixel steps, and a
+            // stepped edge reads as a cut edge rather than as a moulded one.
+            let fy = (y as f32 + 0.5) * sy - 0.5;
+            let y0 = fy.floor().clamp(0.0, self.h as f32 - 1.0) as u32;
+            let y1 = (y0 + 1).min(self.h - 1);
+            let wy = fy - y0 as f32;
+            for x in 0..w {
+                let fx = (x as f32 + 0.5) * sx - 0.5;
+                let x0 = fx.floor().clamp(0.0, self.w as f32 - 1.0) as u32;
+                let x1 = (x0 + 1).min(self.w - 1);
+                let wx = fx - x0 as f32;
+                let a = |x: u32, y: u32| {
+                    self.rgba[((y * self.w + x) * 4 + 3) as usize] as f32
+                };
+                let top = a(x0, y0) * (1.0 - wx) + a(x1, y0) * wx;
+                let bot = a(x0, y1) * (1.0 - wx) + a(x1, y1) * wx;
+                let v = top * (1.0 - wy) + bot * wy;
+                out[(y * w + x) as usize] = v.clamp(0.0, 255.0) as u8;
+            }
+        }
+        out
+    }
+
     /// The label slot as a share of the art, for a caller aligning something to it — the shelf's
     /// favourites star sits on its top right corner.
     pub fn label_share(&self) -> Option<(f32, f32, f32, f32)> {
@@ -383,6 +451,11 @@ impl Art {
                         (self.recess[2] as f32 * 0.78) as u8,
                         255,
                     ]
+                } else if !self.tint {
+                    // A picture of a cart keeps the colour it came in: the shell colour belongs to
+                    // the machine's plastic, and this is not plastic, it is a photograph of some
+                    // particular cart somebody owned.
+                    [p[0], p[1], p[2], p[3]]
                 } else {
                     let luma = 0.299 * p[0] as f32 + 0.587 * p[1] as f32 + 0.114 * p[2] as f32;
                     // The dark theme paints the shell colour through the art's own shading, which

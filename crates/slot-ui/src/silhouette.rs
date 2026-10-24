@@ -106,8 +106,17 @@ pub fn silhouette(system: System, w: u32, h: u32) -> &'static [u8] {
 /// died in, unseen for as long as nothing ever ran. So the board rasterises its own, every time:
 /// it is built once per cart at most, and resvg is fast.
 pub(crate) fn shell_at(system: System, w: u32, h: u32) -> (Vec<u8>, Vec<u8>) {
-    let mask =
-        rasterise_svg(outline(system), w, h).unwrap_or_else(|| vec![255; (w * h) as usize]);
+    // A card carrying a border for this machine is carrying that machine's outline too, and it is
+    // the truer one: it is traced off a real cart rather than written down from a description of
+    // one. The board the picker opens is cut with it — so the shell half a cart comes apart into
+    // is the same shape as the cart that was on the shelf, which is the whole of what makes the
+    // two halves read as one cart. Without a border it is the drawing in code, as it always was.
+    let mask = match crate::cart_art::art_for(system) {
+        Some(art) => art.outline(w, h),
+        None => {
+            rasterise_svg(outline(system), w, h).unwrap_or_else(|| vec![255; (w * h) as usize])
+        }
+    };
     let depth = depth_map(&mask, w as usize, h as usize);
     (mask, depth)
 }

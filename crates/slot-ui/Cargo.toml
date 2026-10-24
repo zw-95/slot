@@ -26,3 +26,6 @@ slot-store = { path = "../slot-store" }
 [dev-dependencies]
 slot-gfx = { path = "../slot-gfx", features = ["test-support"] }
 tempfile.workspace = true
+# To write the PNGs a card would be carrying: a test that only ever read art off a real card
+# could not say what it does with the ones it finds there.
+png.workspace = true
