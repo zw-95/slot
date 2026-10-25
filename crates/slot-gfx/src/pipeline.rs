@@ -13,9 +13,17 @@ pub const SRC_H: u32 = GBA_SRC_H;
 /// Column-major identity for the colour-correction matrix, uploaded when correction is off.
 const IDENTITY_CC: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
 
+/// How many **panel** pixels one RGB triad covers. Three: at the scale the panel was built around
+/// a source pixel is three panel pixels across, so one group is one group per source pixel there —
+/// which is why nothing moves for the integer fit, while every other fit stops disagreeing.
+///
+/// It belongs to the glass and not to the game or the fit, so nothing here is wired to either.
+/// **The one dial** if the lattice reads too fine or too coarse: see `u_triad` in `GAME_FRAG`.
+const TRIAD_PX: f32 = 3.0;
+
 pub struct GamePass {
-prog: gl::types::GLuint,
-/// How the frame is fitted to the panel: whole source pixels, the picture's own shape grown
+    prog: gl::types::GLuint,
+    /// How the frame is fitted to the panel: whole source pixels, the picture's own shape grown
 /// to the panel's edges, or the panel's shape. The first is what there was before there was
 /// a choice.
 fit: Fit,
@@ -120,6 +128,7 @@ impl GamePass {
             u_grid_mix,
             u_grid_scan,
             u_mask_on,
+            u_triad,
         );
         unsafe {
             // What is fixed for the life of the program: which texture unit carries what, and
@@ -157,6 +166,8 @@ impl GamePass {
             gl::Uniform1f(u_grid_scan, 0.0);
             u_mask_on = crate::gl::uniform_location(prog, "u_mask_on");
             gl::Uniform1f(u_mask_on, 1.0);
+            u_triad = crate::gl::uniform_location(prog, "u_triad");
+            gl::Uniform1f(u_triad, TRIAD_PX);
             // Off until a palette arrives; the matrix path is what runs by default.
             gl::Uniform1f(u_pal_on, 0.0);
             // The source size, primed for the machine `active` starts on. `set_system` is a no-op
@@ -215,9 +226,9 @@ impl GamePass {
             self.tex_h = h;
         }
         self.active = system;
-        // The mask tiles once per source pixel, so a different frame size is a different
-        // tiling count and nothing more: the 3x3 table is the same table, the filter is the
-        // same filter, and no part of either is written against a resolution.
+        // Nothing here moves the lattice: it tiles on the panel's own pixels (see `TRIAD_PX`), so
+        // a different frame size leaves it standing exactly where it stood. It was `u_src` once,
+        // which is another way of saying every fit that was not whole could not agree with it.
         unsafe {
             gl::UseProgram(self.prog);
             gl::Uniform2f(

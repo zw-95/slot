@@ -18,10 +18,21 @@ use crate::System;
 /// open on a PC and drop a PNG into.
 pub const DIR: &str = "System/Borders";
 
-/// One border: the file, and the number off its name.
+/// Where a **card** keeps the drawings its borders are made from. Each one is a cart drawn in grey
+/// plastic with a magenta label slot, and every colour it comes in is that same drawing dyed at
+/// runtime — see `slot_ui::cart_art::border_art`. One template per shape, eleven colours each, and
+/// the card carries no picture per colour at all.
+pub const BASE: &str = "base";
+
+/// How many colours a template is offered in. The list itself lives in the rasteriser, because
+/// that is the only place a colour is anything but a triple of bytes; this is the number the
+/// numbering below multiplies by, and the two have to agree.
+pub const SHELL_COUNT: u32 = 11;
+
+/// One border: the file it is drawn from, and the number it answers to.
 ///
-/// The number is kept because it is the only thing that says what order the borders come in —
-/// a directory read hands back the card's own order, which is whoever copied them there.
+/// **The file is a template and not the border.** Two entries may name the same drawing: they are
+/// one shape in two colours, and the number is what says which colour. See `borders`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Border {
     pub path: PathBuf,
@@ -40,19 +51,6 @@ impl Border {
     }
 }
 
-/// `sfc12.png` for the Super Nintendo, and `None` for anything that is not that machine's: the
-/// picture belongs to the machine whose prefix it carries, so a card can hold five machines'
-/// borders in one directory without any of them having to sort the others out.
-fn parse(system: System, name: &str) -> Option<u32> {
-    let stem = name.strip_suffix(".png").or_else(|| name.strip_suffix(".PNG"))?;
-    let prefix = system.dir_name().to_ascii_lowercase();
-    let rest = stem.strip_prefix(&prefix)?;
-    // Digits only, and at least one: `sfc1` is a border, `sfc_label` is somebody else's file.
-    if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    rest.parse().ok().filter(|n: &u32| *n > 0)
-}
 
 /// The borders a card has for one machine, in the order they are numbered.
 ///
@@ -64,27 +62,53 @@ fn parse(system: System, name: &str) -> Option<u32> {
 /// the card and the user can see it there. What is *drawn* with a picture that would not decode
 /// is decided by the rasteriser, which answers with nothing and falls back to the shell in code.
 pub fn borders(root: &Path, system: System) -> Vec<Border> {
-    let dir = match std::fs::read_dir(root.join(DIR)) {
-        Ok(d) => d,
-        Err(_) => return Vec::new(),
+    let mut out = Vec::new();
+    // Template by template, colour by colour — **the shapes outer loop, the colours inner**, so
+    // every colour of one drawing sits together and stepping the ring walks shape after shape.
+    let shapes = templates(root, system);
+    for (shape, path) in shapes.iter().enumerate() {
+        for colour in 0..SHELL_COUNT {
+            out.push(Border {
+                path: path.clone(),
+                number: (shape as u32) * SHELL_COUNT + colour + 1,
+            });
+        }
+    }
+    out
+}
+
+/// The grey drawings this machine's borders are made from: every `base/<machine>_base_NN.png` on
+/// the card, in name order.
+///
+/// A shape is a shape and nothing else here — the count always answers how many drawings there
+/// are, never how many borders, which is that number times the colours. Empty is not an error to
+/// report: a card with no drawings for this machine is a card whose carts keep the shells they
+/// were born with, which is the state every card starts in.
+pub fn templates(root: &Path, system: System) -> Vec<PathBuf> {
+    let Ok(dir) = std::fs::read_dir(root.join(DIR).join(BASE)) else {
+        return Vec::new();
     };
-    let mut out: Vec<Border> = dir
+    let prefix = format!("{}_base_", system.dir_name().to_ascii_lowercase());
+    let mut out: Vec<PathBuf> = dir
         .filter_map(|e| {
             let e = e.ok()?;
             if !e.file_type().ok()?.is_file() {
                 return None;
             }
-            let name = e.file_name();
-            let number = parse(system, name.to_str()?)?;
-            Some(Border {
-                path: e.path(),
-                number,
-            })
+            // Lower-cased before the name is read, because the card is edited on a filesystem
+            // that does not care and hands back `MD_base_01.png` where `md_base_01` was written.
+            let name = e.file_name().to_string_lossy().to_ascii_lowercase();
+            let rest = name.strip_prefix(&prefix)?.strip_suffix(".png")?;
+            // Digits only: `_base_final2` is somebody's draft, not a shape.
+            if rest.is_empty() || !rest.bytes().all(|b| b.is_ascii_digit()) {
+                return None;
+            }
+            Some(e.path())
         })
         .collect();
-    // Numbered, then by name so two borders carrying the same number come back in the same order
-    // on every boot rather than in whatever order the card's directory happens to be in.
-    out.sort_by(|a, b| a.number.cmp(&b.number).then_with(|| a.path.cmp(&b.path)));
+    // By name, so `_base_02` follows `_base_01` on every card rather than in whatever order the
+    // card's own directory hands them back.
+    out.sort();
     out
 }
 
@@ -175,64 +199,81 @@ mod tests {
 
     fn card() -> tempfile::TempDir {
         let d = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(d.path().join(DIR)).unwrap();
+        std::fs::create_dir_all(d.path().join(DIR).join(BASE)).unwrap();
         d
     }
 
+    /// A **drawing**, which is not a border: one grey shape, and the raw material of eleven of
+    /// them. The card is edited on a PC, so nothing here ever needs a file per colour.
     fn put(d: &tempfile::TempDir, name: &str) {
-        std::fs::write(d.path().join(DIR).join(name), b"not really a png").unwrap();
+        std::fs::write(
+            d.path().join(DIR).join(BASE).join(name),
+            b"not really a png",
+        )
+        .unwrap();
     }
 
-    /// The whole point of the directory: **the count comes off the card**, so a border dropped on
-    /// it is a border the picker offers without anybody editing a list.
+    /// The whole point of the directory: **the count comes off the card**, so a drawing dropped on
+    /// it is a border the picker offers without anybody editing a list — and offered in every
+    /// colour at that, because the colours belong to the code and the shapes to the card.
     #[test]
     fn the_card_is_the_list_and_not_a_number_in_the_code() {
         let d = card();
         assert!(borders(d.path(), System::Sfc).is_empty(), "a card with none");
         for n in 1..=4 {
-            put(&d, &format!("sfc{n}.png"));
+            put(&d, &format!("sfc_base_{n:02}.png"));
         }
-        assert_eq!(count(d.path(), System::Sfc), 4);
+        assert_eq!(count(d.path(), System::Sfc), 4 * SHELL_COUNT as usize);
         // And the fifth, from a card edited on a PC — nothing here had to change for it.
-        put(&d, "sfc5.png");
-        assert_eq!(count(d.path(), System::Sfc), 5);
+        put(&d, "sfc_base_05.png");
+        assert_eq!(count(d.path(), System::Sfc), 5 * SHELL_COUNT as usize);
     }
 
     #[test]
     fn a_border_belongs_to_the_machine_in_its_name() {
         let d = card();
-        put(&d, "sfc1.png");
-        put(&d, "sfc2.png");
-        put(&d, "gba1.png");
-        put(&d, "fc1.png");
-        assert_eq!(count(d.path(), System::Sfc), 2);
-        assert_eq!(count(d.path(), System::Gba), 1);
-        assert_eq!(count(d.path(), System::Gb), 0, "no gb borders on this card");
+        put(&d, "sfc_base_01.png");
+        put(&d, "sfc_base_02.png");
+        put(&d, "gba_base_01.png");
+        put(&d, "fc_base_01.png");
+        assert_eq!(count(d.path(), System::Sfc), 2 * SHELL_COUNT as usize);
+        assert_eq!(count(d.path(), System::Gba), SHELL_COUNT as usize);
+        assert_eq!(count(d.path(), System::Gb), 0, "no Game Boy drawings on this card");
     }
 
     /// Numbered, not read off the directory: a card's own order is whoever copied them there, and
-    /// `10` sorting before `2` would put the picker's ring in an order nobody wrote down.
+    /// `_base_10` arriving before `_base_02` would put the picker's ring in an order nobody wrote
+    /// down — which is why the drawings are sorted by name before the colours are handed out.
     #[test]
     fn they_come_back_in_the_order_they_are_numbered() {
         let d = card();
         for n in [1, 2, 10, 3] {
-            put(&d, &format!("gba{n}.png"));
+            put(&d, &format!("gba_base_{n:02}.png"));
         }
         let got: Vec<u32> = borders(d.path(), System::Gba).iter().map(|b| b.number).collect();
-        assert_eq!(got, [1, 2, 3, 10]);
+        // Shape after shape — 01, 02, 03, 10 — and inside each one, its colours from first to last.
+        let want: Vec<u32> = (0..4)
+            .flat_map(|shape| (1..=SHELL_COUNT).map(move |c| shape * SHELL_COUNT + c))
+            .collect();
+        assert_eq!(got, want);
     }
 
-    /// A file that is not a border is not a border: another machine's, a stray label, a directory.
+    /// A file that is not a drawing is not a drawing: another machine's, a stray draft, a
+    /// directory. Nothing here decides what is inside the PNG — that is the rasteriser's answer,
+    /// and a drawing it cannot open is still one the card carries.
     #[test]
     fn anything_that_is_not_numbered_for_the_machine_is_passed_over() {
         let d = card();
-        put(&d, "sfc1.png");
-        put(&d, "sfc_label.png");
-        put(&d, "sfc0.png"); // numbered from one
-        put(&d, "gba1.png");
-        put(&d, "readme.txt");
-        std::fs::create_dir_all(d.path().join(DIR).join("sfc2.png")).unwrap();
-        assert_eq!(count(d.path(), System::Sfc), 1);
+        put(&d, "sfc_base_01.png");
+        put(&d, "sfc_base_draft.png"); // not numbered
+        put(&d, "gba_base_01.png"); // another machine's
+        std::fs::write(
+            d.path().join(DIR).join(BASE).join("readme.txt"),
+            b"notes",
+        )
+        .unwrap();
+        std::fs::create_dir_all(d.path().join(DIR).join(BASE).join("sfc_base_02.png")).unwrap();
+        assert_eq!(count(d.path(), System::Sfc), SHELL_COUNT as usize);
         assert_eq!(borders(d.path(), System::Sfc)[0].number, 1);
     }
 
@@ -298,9 +339,9 @@ mod tests {
     #[test]
     fn a_machine_s_choices_are_not_counted_as_one_of_its_borders() {
         let d = card();
-        put(&d, "sfc1.png");
+        put(&d, "sfc_base_01.png");
         write_selected(d.path(), System::Sfc, "Tetris", Some(1)).unwrap();
-        assert_eq!(count(d.path(), System::Sfc), 1);
+        assert_eq!(count(d.path(), System::Sfc), SHELL_COUNT as usize);
     }
 
     /// A typo on a card costs that one cart its border, not the whole file: the same bargain the

@@ -56,6 +56,7 @@ const MARK_B: u8 = 200;
 const REF_PERCENTILE: f32 = 0.90;
 
 /// The label slot, in the art's own pixels.
+#[derive(Clone)]
 pub struct Label {
     x0: u32,
     y0: u32,
@@ -65,6 +66,10 @@ pub struct Label {
     mask: Vec<u8>,
 }
 
+/// Cloneable because the dyed borders are **kept** — see `border_art`. It is a picture, so a
+/// clone is a copy of its pixels, which is a great deal cheaper than decoding the drawing again
+/// and dyeing it a second time.
+#[derive(Clone)]
 pub struct Art {
     rgba: Vec<u8>,
     w: u32,
@@ -131,11 +136,63 @@ pub fn art_for(system: System) -> Option<&'static Art> {
 /// rest are read when they are asked for rather than held for the whole of a boot: a machine
 /// with thirty-two borders is thirty-two photographs, and holding all of them for a shelf that
 /// draws one is the wrong bargain. A border nobody has looked at costs nothing at all.
+/// Every border dyed so far, keyed by the machine and the number it answers to.
+///
+/// A border is a drawing read off the card and then dyed pixel by pixel, which is a great deal of
+/// work for something the picker may ask for twice inside one press — it lays out the ring, the
+/// caret walks it, and every step is a redraw of faces already drawn. The skeletons are few: one
+/// drawing per shape, and the whole ring is those few drawings in eleven colours.
+static DYED: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<(&'static str, u32), Art>>> =
+    std::sync::OnceLock::new();
+
+/// One border, by number: **the shape it names, dyed the colour it names.**
+///
+/// The card carries one grey drawing per shape (`System/Borders/base/`) and nothing else — see
+/// `slot_store::borders` for the numbering, which is shapes times colours. The colour therefore
+/// does not live on the card anywhere: it is this, done at the moment the border is needed.
+///
+/// Which is the whole of the bargain. A card that carried a picture per colour carried ninety-four
+/// of them, each one rebuilt by a script on a PC and copied across, and a picture that came out
+/// wrong came out wrong in a place nobody could see: the script was elsewhere, the ninety-four
+/// were opaque, and what reached the shelf was a flat wash with no way to ask why. One grey drawing
+/// and one function leaves one place for a mistake to live, and it is here, where it can be read.
 pub fn border_art(root: &Path, system: System, number: u32) -> Option<Art> {
-    let border = slot_store::borders::borders(root, system)
-        .into_iter()
-        .find(|b| b.number == number)?;
-    read(&border.path, false)
+    let key = (system.dir_name(), number);
+    if let Some(done) = DYED
+        .get_or_init(Default::default)
+        .lock()
+        .ok()
+        .and_then(|g| g.get(&key).cloned())
+    {
+        return Some(done);
+    }
+    let index = number.checked_sub(1)?;
+    let shapes = slot_store::borders::templates(root, system);
+    let art = {
+        let colour = (index % slot_store::borders::SHELL_COUNT) as usize;
+        let shape = (index / slot_store::borders::SHELL_COUNT) as usize;
+        let plate = shapes.get(shape)?;
+        let mut art = read(plate, false)?;
+        // **Dyed after it is read, not before**: `read` is what finds the slot, and dyeing first
+        // would be asking it to find a slot in a drawing that had already had every pixel
+        // recoloured to match the plastic — the magenta goes with the rest of it, and there would
+        // be nowhere left to paste this cart's own label. The dye puts the slot's magenta back
+        // when it is finished.
+        let (_, rgb, solidity) = SHELLS[colour];
+        shell_tint(
+            &mut art.rgba,
+            art.w,
+            art.label.as_ref(),
+            rgb,
+            solidity,
+            SHELL_CONTRAST,
+        );
+        art
+    };
+    if let Ok(mut keep) = DYED.get_or_init(Default::default).lock() {
+        keep.insert(key, art.clone());
+    }
+    Some(art)
 }
 
 /// Read whatever the card offers. A missing, unreadable or index-coloured file is simply not

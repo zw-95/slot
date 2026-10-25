@@ -99,8 +99,13 @@ uniform float u_grid_scan;
 // 这是 RetroArch 手持着色器（nds-color / lcd1x_nds）的通行做法，直接乘编码值会把
 // 「半彩」压暗、把单色背光冲淡。
 uniform float u_cc_gamma;
-// 遮罩开关：1.0 = 画（整数倍），0.0 = 完全不画（等比铺满 / 全屏拉伸）。
+// 遮罩开关：1.0 = 画，0.0 = 不画。它按 fit 关过一次 ——「三色组是每个源像素一组」这句
+// 只在整数倍成立 —— 而结果是把 SELECT+X 做成了一把看起来坏了的键，见 pipeline 的
+// draw_source。所以恒开： VERGE 见 u_grid 下面那段。
 uniform float u_mask_on;
+// 一整组 RGB 三条占几个**面板像素**。这是面板的属性，不是游戏的：一块真 LCD 的荫罩长在
+// 自己的玻璃上，不关心今天送进来的是 160x144 还是 240x160。
+uniform float u_triad;
 varying vec2 v_uv;
 // 4×4 有序抖动（Bayer）。两次 2×2 用算术叠出来，避开 GLSL ES 1.00 没有的位运算与数组索引。
 float Bayer2(vec2 a) {
@@ -130,21 +135,25 @@ void main() {
         c = u_cc * c + u_cc_bias;
         c = pow(max(c, vec3(0.0)), vec3(1.0 / u_cc_gamma));
     }
+    // **Both of these are drawn on the panel's own pixels, not on the picture's.** They were drawn
+    // on `u_src` — one triad per *source* pixel — and that only lines up with the panel while the
+    // scale is whole: a Family Computer is 256 across on a 720-wide panel, 2.8 panel pixels each,
+    // so a group lands across a source pixel's edge and comes out as uneven bands of colour
+    // instead of a lattice. `gl_FragCoord` is where the fragment lands on the panel, and dividing
+    // it by `u_triad` tiles each group over a whole number of those no matter what is fitted —
+    // which is where a shadow mask actually lives.
+    vec2 panel_px = gl_FragCoord.xy;
     if (u_grid_mix > 0.0) {
-        vec2 sub = fract(v_uv * u_src);
-        // The mesh is the right column and the bottom row of every 3x3 source pixel (5 of its 9,
-        // overlap counted once); a scanline is the bottom row alone — the same lit wire every
-        // third game pixel, which is what a panel's row gap looks like.
+        vec2 sub = fract(panel_px / u_triad);
+        // The mesh is the right column and the bottom row of every group (5 of its 9, overlap
+        // counted once); a scanline is the bottom row alone — the same lit wire every third
+        // panel-pixel group, which is what a panel's row gap looks like.
         bool hit = sub.y >= 0.66667 || (u_grid_scan < 0.5 && sub.x >= 0.66667);
         if (hit) {
             c = mix(c, u_grid, u_grid_mix);
         }
     }
-    // 面板遮罩在编码空间乘（顺序与旧版等价：矩阵与遮罩都是乘法，可交换）。
-    // u_mask_on 由 CPU 侧按 fit 推送：遮罩是「每个源像素一组 RGB 三条」，这句话只在
-    // 整数倍缩放下成立，等比铺满与全屏拉伸时三色组会横跨源像素的边界，出来的是彩色的
-    // 拖影而不是网格 —— 干脆不画，见 pipeline 的 draw_source。
-    vec3 rgb = c * mix(vec3(1.0), texture2D(u_mask, v_uv * u_src).rgb, u_mask_on);
+    vec3 rgb = c * mix(vec3(1.0), texture2D(u_mask, panel_px / u_triad).rgb, u_mask_on);
     FRAG_COLOR = vec4(rgb * u_bright, 1.0);
 }
 "#;
