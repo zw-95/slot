@@ -838,6 +838,13 @@ impl Frontend {
     fn pump_shelf_faces(&mut self, compositor: &mut Compositor) {
         self.sync_resident_faces(compositor);
         for (i, f) in self.shelf_faces.drain() {
+            // Anything already standing in this place was superseded — another cover for this
+            // cart, or another cover for the cart that used to stand here — and the arrival is
+            // the moment it stops being drawn, which is also the moment its texture may go.
+            // Releasing it earlier is a row with no picture in it; see `sync_resident_faces`.
+            if let Some(old) = self.session.app().face_of(i) {
+                compositor.release_texture(old.tex);
+            }
             let id = compositor.create_texture(f.w, f.h, &f.rgba);
             self.session.app_mut().set_face(i, id, f.w, f.h);
         }
@@ -896,10 +903,13 @@ impl Frontend {
         // stale — so the choice lands on the row as well as on the card.
         if self.session.app_mut().take_shelf_face_stale() {
             let i = self.session.app().shelf_index();
-            if let Some(face) = self.session.app().face_of(i) {
-                compositor.release_texture(face.tex);
-                self.session.app_mut().clear_face(i);
-            }
+            // **Only queued, and deliberately not released.** The face standing there is out of
+            // date — it is still wearing the cover this cart has just taken off — but it is the
+            // right cart in the right place, and dropping it for the two or three frames the
+            // filler needs is dropping the row back to the machine's own shell, which is what
+            // made changing a cover look like the cover had been thrown away and then handed
+            // back. The row keeps its picture until the picture that replaces it arrives, and
+            // the old texture is handed back there — see `pump_shelf_faces`.
             if !self.shelf_missing.contains(&i) {
                 self.shelf_missing.push(i);
             }

@@ -441,11 +441,29 @@ pub fn shell_tint(
     let (hue, sat, light) = rgb_to_hsv(target);
     let base = light * 255.0;
 
-    // What light the drawing actually has — over its own plastic and nowhere else.
+    // What light the drawing actually has — over its own plastic and **nowhere else**. The slot's
+    // magenta is the brightest thing on the page and there is more of it than there is of most of
+    // the shell: on a Family Computer drawing it is close to half the picture. `reference_luma`
+    // has always known to ignore it and this did not, so the middle and both ends of the range
+    // were being decided by where the *label* sits rather than by where the light does, and whole
+    // stretches of plastic were then recoloured against a ceiling belonging to the sticker — which
+    // is what a grey patch down one side of a shell is. This lines up with the other one.
+    let marked = |x: u32, y: u32| -> bool {
+        label.is_some_and(|l| {
+            x >= l.x0 && x <= l.x1 && y >= l.y0 && y <= l.y1 && l.mask[(y * w + x) as usize] != 0
+        })
+    };
+    let rows = rgba.len() / 4 / (w.max(1) as usize);
     let mut hist = [0u32; 256];
-    for px in rgba.chunks_exact(4) {
-        if px[3] != 0 {
-            hist[value_of(px) as usize] += 1;
+    for y in 0..rows as u32 {
+        for x in 0..w {
+            if marked(x, y) {
+                continue;
+            }
+            let px = &rgba[((y * w + x) * 4) as usize..][..4];
+            if px[3] != 0 {
+                hist[value_of(px) as usize] += 1;
+            }
         }
     }
     hist[0] = 0;
@@ -488,7 +506,6 @@ pub fn shell_tint(
         shift = dn * k - base;
     }
 
-    let rows = rgba.len() / 4 / (w.max(1) as usize);
     for y in 0..rows as u32 {
         for x in 0..w {
             let at = ((y * w + x) * 4) as usize;
