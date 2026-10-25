@@ -875,7 +875,14 @@ impl Shelf {
             let t = offset.abs().min(1.0);
             let size = self.size();
             let scale = size.middle + (size.side - size.middle) * t;
-            let mut alpha = (1.0 + (SIDE_ALPHA - 1.0) * t) * (1.0 - recede);
+            // The opacity is handed back **by however far out the cart already stands**: `t` is
+            // nothing at the middle and one a step either way, so the cart in hand keeps the whole
+            // of its own while the ones beside it clear out. The displacement above already did
+            // this — a cart in the middle has no "away" to travel — and the two have to agree,
+            // because a row that parted without dimming would be a row of carts walking sideways
+            // behind whatever it is making way for, and one that dimmed in place would lose the
+            // cart the whole row exists to hold.
+            let mut alpha = (1.0 + (SIDE_ALPHA - 1.0) * t) * (1.0 - recede * t);
             let (w, h) = self.drawn(i, size, scale);
             // Away from the middle, and further the further out it already was, so the row
             // opens rather than sliding sideways.

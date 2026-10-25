@@ -12,7 +12,8 @@ use slot_store::{
 use slot_ui::lang;
 use slot_ui::{
     board_at, board_zoom, draw_backdrop, draw_edge_glow, draw_empty_slot, draw_shortcut_row,
-    draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of, size_for,
+    draw_status, draw_sticker_at, draw_top_band, ease, grown, letters, lid_at, lift_of, shelf_cart,
+    size_for, SIDE_ALPHA,
     ClockPicker, Draw, FfState, Hud, HudKind, Icon, Letters, Millis, Placed, Polaroids,
     PowerChoice, Refusal, Shelf, SlotChrome, TexId, Toast, BOARD_W, BOARD_X, CART_W, CORE_DOT,
     CORE_DOT_GAP, CORE_DOT_LIFT, CORE_H, CORE_W, HINT_EDGE, HINT_H, MOUTH_H, NAME_H,
@@ -263,13 +264,11 @@ impl LinkRow {
 /// How much of the shelf's own size the border picker draws a cart at: large enough to read the
 /// difference between two shells, which is the only reason the panel exists.
 pub const BORDER_FACE_K: u32 = 2;
-/// How far apart the picker's ring stands its neighbours, as a share of a cart's own width.
-/// Wider and the two beside it leave the panel; narrower and they read as one wide cart.
-const BORDER_SPACING: f32 = 1.18;
-/// How solid a neighbour is, against the one in hand's full.
-const BORDER_SIDE_A: f32 = 0.45;
-/// How far the shelf dims behind the row.
-const BORDER_VEIL: f32 = 0.62;
+/// How far past the place they are going to stand the covers arrive from, as a share of the row's
+/// own pitch. They walk into the room the neighbouring games have just left, rather than appearing
+/// in it: the row parts outwards and the covers come in behind them, which is one movement and not
+/// an exchange nobody watched.
+const BORDER_ARRIVE: f32 = 0.35;
 /// The row of lamps under the cart, and its lift off the cart's foot.
 const BORDER_DOT: f32 = 6.0;
 const BORDER_DOT_GAP: f32 = 7.0;
@@ -4001,7 +4000,16 @@ impl App {
                         draw_empty_slot(out);
                     }
                     _ => {
-                        self.shelf.draw(self.shelf_shake(), out);
+                        // While covers are being chosen the row **parts to either side** of the
+                        // cart being dressed, and the covers walk into the room it leaves. The
+                        // cart itself keeps its place and all of its light — which is the whole
+                        // difference between this and opening a panel over the shelf.
+                        let part = self.border_part();
+                        if part > 0.0 {
+                            self.shelf.draw_row(None, self.shelf_shake(), part, 1.0, out);
+                        } else {
+                            self.shelf.draw(self.shelf_shake(), out);
+                        }
                         // The stars, over the row and under the case's own furniture: a starred
                         // cart wears one above it, and the shelf's own star sits in the corner
                         // saying which shelf is up.
@@ -4786,6 +4794,18 @@ impl App {
         self.border_picker.filter(|p| !p.waiting())
     }
 
+    /// How far the shelf's row has parted to let the covers in. Nothing with no picker up, and
+    /// the picker's own openness once there is one, so the neighbouring **games** leave exactly
+    /// as the covers arrive — see `draw_row`'s `recede`, which is the same motion the core picker
+    /// has always used. Deliberately not dimmed and not hidden: unlike the lid coming off, this
+    /// cart keeps every pixel it had, because it is what is being dressed.
+    pub(crate) fn border_part(&self) -> f32 {
+        match self.border_picker_shown() {
+            Some(picker) => picker.openness(self.now()),
+            None => 0.0,
+        }
+    }
+
     /// The cart under the highlight, large, wearing the border in hand, with its neighbours
     /// either side of it and the shelf dimmed behind the whole row.
     ///
@@ -4798,15 +4818,12 @@ impl App {
         if pose.openness <= 0.0 {
             return;
         }
-        // The shelf dims rather than going away: what is being dressed is the cart still
-        // standing there, and a panel that hid it would be choosing a border for nothing.
-        out.push(Draw::Rect {
-            x: 0.0,
-            y: 0.0,
-            w: OUT_W as f32,
-            h: OUT_H as f32,
-            colour: [0.0, 0.0, 0.0, BORDER_VEIL * pose.openness],
-        });
+        // **Not a panel, and no veil: this is not something laid over the shelf.** Opening it
+        // asks the row what it is holding, and the row answers with covers of one cart instead of
+        // with games — the neighbours part outwards (see `border_part`) and these walk into the
+        // room they leave. Nothing behind it is hidden or dimmed, and the cart being dressed does
+        // not move: it is dressed where it stands, which is the one thing a panel over it could
+        // never do.
         // Nothing to draw until at least one of the ring's faces is on the GPU.
         if !self.border_faces.iter().any(|f| f.is_some()) {
             return;
@@ -4827,12 +4844,14 @@ impl App {
         // The height every cart in the row is drawn at: the row stands them on a line, and that
         // line is the one measure they share. The width is **each cart's own**, taken from its
         // face below, because a machine's borders are not all one shape.
-        let ch = size.h as f32 * size.middle;
-        let cx = OUT_W as f32 / 2.0;
-        let cy = OUT_H as f32 / 2.0;
-        // How far apart the places are: the machine's own width, so the row slides a steady step
-        // whatever shape the cart standing in it happens to be.
-        let spacing = size.w as f32 * size.middle * BORDER_SPACING;
+        // **The shelf's own row, exactly**: its pitch, its sizes, and the same line the carts
+        // stand on. Whatever justified those numbers for a row of games justifies them for a row
+        // of covers of the same cart. Anything else here and opening the picker would quietly be
+        // a second layout disagreeing with the first.
+        // `shelf_cart` is where the shelf stands this cart, which is the one line every cart in
+        // the row shares; its foot is the line these covers stand on too.
+        let stance = shelf_cart(cart.system());
+        let foot = stance.y + stance.h;
         for offset in [-1isize, 0, 1] {
             let Some(i) = picker.item_at(offset) else {
                 continue;
@@ -4840,24 +4859,29 @@ impl App {
             let Some((tex, fw, fh)) = self.border_faces.get(i).copied().flatten() else {
                 continue;
             };
+            // Where this one stands, counting the press still carrying the row.
+            let d = offset as f32 + pose.shift;
+            let t = d.abs().min(1.0);
+            let scale = size.middle + (size.side - size.middle) * t;
             // The width **this** picture asks for at the row's height. A Family Computer cart
             // wearing the square NES shell is square and one wearing the yellow cart is half
             // again as wide as it is tall, and a row that drew both at the machine's width is a
             // row that stretched one of them into a shape it is not.
-            let cw = ch * fw as f32 / fh.max(1) as f32;
-            // Where this one stands: its own place in the row, and the whole row slid by
-            // however far the press has carried it.
-            let d = offset as f32 + pose.shift;
-            let near = (1.0 - d.abs()).clamp(0.0, 1.0);
-            let alpha = (BORDER_SIDE_A + (1.0 - BORDER_SIDE_A) * near) * pose.openness;
+            let h = size.h as f32 * scale;
+            let w = h * fw as f32 / fh.max(1) as f32;
+            // And the room it walks in from while the row is still opening: further out the
+            // further out it already stands, which is what makes the row part rather than slide.
+            let arrive =
+                (1.0 - pose.openness) * d.signum() * (1.0 + d.abs()) * size.pitch * BORDER_ARRIVE;
+            let alpha = (1.0 + (SIDE_ALPHA - 1.0) * t) * pose.openness;
             if alpha <= 0.01 {
                 continue;
             }
             out.push(Draw::Tex {
-                x: (cx + d * spacing - cw / 2.0).round(),
-                y: (cy - ch / 2.0).round(),
-                w: cw,
-                h: ch,
+                x: (OUT_W as f32 / 2.0 + d * size.pitch - w / 2.0 + arrive).round(),
+                y: (foot - h).round(),
+                w,
+                h,
                 tex,
                 alpha,
             });
@@ -4866,8 +4890,8 @@ impl App {
         // change is in flight — a row that blinked would be a different row every press.
         let n = picker.count();
         let row = n as f32 * BORDER_DOT + (n - 1) as f32 * BORDER_DOT_GAP;
-        let x0 = cx - row / 2.0;
-        let y = cy + ch / 2.0 + BORDER_DOT_LIFT;
+        let x0 = OUT_W as f32 / 2.0 - row / 2.0;
+        let y = foot + BORDER_DOT_LIFT;
         for i in 0..n {
             let lit = picker.dot_lit(i, now);
             out.push(Draw::Rect {
