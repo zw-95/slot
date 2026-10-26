@@ -13,7 +13,9 @@ device = ["slot-gfx/device"]
 [dependencies]
 slot-ftrace = { path = "../slot-ftrace" }
 slot-gfx = { path = "../slot-gfx", default-features = false }
+slot-i18n = { path = "../slot-i18n" }
 slot-input = { path = "../slot-input" }
+slot-pinyin = { path = "../slot-pinyin" }
 slot-power = { path = "../slot-power" }
 slot-cheevos = { path = "../slot-cheevos" }
 slot-retro = { path = "../slot-retro" }

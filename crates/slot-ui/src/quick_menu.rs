@@ -6,6 +6,7 @@ use crate::plate::{
 use crate::power_menu::{MENU_H, MENU_INK, MENU_PAD, MENU_PX};
 use crate::slot_chrome::{opening, MOUTH_H};
 use crate::text;
+use slot_i18n::{t, MsgKey};
 use slot_store::Platform;
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -72,6 +73,8 @@ pub enum QuickRow {
     ShutDown,
     /// Starts slot again, without restarting the device.
     Reload,
+    /// Which language the interface speaks.
+    Language,
     /// A platform's own page under Screen, and the rows on it.
     ScreenOf(Platform),
     ShaderOf(Platform),
@@ -80,7 +83,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 49] = [
+const GENERIC: [QuickRow; 50] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -130,6 +133,7 @@ const GENERIC: [QuickRow; 49] = [
     QuickRow::Cast,
     QuickRow::PlayCast,
     QuickRow::TvSound,
+    QuickRow::Language,
 ];
 
 /// How many rows each platform has of its own: its page, shader, colour correction and bezel.
@@ -242,7 +246,7 @@ impl QuickRow {
         QuickRow::Achievements,
     ];
 
-    pub const GENERAL: [QuickRow; 10] = [
+    pub const GENERAL: [QuickRow; 11] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
@@ -253,6 +257,7 @@ impl QuickRow {
         QuickRow::MenuSounds,
         QuickRow::Haptics,
         QuickRow::TvSound,
+        QuickRow::Language,
     ];
 
     pub const GAME: [QuickRow; 8] = [
@@ -354,7 +359,8 @@ impl QuickRow {
             | QuickRow::TvSound
             | QuickRow::Theme
             | QuickRow::Recents
-            | QuickRow::ShowTitles => QuickRow::GENERAL.to_vec(),
+            | QuickRow::ShowTitles
+            | QuickRow::Language => QuickRow::GENERAL.to_vec(),
             QuickRow::Resume
             | QuickRow::States
             | QuickRow::Settings
@@ -438,57 +444,59 @@ impl QuickRow {
             .unwrap_or(0)
     }
 
+    /// What the row is called, in the language the interface is in.
     pub fn label(self) -> &'static str {
         match self {
-            QuickRow::FastForward => "Fast Forward",
-            QuickRow::FastForwardSound => "Fast Forward Sound",
-            QuickRow::Screen => "Screen",
-            QuickRow::Rumble => "Rumble",
-            QuickRow::DateTime => "Date & Time",
-            QuickRow::Clock => "Clock",
-            QuickRow::MenuSounds => "Menu Sounds",
-            QuickRow::Haptics => "Haptics",
-            QuickRow::TvSound => "Sound on TV",
-            QuickRow::About => "About",
-            QuickRow::Game => "Gameplay",
-            QuickRow::EjectSave => "Auto Save on Eject",
-            QuickRow::Turbo => "Turbo Buttons",
-            QuickRow::Rewind => "Rewind",
-            QuickRow::GbPalettes => "Palettes",
-            QuickRow::RunAhead => "Run-Ahead",
-            QuickRow::Theme => "Theme",
-            QuickRow::Wallpaper => "Wallpaper",
-            QuickRow::General => "General",
-            QuickRow::Recents => "Recents",
-            QuickRow::ShowTitles => "Game Titles",
-            QuickRow::WallpaperTint => "Wallpaper Tint",
-            QuickRow::Resume => "Resume",
-            QuickRow::States => "States",
-            QuickRow::Settings => "Settings",
-            QuickRow::ExitGame => "Exit Game",
-            QuickRow::PlayScreen => "Screen",
-            QuickRow::PlayGameplay => "Gameplay",
-            QuickRow::Shader | QuickRow::ShaderOf(_) => "Shader",
-            QuickRow::ColourCorrection | QuickRow::ColourCorrectionOf(_) => "Color Correction",
-            QuickRow::Palette => "Palette",
-            QuickRow::Bezel | QuickRow::BezelOf(_) => "Bezel",
+            QuickRow::FastForward => t(MsgKey::RowFastForward),
+            QuickRow::FastForwardSound => t(MsgKey::RowFastForwardSound),
+            QuickRow::Screen | QuickRow::PlayScreen => t(MsgKey::RowScreen),
+            QuickRow::Rumble => t(MsgKey::RowRumble),
+            QuickRow::DateTime => t(MsgKey::RowDateTime),
+            QuickRow::Clock => t(MsgKey::RowClock),
+            QuickRow::MenuSounds => t(MsgKey::RowMenuSounds),
+            QuickRow::Haptics => t(MsgKey::RowHaptics),
+            QuickRow::TvSound => t(MsgKey::RowTvSound),
+            QuickRow::About => t(MsgKey::RowAbout),
+            QuickRow::Game | QuickRow::PlayGameplay => t(MsgKey::RowGameplay),
+            QuickRow::EjectSave => t(MsgKey::RowEjectSave),
+            QuickRow::Turbo => t(MsgKey::RowTurbo),
+            QuickRow::Rewind => t(MsgKey::RowRewind),
+            QuickRow::GbPalettes => t(MsgKey::RowPalettes),
+            QuickRow::Palette => t(MsgKey::RowPalette),
+            QuickRow::RunAhead => t(MsgKey::RowRunAhead),
+            QuickRow::Theme => t(MsgKey::RowTheme),
+            QuickRow::Wallpaper => t(MsgKey::RowWallpaper),
+            QuickRow::General => t(MsgKey::RowGeneral),
+            QuickRow::Recents => t(MsgKey::RowRecents),
+            QuickRow::ShowTitles => t(MsgKey::RowShowTitles),
+            QuickRow::WallpaperTint => t(MsgKey::RowWallpaperTint),
+            QuickRow::Resume => t(MsgKey::RowResume),
+            QuickRow::States => t(MsgKey::RowStates),
+            QuickRow::Settings => t(MsgKey::RowSettings),
+            QuickRow::ExitGame => t(MsgKey::RowExitGame),
+            QuickRow::Shader | QuickRow::ShaderOf(_) => t(MsgKey::RowShader),
+            QuickRow::ColourCorrection | QuickRow::ColourCorrectionOf(_) => {
+                t(MsgKey::RowColourCorrection)
+            }
+            QuickRow::Bezel | QuickRow::BezelOf(_) => t(MsgKey::RowBezel),
             QuickRow::ScreenOf(p) => p.name(),
-            QuickRow::Disc => "Disc",
-            QuickRow::Network => "Network",
-            QuickRow::Wifi => "Wi-Fi",
-            QuickRow::WifiNetworks => "Networks",
-            QuickRow::Bluetooth => "Bluetooth",
-            QuickRow::BtDevices => "Devices",
-            QuickRow::Cast | QuickRow::PlayCast => "Cast",
-            QuickRow::Services => "Services",
-            QuickRow::Updates => "Updates",
-            QuickRow::Cores => "Cores",
-            QuickRow::GameArt => "Game Art",
-            QuickRow::Achievements => "RetroAchievements",
-            QuickRow::Power => "Power",
-            QuickRow::Restart => "Restart",
-            QuickRow::ShutDown => "Shut Down",
-            QuickRow::Reload => "Reload unslot",
+            QuickRow::Disc => t(MsgKey::RowDisc),
+            QuickRow::Network => t(MsgKey::RowNetwork),
+            QuickRow::Wifi => t(MsgKey::RowWifi),
+            QuickRow::WifiNetworks => t(MsgKey::RowNetworks),
+            QuickRow::Bluetooth => t(MsgKey::RowBluetooth),
+            QuickRow::BtDevices => t(MsgKey::RowDevices),
+            QuickRow::Cast | QuickRow::PlayCast => t(MsgKey::RowCast),
+            QuickRow::Services => t(MsgKey::RowServices),
+            QuickRow::Updates => t(MsgKey::RowUpdates),
+            QuickRow::Cores => t(MsgKey::RowCores),
+            QuickRow::GameArt => t(MsgKey::RowGameArt),
+            QuickRow::Achievements => t(MsgKey::RowAchievements),
+            QuickRow::Power => t(MsgKey::RowPower),
+            QuickRow::Restart => t(MsgKey::RowRestart),
+            QuickRow::ShutDown => t(MsgKey::RowShutDown),
+            QuickRow::Reload => t(MsgKey::RowReload),
+            QuickRow::Language => t(MsgKey::RowLanguage),
         }
     }
 
@@ -562,10 +570,13 @@ pub enum QuickValue {
     Disc5,
     Hours24,
     Hours12,
+    /// The language row's own two choices, each named in its own tongue.
+    LangEn,
+    LangZh,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 25] = [
+    pub const ALL: [QuickValue; 27] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -591,39 +602,45 @@ impl QuickValue {
         QuickValue::Disc5,
         QuickValue::Hours24,
         QuickValue::Hours12,
+        QuickValue::LangEn,
+        QuickValue::LangZh,
     ];
 
     pub fn index(self) -> usize {
         self as usize
     }
 
+    /// What the value reads as, in the language the interface is in. Speeds, shaders that are
+    /// named after themselves and the tints' percentages read the same in both.
     pub fn text(self) -> &'static str {
         match self {
             QuickValue::Speed2 => "2×",
             QuickValue::Speed3 => "3×",
             QuickValue::Speed4 => "4×",
             QuickValue::Speed6 => "6×",
-            QuickValue::On => "On",
-            QuickValue::Off => "Off",
+            QuickValue::On => t(MsgKey::ValueOn),
+            QuickValue::Off => t(MsgKey::ValueOff),
             QuickValue::Lcd3x => "LCD3x",
-            QuickValue::Grid => "Grid",
-            QuickValue::Dot => "Dot",
+            QuickValue::Grid => t(MsgKey::ValueGrid),
+            QuickValue::Dot => t(MsgKey::ValueDot),
             QuickValue::Simpletex => "Simpletex",
-            QuickValue::Frames1 => "1 Frame",
-            QuickValue::Dark => "Dark",
-            QuickValue::Light => "Light",
-            QuickValue::Show => "Show",
-            QuickValue::Hide => "Hide",
+            QuickValue::Frames1 => t(MsgKey::ValueFrames1),
+            QuickValue::Dark => t(MsgKey::ValueDark),
+            QuickValue::Light => t(MsgKey::ValueLight),
+            QuickValue::Show => t(MsgKey::ValueShow),
+            QuickValue::Hide => t(MsgKey::ValueHide),
             QuickValue::Low => "25%",
             QuickValue::Medium => "45%",
             QuickValue::High => "65%",
-            QuickValue::Disc1 => "Disc 1",
-            QuickValue::Disc2 => "Disc 2",
-            QuickValue::Disc3 => "Disc 3",
-            QuickValue::Disc4 => "Disc 4",
-            QuickValue::Disc5 => "Disc 5",
-            QuickValue::Hours24 => "24-Hour",
-            QuickValue::Hours12 => "12-Hour",
+            QuickValue::Disc1 => t(MsgKey::ValueDisc1),
+            QuickValue::Disc2 => t(MsgKey::ValueDisc2),
+            QuickValue::Disc3 => t(MsgKey::ValueDisc3),
+            QuickValue::Disc4 => t(MsgKey::ValueDisc4),
+            QuickValue::Disc5 => t(MsgKey::ValueDisc5),
+            QuickValue::Hours24 => t(MsgKey::ValueHours24),
+            QuickValue::Hours12 => t(MsgKey::ValueHours12),
+            QuickValue::LangEn => t(MsgKey::ValueLangEn),
+            QuickValue::LangZh => t(MsgKey::ValueLangZh),
         }
     }
 
@@ -783,31 +800,41 @@ pub fn quick_caret_face(right: bool) -> UndoFace {
 pub fn quick_legend_faces(ink: [u8; 3]) -> [UndoFace; 5] {
     let hint = Some(ink);
     [
-        with_hint(button_face(ButtonLegend::B), "Back", hint, true),
+        with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnBack), hint, true),
         with_hint(
             button_pair(ButtonLegend::Left, ButtonLegend::Right),
-            "Change",
+            t(MsgKey::BtnChange),
             hint,
             false,
         ),
-        with_hint(button_face(ButtonLegend::A), "Open", hint, false),
-        with_hint(button_face(ButtonLegend::B), "Resume", hint, true),
-        with_hint(button_face(ButtonLegend::X), "Restart", hint, false),
+        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnOpen), hint, false),
+        with_hint(
+            button_face(ButtonLegend::B),
+            t(MsgKey::RowResume),
+            hint,
+            true,
+        ),
+        with_hint(
+            button_face(ButtonLegend::X),
+            t(MsgKey::RowRestart),
+            hint,
+            false,
+        ),
     ]
 }
 
 /// Cancel, Swap, Choose. Swap keeps the button before the word, the way the old arrows did.
 pub fn core_button_legends() -> Vec<UndoFace> {
     vec![
-        with_hint(button_face(ButtonLegend::B), "Cancel", None, true),
+        with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnCancel), None, true),
         with_hint(
             button_pair(ButtonLegend::Left, ButtonLegend::Right),
-            "Swap",
+            t(MsgKey::BtnSwap),
             None,
             true,
         ),
-        with_hint(button_face(ButtonLegend::A), "Choose", None, false),
-        with_hint(button_face(ButtonLegend::Y), "All GBA", None, false),
+        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnChoose), None, false),
+        with_hint(button_face(ButtonLegend::Y), t(MsgKey::BtnAllGba), None, false),
     ]
 }
 
@@ -815,18 +842,23 @@ pub fn core_button_legends() -> Vec<UndoFace> {
 pub fn link_button_legends(ink: [u8; 3]) -> Vec<UndoFace> {
     let hint = Some(ink);
     vec![
-        with_hint(button_face(ButtonLegend::B), "Cancel", hint, true),
-        with_hint(button_face(ButtonLegend::Select), "Mode", hint, true),
+        with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnCancel), hint, true),
+        with_hint(button_face(ButtonLegend::Select), t(MsgKey::BtnMode), hint, true),
         with_hint(
             button_pair(ButtonLegend::Left, ButtonLegend::Right),
-            "Swap",
+            t(MsgKey::BtnSwap),
             hint,
             false,
         ),
-        with_hint(button_face(ButtonLegend::A), "Link", hint, false),
-        with_hint(button_face(ButtonLegend::A), "OK", hint, false),
-        with_hint(button_face(ButtonLegend::B), "Back", hint, true),
-        with_hint(button_face(ButtonLegend::A), "End Link", hint, false),
+        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnLink), hint, false),
+        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnOk), hint, false),
+        with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnBack), hint, true),
+        with_hint(
+            button_face(ButtonLegend::A),
+            t(MsgKey::BtnEndLink),
+            hint,
+            false,
+        ),
     ]
 }
 

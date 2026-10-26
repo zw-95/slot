@@ -1,8 +1,8 @@
 use slot_store::{read_slot_state, write_slot_state, SlotState};
 
 #[test]
-fn titles_start_hidden() {
-    assert!(!SlotState::default().show_titles);
+fn titles_start_shown() {
+    assert!(SlotState::default().show_titles);
 }
 
 #[test]
@@ -18,7 +18,7 @@ fn show_titles_survives_a_restart() {
 }
 
 #[test]
-fn a_card_written_before_titles_reads_with_them_hidden() {
+fn a_card_written_before_titles_reads_with_them_shown() {
     let d = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(d.path().join("Config")).unwrap();
     write_slot_state(d.path(), &SlotState::default()).unwrap();
@@ -30,5 +30,5 @@ fn a_card_written_before_titles_reads_with_them_hidden() {
         .map(|l| format!("{l}\n"))
         .collect();
     std::fs::write(&path, old).unwrap();
-    assert!(!read_slot_state(d.path()).show_titles);
+    assert!(read_slot_state(d.path()).show_titles);
 }

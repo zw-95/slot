@@ -13,6 +13,7 @@ jpeg-decoder = { workspace = true }
 resvg = { workspace = true }
 usvg = { workspace = true }
 slot-gfx = { path = "../slot-gfx", default-features = false }
+slot-i18n = { path = "../slot-i18n" }
 slot-power = { path = "../slot-power" }
 slot-store = { path = "../slot-store" }
 

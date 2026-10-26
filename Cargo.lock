@@ -2176,7 +2176,9 @@ dependencies = [
  "slot-cheevos",
  "slot-ftrace",
  "slot-gfx",
+ "slot-i18n",
  "slot-input",
+ "slot-pinyin",
  "slot-power",
  "slot-retro",
  "slot-store",
@@ -2217,7 +2219,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "slot-i18n"
+version = "0.1.0"
+
+[[package]]
 name = "slot-input"
+version = "0.1.0"
+
+[[package]]
+name = "slot-pinyin"
 version = "0.1.0"
 
 [[package]]
@@ -2247,6 +2257,8 @@ name = "slot-store"
 version = "0.1.0"
 dependencies = [
  "lz4_flex",
+ "slot-i18n",
+ "slot-pinyin",
  "tempfile",
  "unicode-normalization",
 ]
@@ -2261,6 +2273,7 @@ dependencies = [
  "qrcode",
  "resvg",
  "slot-gfx",
+ "slot-i18n",
  "slot-power",
  "slot-store",
  "tempfile",

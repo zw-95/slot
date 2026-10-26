@@ -108,7 +108,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Clock",
             "Menu Sounds",
             "Haptics",
-            "Sound on TV"
+            "Sound on TV",
+            "Language"
         ]
     );
     let screens: Vec<&str> = QuickRow::screen_page()
@@ -195,6 +196,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Restart,
             QuickRow::ShutDown,
             QuickRow::Reload,
+            QuickRow::Achievements,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))
@@ -223,7 +225,7 @@ fn a_hidden_row_is_stepped_over_and_takes_no_place() {
     let hidden = [QuickRow::WallpaperTint];
     assert_eq!(QuickRow::Wallpaper.down(&hidden), QuickRow::Theme);
     assert_eq!(QuickRow::Theme.up(&hidden), QuickRow::Wallpaper);
-    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Haptics);
+    assert_eq!(QuickRow::Wallpaper.up(&hidden), QuickRow::Language);
     assert_eq!(QuickRow::Theme.position(&hidden), 1);
     assert_eq!(QuickRow::Wallpaper.down(&[]), QuickRow::WallpaperTint);
     assert_eq!(QuickRow::Theme.position(&[]), 2);
@@ -264,6 +266,8 @@ fn the_values_read_as_the_menu_prints_them() {
             "Disc 5",
             "24-Hour",
             "12-Hour",
+            "English",
+            "简体中文",
         ]
     );
     assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));

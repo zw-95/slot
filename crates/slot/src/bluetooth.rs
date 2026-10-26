@@ -4,10 +4,12 @@
 //! bluetoothctl and bluealsa. Off the device a pretend radio stands in, as with the Wi-Fi.
 
 use std::path::{Path, PathBuf};
-use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+
+use slot_i18n::{filled, t, MsgKey};
 
 /// How long a search for new devices runs.
 pub const SEARCH_S: u32 = 10;
@@ -273,10 +275,8 @@ fn work(
                     v.devices = sorted(devices.clone());
                     v.error = match link {
                         Link::Up => None,
-                        Link::Failed => Some(format!("Could not connect to {name}")),
-                        Link::NeedsLe => Some(format!(
-                            "{name} would not pair. Turn Bluetooth off and on, then try again"
-                        )),
+                        Link::Failed => Some(filled(MsgKey::BtCouldNotConnect, &name)),
+                        Link::NeedsLe => Some(filled(MsgKey::BtWouldNotPair, &name)),
                     };
                 });
             }
@@ -381,7 +381,7 @@ impl BtBackend for DeviceBt {
     fn up(&mut self) -> Result<(), String> {
         match self.ran(&["up"]) {
             true => Ok(()),
-            false => Err("Bluetooth would not start".into()),
+            false => Err(t(MsgKey::BtWouldNotStart).into()),
         }
     }
 
@@ -577,16 +577,13 @@ mod tests {
 
         bt.pair("AA:00:00:00:00:03");
         let view = settled(&bt, |v| v.error.is_some());
-        assert_eq!(view.error.as_deref(), Some("Could not connect to Stubborn"));
+        let wanted = filled(MsgKey::BtCouldNotConnect, "Stubborn");
+        assert_eq!(view.error.as_deref(), Some(wanted.as_str()));
 
         bt.pair("AA:00:00:00:00:04");
         let view = settled(&bt, |v| v.error.as_deref().is_some_and(|e| e.contains("Xbox")));
-        assert_eq!(
-            view.error.as_deref(),
-            Some(
-                "Xbox Wireless Controller would not pair. Turn Bluetooth off and on, then try again"
-            )
-        );
+        let wanted = filled(MsgKey::BtWouldNotPair, "Xbox Wireless Controller");
+        assert_eq!(view.error.as_deref(), Some(wanted.as_str()));
         assert!(!view.devices.iter().any(|d| d.name.starts_with("Xbox") && d.connected));
 
         bt.forget("AA:00:00:00:00:02");

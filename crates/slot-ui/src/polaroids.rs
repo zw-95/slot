@@ -6,6 +6,7 @@ use crate::art;
 use crate::footer::{draw_corners, Printed};
 use crate::hud::{PLATE, PLATE_H};
 use crate::plate::{hint_quad, hint_row, hint_width, Hint, HINT_GAP, HINT_H, TITLE_H, TITLE_W};
+use slot_i18n::{filled, t, MsgKey};
 
 pub const PHOTO_W: u32 = 240;
 pub const PHOTO_H: u32 = 160;
@@ -18,7 +19,15 @@ const DOT_DIM: f32 = 0.35;
 
 const MARGIN: f32 = 16.0;
 
-pub const LEGEND: [(&str, &str); 3] = [("B", "Back"), ("Y", "Delete"), ("A", "Load")];
+/// The three ways out of a photo: the button, and the word for what it does. A function and not
+/// a const, because the word is looked up in whichever tongue the interface is in.
+pub fn polaroid_legend() -> [(&'static str, &'static str); 3] {
+    [
+        ("B", t(MsgKey::BtnBack)),
+        ("Y", t(MsgKey::BtnDelete)),
+        ("A", t(MsgKey::BtnLoad)),
+    ]
+}
 const WAYS_OUT: usize = 2;
 const UNDO_KEY: &str = "X";
 
@@ -82,7 +91,7 @@ impl Polaroids {
     }
 
     pub fn hints(&self) -> Vec<Hint> {
-        let mut out = hint_row(&LEGEND);
+        let mut out = hint_row(&polaroid_legend());
         if let Some(label) = &self.undo {
             out.push(Hint {
                 key: UNDO_KEY,
@@ -237,13 +246,13 @@ impl Polaroids {
         };
         let delta = parsed - then;
         if delta < 60 {
-            return "just now".into();
+            return t(MsgKey::TimeJustNow).into();
         }
         if delta < 3600 {
-            return format!("{} min ago", delta / 60);
+            return filled(MsgKey::TimeMinAgo, delta / 60);
         }
         if delta < RELATIVE_WINDOW {
-            return format!("{} hr ago", delta / 3600);
+            return filled(MsgKey::TimeHrAgo, delta / 3600);
         }
         format!("{} {}:{}", &stamp[..10], &stamp[11..13], &stamp[14..16])
     }

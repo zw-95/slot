@@ -3,13 +3,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use slot_gfx::{Canvas, Layout, OUT_H, OUT_W};
+use slot_i18n::{filled, saying, set_lang, t, MsgKey};
 use slot_input::{Action, Btn, MENU_DOUBLE_TAP_MS, MUTE_CHORD_MS};
 use slot_power::{Battery, Charge, LedState, LidPolicy, Power};
 use slot_retro::{CoreOption, LinkChannel};
 use slot_store::{
-    format_stamp, parse_stamp, read_slot_state, scan, write_slot_state, BezelPick, Cart, Core,
-    GbPalette, Platform, Recent, Shader, SlotState, StateEntry, StateRing, WallpaperPick,
-    WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, RING_MAX, RUN_AHEAD_MAX, VOLUME_MAX,
+    format_stamp, parse_stamp, read_language, read_slot_state, scan, write_language,
+    write_slot_state, BezelPick, Cart, Core, GbPalette, Lang, Platform, Recent, Shader, SlotState,
+    StateEntry, StateRing, WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS,
+    RING_MAX, RUN_AHEAD_MAX, VOLUME_MAX,
 };
 use slot_ui::{
     board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
@@ -85,6 +87,8 @@ pub const UNDO_GRACE_MS: Millis = 30_000;
 pub const LINK_LOST_MS: Millis = 2000;
 
 const PLAY_HOLD_MS: Millis = 500;
+/// 长按多久算"长按 X"：短按是切子文件夹，按够这么久才打开搜索。
+const X_HOLD_MS: Millis = 500;
 
 const SHUTDOWN_SHOW_MS: Millis = 250;
 
@@ -183,8 +187,8 @@ impl LinkRow {
 
     pub fn text(self) -> &'static str {
         match self {
-            LinkRow::Host => "Host",
-            LinkRow::Join => "Join",
+            LinkRow::Host => t(MsgKey::LinkHost),
+            LinkRow::Join => t(MsgKey::LinkJoin),
         }
     }
 
@@ -418,9 +422,20 @@ impl Rack {
 
     fn name(self) -> &'static str {
         match self {
-            Rack::Recents => "Recents",
-            Rack::Favorites => "Favorites",
+            Rack::Recents => t(MsgKey::RackRecents),
+            Rack::Favorites => t(MsgKey::RackFavorites),
             Rack::Of(p) => p.name(),
+        }
+    }
+
+    /// The machine in its own short name — GBA rather than Game Boy Advance. What the shelf
+    /// says above the carts: it is the name of the folder the games came from, so it answers
+    /// "where am I" at a glance and fits on one line however long the machine's full name is.
+    fn short(self) -> &'static str {
+        match self {
+            Rack::Recents => t(MsgKey::RackRecents),
+            Rack::Favorites => t(MsgKey::RackFavorites),
+            Rack::Of(p) => p.dir_name(),
         }
     }
 }
@@ -431,9 +446,17 @@ const FAVORITES_AT: usize = 1;
 pub struct App {
     phase: Phase,
     shelves: Vec<(Rack, Shelf)>,
+    /// 界面说哪种话。存在 `Config/language.txt`，和最近玩过、收藏一样单独一份文件。
+    language: Lang,
+    /// 卡上所有机种的全部卡带。书架可以被子文件夹筛过，找游戏、刮封面、最近玩过都看这份。
+    games: Vec<Cart>,
+    /// 当前机种书架上正在看的那个子文件夹；None 是"全部"。
+    shelf_folder: Option<String>,
     shelf_at: usize,
     orphaned: Vec<TexId>,
     play_held: Option<Millis>,
+    /// X 按下的时刻：按够 `X_HOLD_MS` 当场开搜索，不等松手；松手时还没够就是短按。
+    x_held: Option<Millis>,
     held_dir: Option<(Btn, Millis, usize)>,
     refusal: Option<Refusal>,
     refused_from: Option<f32>,
@@ -525,6 +548,8 @@ pub struct App {
     slot_faces: Option<(TexId, TexId)>,
     shelf_platform: slot_ui::Printed,
     shelf_title: slot_ui::Printed,
+    /// "3 / 57": how far down the row the hand is, out of the games the shelf is showing.
+    shelf_count: slot_ui::Printed,
     name_pending: bool,
     slot_letter: Option<char>,
     shelf_named: Option<Millis>,
@@ -675,7 +700,7 @@ pub fn sync_line(p: SyncProgress) -> String {
 
 impl App {
     pub fn new(carts: Vec<Cart>) -> Self {
-        let shelves = shelves_of(carts);
+        let shelves = shelves_of(carts.clone());
         let shelf_at = shelves
             .iter()
             .position(|(_, s)| !s.carts.is_empty())
@@ -687,9 +712,13 @@ impl App {
             state_writer,
             phase: Phase::Shelf,
             shelves,
+            language: Lang::En,
+            games: carts,
+            shelf_folder: None,
             shelf_at,
             orphaned: Vec::new(),
             play_held: None,
+            x_held: None,
             held_dir: None,
             refusal: None,
             refused_from: None,
@@ -775,6 +804,7 @@ impl App {
             slot_faces: None,
             shelf_platform: slot_ui::Printed::default(),
             shelf_title: slot_ui::Printed::default(),
+            shelf_count: slot_ui::Printed::default(),
             name_pending: false,
             slot_letter: None,
             shelf_named: None,
@@ -842,6 +872,9 @@ impl App {
         let mut app = App::new(carts);
         app.root = Some(root.to_path_buf());
         app.state = read_slot_state(root);
+        // 界面说卡上记着的那种话。
+        app.language = read_language(root);
+        set_lang(app.language);
         let wifi = Wifi::for_card(root);
         if app.state.wifi {
             wifi.turn_on();
@@ -920,12 +953,116 @@ impl App {
         &mut self.shelves[self.shelf_at].1
     }
 
+    /// The subfolders of one system's games, in the order they cycle: named, no duplicates.
+    fn folders_of(&self, platform: Platform) -> Vec<String> {
+        let mut folders: Vec<String> = self
+            .games
+            .iter()
+            .filter(|c| c.platform == platform)
+            .filter_map(|c| slot_store::folder_of(platform, &c.rom))
+            .collect();
+        folders.sort();
+        folders.dedup();
+        folders
+    }
+
+    /// A short X on the shelf: everything first, then one subfolder at a time, then back to
+    /// everything — always inside the system the player is looking at. It never leaves that
+    /// system: switching systems is L1 and R1's job, and a system with no subfolders gets no
+    /// answer at all from X rather than a jump somewhere else. Holding X opens the search
+    /// keyboard instead.
+    fn cycle_folder(&mut self) {
+        let Some(platform) = self.shelves[self.shelf_at].0.platform() else {
+            return;
+        };
+        let folders = self.folders_of(platform);
+        if folders.is_empty() {
+            return;
+        }
+        let at = self
+            .shelf_folder
+            .as_ref()
+            .and_then(|f| folders.iter().position(|name| name == f));
+        let next = match at {
+            None => Some(folders[0].clone()),
+            // Past the last folder, back to everything.
+            Some(i) => folders.get(i + 1).cloned(),
+        };
+        self.show_folder(next);
+    }
+
+    /// Leaves one system's shelf showing only `folder`, or all of it when that is None.
+    fn show_folder(&mut self, folder: Option<String>) {
+        let Some(platform) = self.shelves[self.shelf_at].0.platform() else {
+            return;
+        };
+        let at = self.shelf_at;
+        let carts: Vec<Cart> = self
+            .games
+            .iter()
+            .filter(|c| {
+                c.platform == platform
+                    && slot_store::folder_of(platform, &c.rom).as_deref() == folder.as_deref()
+            })
+            .cloned()
+            .collect();
+        // 一个子文件夹里总有游戏；万一没有，也别动书架 —— restock 见空书架会跳到下一个机种，
+        // 而切文件夹不该把人带出当前机种。
+        if carts.is_empty() {
+            return;
+        }
+        let (was, picked) = (
+            self.shelves[at].1.index,
+            self.shelves[at]
+                .1
+                .carts
+                .get(self.shelves[at].1.index)
+                .map(|c| c.rom.clone()),
+        );
+        let changed = self.restock(at, carts);
+        if !changed && self.shelf_folder == folder {
+            return;
+        }
+        let shelf = &mut self.shelves[at].1;
+        let i = picked
+            .and_then(|rom| shelf.carts.iter().position(|c| c.rom == rom))
+            .unwrap_or_else(|| was.min(shelf.carts.len().saturating_sub(1)));
+        if !shelf.carts.is_empty() {
+            shelf.select(i);
+        }
+        self.shelf_folder = folder;
+        self.shelf_platform = slot_ui::Printed::default();
+        self.slot_letter = None;
+        self.shelf_named = None;
+        self.name_pending = true;
+        self.mark_stars();
+    }
+
+    /// Puts every one of a system's games back on its shelf after a subfolder was showing.
+    fn restore_shelf(&mut self, at: usize) {
+        let Some(platform) = self.shelves[at].0.platform() else {
+            return;
+        };
+        let carts: Vec<Cart> = self
+            .games
+            .iter()
+            .filter(|c| c.platform == platform)
+            .cloned()
+            .collect();
+        self.restock(at, carts);
+    }
+
     fn switch_shelf(&mut self, by: i32) {
         let Some(to) = self.next_shelf(by) else {
             return;
         };
+        if self.shelf_folder.take().is_some() {
+            let left = self.shelf_at;
+            self.restore_shelf(left);
+        }
         self.shelf_mut().release_hold();
         self.play_held = None;
+        self.x_held = None;
         self.shelf_at = to;
         self.shelf_platform = slot_ui::Printed::default();
         self.slot_letter = None;
@@ -1196,6 +1333,10 @@ impl App {
             QuickRow::MenuSounds => Some(QuickValue::flag(self.state.menu_sounds)),
             QuickRow::Haptics => Some(QuickValue::flag(self.state.haptics)),
             QuickRow::TvSound => Some(QuickValue::flag(self.state.tv_sound)),
+            QuickRow::Language => Some(match self.language {
+                Lang::En => QuickValue::LangEn,
+                Lang::ZhCn => QuickValue::LangZh,
+            }),
             QuickRow::Clock => Some(match self.state.clock_12h {
                 true => QuickValue::Hours12,
                 false => QuickValue::Hours24,
@@ -1581,9 +1722,17 @@ impl App {
     }
 
     pub fn slot_text(&self) -> Option<String> {
+        // The machine's short name on its own for the whole system, and "GBA-动作" when one
+        // of its subfolders is what is showing.
         match self.slot_letter {
             Some(letter) => Some(letter.to_string()),
-            None => self.shelf_platform_name().map(str::to_string),
+            None => {
+                let short = self.shelf_platform_short()?;
+                Some(match &self.shelf_folder {
+                    Some(folder) => format!("{short}-{folder}"),
+                    None => short.to_string(),
+                })
+            }
         }
     }
 
@@ -1603,6 +1752,31 @@ impl App {
         self.shelf_title = slot_ui::Printed::default();
     }
 
+    /// "3 / 57": where the hand is in the row, out of how many the shelf is showing. The count
+    /// is the shelf's and not the library's, so it is the one that moves when X walks into a
+    /// subfolder — fifty-seven games becomes the nine in it.
+    pub fn count_text(&self) -> Option<String> {
+        let shelf = self.shelf();
+        if shelf.carts.is_empty() {
+            return None;
+        }
+        Some(format!("{} / {}", shelf.index + 1, shelf.carts.len()))
+    }
+
+    pub fn set_shelf_count_face(&mut self, face: TexId, w: u32) {
+        self.shelf_count = slot_ui::Printed::new(face, w);
+    }
+
+    pub fn clear_shelf_count(&mut self) {
+        self.shelf_count = slot_ui::Printed::default();
+    }
+
+    /// The tongue the interface speaks. The frontend watches it: every line of type in the
+    /// interface is a baked texture, so the whole lot has to be baked again when this moves.
+    pub fn language(&self) -> Lang {
+        self.language
+    }
+
     fn title_alpha(&self) -> f32 {
         if !self.state.show_titles || (self.name_pending && self.slot_text().is_some()) {
             return 0.0;
@@ -1619,6 +1793,13 @@ impl App {
         Some(self.shelves[self.shelf_at].0.name())
     }
 
+    /// That machine's short name, GBA rather than Game Boy Advance, or None on a card with
+    /// nowhere to switch to — the same moment `shelf_platform_name` has nothing to say.
+    pub fn shelf_platform_short(&self) -> Option<&'static str> {
+        self.next_shelf(1)?;
+        Some(self.shelves[self.shelf_at].0.short())
+    }
+
     pub fn set_battery_percent_face(&mut self, face: TexId, w: u32) {
         self.battery_percent = slot_ui::Printed::new(face, w);
     }
@@ -1631,11 +1812,9 @@ impl App {
         &self.phase
     }
 
+    /// Every game on the card, whether the shelf is showing all of them or one subfolder of them.
     pub fn carts(&self) -> impl Iterator<Item = &Cart> {
-        self.shelves
-            .iter()
-            .filter(|(r, _)| r.platform().is_some())
-            .flat_map(|(_, shelf)| shelf.carts.iter())
+        self.games.iter()
     }
 
     pub fn seated_cart(&self) -> Option<&Cart> {
@@ -2203,7 +2382,7 @@ impl App {
 
     fn core_options_page(&self, options: &[CoreOption], cursor: usize) -> ListPage {
         ListPage {
-            title: "Core Options".into(),
+            title: t(MsgKey::PageCoreOptions).into(),
             status: self.core().text().into(),
             cursor,
             rows: options
@@ -2215,7 +2394,10 @@ impl App {
                     icon: None,
                 })
                 .collect(),
-            legends: vec![back_legend(), Legend::new(ButtonLegend::Right, "Change")],
+            legends: vec![
+                back_legend(),
+                Legend::new(ButtonLegend::Right, t(MsgKey::BtnChange)),
+            ],
         }
     }
 
@@ -2512,7 +2694,10 @@ impl App {
                 Action::GbaDown(Btn::L1) => self.switch_shelf(-1),
                 Action::GbaDown(Btn::R1) => self.switch_shelf(1),
                 Action::GbaDown(Btn::Y) => self.toggle_favorite(),
-                Action::GbaDown(Btn::X) => self.open_search(false),
+                // X 一个键两用：短按切子文件夹，长按是搜索（X 原本就是搜索键）。
+                Action::GbaDown(Btn::X) => self.x_held = Some(now),
+                // 长按已经开过搜索了，那一刻 x_held 就被清空：能走到这里的是短按。
+                Action::GbaUp(Btn::X) if self.x_held.take().is_some() => self.cycle_folder(),
                 _ => {}
             },
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
@@ -2628,7 +2813,7 @@ impl App {
     /// show, if any.
     fn change_service(&mut self, row: ServiceRow, cursor: usize) -> Option<Option<String>> {
         let password = |then: Option<ServiceRow>| Phase::Keyboard {
-            keys: Keyboard::new("New password for root", "", true, 4, 63),
+            keys: Keyboard::new(t(MsgKey::NewPasswordForRoot), "", true, 4, 63),
             typing: Typing::RootPassword { then },
             cursor,
         };
@@ -2654,9 +2839,9 @@ impl App {
             ServiceRow::Vpn => {
                 let tunnels = self.tunnels();
                 if tunnels.is_empty() {
-                    return Some(Some(format!(
-                        "Put WireGuard configs in {} on the card",
-                        crate::wireguard::WG_DIR
+                    return Some(Some(filled(
+                        MsgKey::VpnConfigHint,
+                        crate::wireguard::WG_DIR,
                     )));
                 }
                 // Off, then each tunnel in turn, then off again.
@@ -2681,38 +2866,47 @@ impl App {
 
     fn services_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
         let v = &self.services_view;
-        let on = |b: bool| if b { "On" } else { "Off" }.to_string();
+        let on = |b: bool| {
+            if b {
+                t(MsgKey::ValueOn)
+            } else {
+                t(MsgKey::ValueOff)
+            }
+            .to_string()
+        };
         let rows: Vec<ListRow> = ServiceRow::ALL
             .iter()
             .map(|row| {
                 let (label, detail) = match row {
-                    ServiceRow::Ssh => ("SSH", on(self.state.ssh)),
-                    ServiceRow::Sharing => ("File sharing", on(self.state.samba)),
-                    ServiceRow::Syncthing => ("Syncthing", on(self.state.syncthing)),
+                    ServiceRow::Ssh => (t(MsgKey::ServiceSsh), on(self.state.ssh)),
+                    ServiceRow::Sharing => (t(MsgKey::ServiceSharing), on(self.state.samba)),
+                    ServiceRow::Syncthing => (t(MsgKey::ServiceSyncthing), on(self.state.syncthing)),
                     ServiceRow::Tailscale => (
-                        "Tailscale",
+                        t(MsgKey::ServiceTailscale),
                         match (&v.tailnet, self.state.tailscale) {
-                            (_, false) | (Tailnet::Off, _) => "Off".into(),
-                            (Tailnet::Starting, _) => "Starting".into(),
-                            (Tailnet::SignIn(_), _) => "Sign in".into(),
-                            (Tailnet::Approval, _) => "Needs approval".into(),
-                            (Tailnet::Running(ip), _) => ip.clone().unwrap_or_else(|| "On".into()),
+                            (_, false) | (Tailnet::Off, _) => t(MsgKey::ValueOff).into(),
+                            (Tailnet::Starting, _) => t(MsgKey::DetailStarting).into(),
+                            (Tailnet::SignIn(_), _) => t(MsgKey::DetailSignIn).into(),
+                            (Tailnet::Approval, _) => t(MsgKey::DetailNeedsApproval).into(),
+                            (Tailnet::Running(ip), _) => {
+                                ip.clone().unwrap_or_else(|| t(MsgKey::ValueOn).into())
+                            }
                         },
                     ),
                     ServiceRow::Vpn => (
-                        "VPN",
+                        t(MsgKey::ServiceVpn),
                         match (&self.state.vpn, &v.vpn) {
-                            (None, _) => "Off".into(),
+                            (None, _) => t(MsgKey::ValueOff).into(),
                             (Some(name), Some(up)) if name == up => name.clone(),
-                            (Some(_), _) if v.busy.is_some() => "Connecting".into(),
-                            (Some(_), _) => "Not connected".into(),
+                            (Some(_), _) if v.busy.is_some() => t(MsgKey::DetailConnecting).into(),
+                            (Some(_), _) => t(MsgKey::DetailNotConnected).into(),
                         },
                     ),
                     ServiceRow::Password => (
-                        "Password",
+                        t(MsgKey::ServicePassword),
                         match self.state.password {
-                            Some(_) => "Set".into(),
-                            None => "BaseOS's".into(),
+                            Some(_) => t(MsgKey::DetailSet).into(),
+                            None => t(MsgKey::ServicePasswordBaseOs).into(),
                         },
                     ),
                 };
@@ -2730,7 +2924,7 @@ impl App {
                 format!("http://{ip}:8384   user root")
             }
             Some(ip) => format!("root@{}.local   {ip}", crate::services::hostname()),
-            None => "Connect to Wi-Fi to reach these".into(),
+            None => t(MsgKey::NetNeedWifi).into(),
         };
         let status = match (note, &v.busy, &v.error) {
             (Some(note), ..) if !note.is_empty() => note.to_string(),
@@ -2738,30 +2932,36 @@ impl App {
             (_, None, Some(error)) => error.clone(),
             _ => address,
         };
-        let turn = |on: bool| if on { "Turn Off" } else { "Turn On" };
+        let turn = |on: bool| {
+            if on {
+                t(MsgKey::BtnTurnOff)
+            } else {
+                t(MsgKey::BtnTurnOn)
+            }
+        };
         let action = match row {
             ServiceRow::Ssh => turn(self.state.ssh),
             ServiceRow::Sharing => turn(self.state.samba),
             ServiceRow::Syncthing => turn(self.state.syncthing),
             ServiceRow::Tailscale => match &v.tailnet {
-                Tailnet::SignIn(_) if self.state.tailscale => "Sign In",
+                Tailnet::SignIn(_) if self.state.tailscale => t(MsgKey::DetailSignIn),
                 _ => turn(self.state.tailscale),
             },
             ServiceRow::Vpn => match self.state.vpn {
-                Some(_) => "Change Tunnel",
-                None => "Turn On",
+                Some(_) => t(MsgKey::BtnChangeTunnel),
+                None => t(MsgKey::BtnTurnOn),
             },
             ServiceRow::Password => match self.state.password {
-                Some(_) => "Change Password",
-                None => "Set Password",
+                Some(_) => t(MsgKey::BtnChangePassword),
+                None => t(MsgKey::BtnSetPassword),
             },
         };
         let mut legends = with_action(Some(action));
         if row == ServiceRow::Syncthing && v.syncthing_id.is_some() {
-            legends.insert(1, Legend::new(ButtonLegend::X, "Show ID"));
+            legends.insert(1, Legend::new(ButtonLegend::X, t(MsgKey::BtnShowId)));
         }
         ListPage {
-            title: "Services".into(),
+            title: t(MsgKey::PageServices).into(),
             status,
             cursor: cursor.min(rows.len() - 1),
             rows,
@@ -2809,7 +3009,7 @@ impl App {
         self.ss_state = crate::scrape::ss_state(&root);
         saved
             .err()
-            .map(|e| format!("Could not save the login: {e}"))
+            .map(|e| filled(MsgKey::LoginSaveFail, e))
     }
 
     fn game_art_input(&mut self, cursor: usize, action: Action) {
@@ -2827,7 +3027,7 @@ impl App {
                 };
                 self.phase = Phase::Keyboard {
                     keys: Keyboard::new(
-                        "ScreenScraper username, or none to sign out",
+                        t(MsgKey::ScreenScraperUserPrompt),
                         &user,
                         false,
                         0,
@@ -2847,7 +3047,7 @@ impl App {
                     .map(|(c, _)| c)
                     .collect();
                 if missing.is_empty() {
-                    (cursor, Some("Every game here has a label".to_string()))
+                    (cursor, Some(t(MsgKey::ArtEveryGameHasLabel).to_string()))
                 } else {
                     if let Some(scraper) = &self.scraper {
                         scraper.fetch(missing);
@@ -2875,13 +3075,13 @@ impl App {
         let count = |platform: Option<Platform>| {
             let carts = self.art_carts(platform);
             let has = carts.iter().filter(|(_, has)| *has).count();
-            format!("{has} of {}", carts.len())
+            saying(MsgKey::ArtHasCount, &[&has, &carts.len()])
         };
         let platforms = self.art_platforms();
         let missing =
             |platform: Option<Platform>| self.art_carts(platform).iter().any(|(_, has)| !has);
         let rows: Vec<ListRow> = std::iter::once(ListRow {
-            label: "All systems".into(),
+            label: t(MsgKey::ArtAllSystems).into(),
             detail: count(None),
             bars: None,
             icon: None,
@@ -2895,7 +3095,7 @@ impl App {
         .chain(std::iter::once(ListRow {
             label: "ScreenScraper".into(),
             detail: match &self.ss_state {
-                SsState::Off | SsState::On(None) => "Sign in".into(),
+                SsState::Off | SsState::On(None) => t(MsgKey::DetailSignIn).into(),
                 SsState::NoDevId(user) | SsState::On(Some(user)) => user.clone(),
             },
             bars: None,
@@ -2905,40 +3105,38 @@ impl App {
         let on_ss = cursor >= rows.len() - 1;
         let made = v.made.len();
         let status = match () {
-            _ if v.running => format!(
-                "Finding art for {} ({} of {})",
-                v.current.as_deref().unwrap_or("..."),
-                (v.done + 1).min(v.total),
-                v.total
+            _ if v.running => saying(
+                MsgKey::ArtFinding,
+                &[
+                    &v.current.as_deref().unwrap_or("..."),
+                    &(v.done + 1).min(v.total),
+                    &v.total,
+                ],
             ),
             _ if note.is_some() => note.unwrap_or_default().to_string(),
             _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
-            _ if v.skipped > 0 => format!(
-                "Skipped {} game{} ScreenScraper turned away",
-                v.skipped,
-                if v.skipped == 1 { "" } else { "s" }
+            _ if v.skipped > 0 => saying(
+                MsgKey::ArtSkipped,
+                &[&v.skipped, &if v.skipped == 1 { "" } else { "s" }],
             ),
-            _ if made > 0 => format!(
-                "Added {made} label{} to the shelves",
-                if made == 1 { "" } else { "s" }
+            _ if made > 0 => saying(
+                MsgKey::ArtAdded,
+                &[&made, &if made == 1 { "" } else { "s" }],
             ),
-            _ if v.missed > 0 => format!(
-                "No art found for {} game{}",
-                v.missed,
-                if v.missed == 1 { "" } else { "s" }
+            _ if v.missed > 0 => saying(
+                MsgKey::ArtNoneFound,
+                &[&v.missed, &if v.missed == 1 { "" } else { "s" }],
             ),
             _ => match &self.ss_state {
-                SsState::On(_) => "Art from ScreenScraper and libretro".into(),
-                SsState::NoDevId(_) => {
-                    "Signed in, but ScreenScraper needs unslot's developer ID".into()
-                }
-                SsState::Off => "Art from libretro-thumbnails".into(),
+                SsState::On(_) => t(MsgKey::ArtFromBoth).into(),
+                SsState::NoDevId(_) => t(MsgKey::ArtNeedsDevId).into(),
+                SsState::Off => t(MsgKey::ArtFromLibretro).into(),
             },
         };
         let action = match () {
             _ if on_ss => Some(match self.ss_state {
-                SsState::Off | SsState::On(None) => "Sign In",
-                SsState::NoDevId(_) | SsState::On(Some(_)) => "Change Account",
+                SsState::Off | SsState::On(None) => t(MsgKey::DetailSignIn),
+                SsState::NoDevId(_) | SsState::On(Some(_)) => t(MsgKey::BtnChangeAccount),
             }),
             _ if v.running => None,
             _ => missing(
@@ -2946,10 +3144,10 @@ impl App {
                     .checked_sub(1)
                     .and_then(|i| platforms.get(i).copied()),
             )
-            .then_some("Find Missing Art"),
+            .then_some(t(MsgKey::BtnFindMissingArt)),
         };
         ListPage {
-            title: "Game Art".into(),
+            title: t(MsgKey::PageGameArt).into(),
             status,
             cursor: cursor.min(rows.len() - 1),
             rows,
@@ -3002,13 +3200,16 @@ impl App {
 
     fn updates_page(&self, cursor: usize) -> ListPage {
         let v = &self.updates_view;
-        let detail = |t: &Track| match &t.stage {
-            Stage::Unchecked => t.current.clone().unwrap_or_else(|| "Unknown".into()),
-            Stage::Checking => "Checking".into(),
-            Stage::UpToDate => "Up to date".into(),
-            Stage::Available(version) => format!("{version} available"),
+        let detail = |track: &Track| match &track.stage {
+            Stage::Unchecked => track
+                .current
+                .clone()
+                .unwrap_or_else(|| t(MsgKey::UpdateUnknown).into()),
+            Stage::Checking => t(MsgKey::UpdateChecking).into(),
+            Stage::UpToDate => t(MsgKey::UpdateUpToDate).into(),
+            Stage::Available(version) => filled(MsgKey::UpdateAvailable, version),
             Stage::Downloading(_, pct) => format!("{pct}%"),
-            Stage::Ready(_) => "Ready to install".into(),
+            Stage::Ready(_) => t(MsgKey::UpdateReady).into(),
         };
         let parts = v.parts();
         let rows: Vec<ListRow> = parts
@@ -3027,7 +3228,7 @@ impl App {
             .collect();
         let downloading = stages.iter().find_map(|(p, s)| match s {
             Stage::Downloading(version, _) => {
-                Some(format!("Downloading {} {version}...", p.name()))
+                Some(saying(MsgKey::UpdateDownloading, &[&p.name(), &version]))
             }
             _ => None,
         });
@@ -3035,19 +3236,22 @@ impl App {
             _ if downloading.is_some() => downloading.unwrap_or_default(),
             _ if v.error.is_some() => v.error.clone().unwrap_or_default(),
             _ if stages.iter().any(|(_, s)| matches!(s, Stage::Ready(_))) => {
-                "Installs when the device restarts. Keep the power connected".into()
+                t(MsgKey::UpdateKeepPower).into()
             }
             _ if stages.iter().any(|(_, s)| **s == Stage::Checking) => {
-                "Checking for updates...".into()
+                t(MsgKey::UpdateChecking2).into()
             }
             _ => parts
                 .iter()
                 .filter_map(|p| {
-                    let t = v.track(*p)?;
+                    let track = v.track(*p)?;
                     Some(format!(
                         "{} {}",
                         p.name(),
-                        t.current.as_deref().unwrap_or("(own build)")
+                        track
+                            .current
+                            .as_deref()
+                            .unwrap_or(t(MsgKey::UpdateOwnBuild))
                     ))
                 })
                 .collect::<Vec<_>>()
@@ -3060,17 +3264,24 @@ impl App {
         match picked.map(|t| &t.stage) {
             Some(Stage::Checking | Stage::Downloading(..)) => {}
             Some(Stage::Available(version)) => {
-                legends.push(Legend::new(ButtonLegend::Y, "Check Again"));
-                legends.push(Legend::new(ButtonLegend::A, &format!("Download {version}")));
+                legends.push(Legend::new(ButtonLegend::Y, t(MsgKey::BtnCheckAgain)));
+                let go = filled(MsgKey::BtnDownloadVersion, version);
+                legends.push(Legend::new(ButtonLegend::A, &go));
             }
             Some(Stage::Ready(_)) => {
-                legends.push(Legend::new(ButtonLegend::Y, "Check Again"));
-                legends.push(Legend::new(ButtonLegend::A, "Restart to Install"));
+                legends.push(Legend::new(ButtonLegend::Y, t(MsgKey::BtnCheckAgain)));
+                legends.push(Legend::new(
+                    ButtonLegend::A,
+                    t(MsgKey::BtnRestartToInstall),
+                ));
             }
-            _ => legends.push(Legend::new(ButtonLegend::A, "Check for Updates")),
+            _ => legends.push(Legend::new(
+                ButtonLegend::A,
+                t(MsgKey::BtnCheckForUpdates),
+            )),
         }
         ListPage {
-            title: "Updates".into(),
+            title: t(MsgKey::PageUpdates).into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
@@ -3135,27 +3346,27 @@ impl App {
             })
             .collect();
         let status = if let Some((c, _)) = v.downloading {
-            format!("Downloading {}...", c.text())
+            filled(MsgKey::CoreDownloading, c.text())
         } else if let Some(e) = &v.error {
             e.clone()
         } else if v.checking {
-            "Checking for cores...".into()
+            t(MsgKey::CoreChecking).into()
         } else {
             let have = cores.iter().filter(|c| v.installed(**c)).count();
-            format!("{have} of {} downloaded", cores.len())
+            saying(MsgKey::CoreHaveCount, &[&have, &cores.len()])
         };
         let core = cores[cursor];
         let mut legends = vec![back_legend()];
         if v.installed(core) && !v.pending(core) {
-            legends.push(Legend::new(ButtonLegend::X, "Remove"));
+            legends.push(Legend::new(ButtonLegend::X, t(MsgKey::BtnRemove)));
         }
         if !v.pending(core) && !v.installed(core) {
-            legends.push(Legend::new(ButtonLegend::A, "Download"));
+            legends.push(Legend::new(ButtonLegend::A, t(MsgKey::BtnDownload)));
         } else if !v.pending(core) && v.outdated(core) {
-            legends.push(Legend::new(ButtonLegend::A, "Update"));
+            legends.push(Legend::new(ButtonLegend::A, t(MsgKey::BtnUpdate)));
         }
         ListPage {
-            title: "Cores".into(),
+            title: t(MsgKey::PageCores).into(),
             status,
             cursor,
             rows,
@@ -3244,11 +3455,11 @@ impl App {
             .map(|d| ListRow {
                 label: d.name.clone(),
                 detail: match (d.connected, d.paired) {
-                    (true, _) => "Connected".into(),
-                    (false, true) => "Paired".into(),
+                    (true, _) => t(MsgKey::BtConnected).into(),
+                    (false, true) => t(MsgKey::BtPaired).into(),
                     (false, false) => match d.kind {
-                        crate::bluetooth::Kind::Controller => "Controller".into(),
-                        crate::bluetooth::Kind::Audio => "Headphones".into(),
+                        crate::bluetooth::Kind::Controller => t(MsgKey::BtController).into(),
+                        crate::bluetooth::Kind::Audio => t(MsgKey::BtHeadphones).into(),
                         crate::bluetooth::Kind::Other => String::new(),
                     },
                 },
@@ -3257,36 +3468,37 @@ impl App {
             })
             .collect();
         let status = match (&v.busy, &v.error) {
-            (BtBusy::Starting, _) => "Turning on Bluetooth...".to_string(),
-            (BtBusy::Searching, _) => "Searching for devices...".to_string(),
-            (BtBusy::Pairing(name), _) => format!("Pairing {name}..."),
-            (BtBusy::Connecting(name), _) => format!("Connecting {name}..."),
+            (BtBusy::Starting, _) => t(MsgKey::BtTurningOn).to_string(),
+            (BtBusy::Searching, _) => t(MsgKey::BtSearching).to_string(),
+            (BtBusy::Pairing(name), _) => filled(MsgKey::BtPairing, name),
+            (BtBusy::Connecting(name), _) => filled(MsgKey::BtConnectingTo, name),
             (BtBusy::Idle, Some(error)) => error.clone(),
-            (BtBusy::Idle, None) if rows.is_empty() => {
-                "Put a device in pairing mode, then press Y to search".to_string()
-            }
+            (BtBusy::Idle, None) if rows.is_empty() => t(MsgKey::BtPairingHint).to_string(),
             (BtBusy::Idle, None) => match v.devices.iter().filter(|d| d.connected).count() {
-                0 => "Nothing connected".to_string(),
-                1 => "1 device connected".to_string(),
-                n => format!("{n} devices connected"),
+                0 => t(MsgKey::BtNothingConnected).to_string(),
+                1 => t(MsgKey::BtOneConnected).to_string(),
+                n => filled(MsgKey::BtManyConnected, n),
             },
         };
         let picked = v.devices.get(cursor.min(v.devices.len().saturating_sub(1)));
-        let mut legends = vec![back_legend(), Legend::new(ButtonLegend::Y, "Search")];
+        let mut legends = vec![
+            back_legend(),
+            Legend::new(ButtonLegend::Y, t(MsgKey::BtnSearch)),
+        ];
         if picked.is_some_and(|d| d.paired) {
-            legends.push(Legend::new(ButtonLegend::X, "Forget"));
+            legends.push(Legend::new(ButtonLegend::X, t(MsgKey::BtnForget)));
         }
         legends.push(Legend::new(
             ButtonLegend::A,
             match picked {
-                Some(d) if d.connected => "Disconnect",
-                Some(d) if d.paired => "Connect",
-                Some(_) => "Pair",
-                None => "Search",
+                Some(d) if d.connected => t(MsgKey::BtnDisconnect),
+                Some(d) if d.paired => t(MsgKey::BtnConnect),
+                Some(_) => t(MsgKey::BtnPair),
+                None => t(MsgKey::BtnSearch),
             },
         ));
         ListPage {
-            title: "Bluetooth".into(),
+            title: t(MsgKey::PageBluetooth).into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
@@ -3355,7 +3567,7 @@ impl App {
             .map(|r| ListRow {
                 label: r.name.clone(),
                 detail: match casting_to(&r.name) {
-                    true => "Casting".into(),
+                    true => t(MsgKey::CastCasting).into(),
                     false => r.model.clone(),
                 },
                 bars: None,
@@ -3363,30 +3575,28 @@ impl App {
             })
             .collect();
         let status = match (&v.busy, &v.error, &v.casting) {
-            (CastBusy::Searching, ..) => "Looking for TVs...".to_string(),
-            (CastBusy::Connecting(name), ..) => format!("Connecting to {name}..."),
+            (CastBusy::Searching, ..) => t(MsgKey::CastLooking).to_string(),
+            (CastBusy::Connecting(name), ..) => filled(MsgKey::CastConnecting, name),
             (CastBusy::Idle, Some(error), _) => error.clone(),
-            (CastBusy::Idle, None, Some(name)) => format!("Casting to {name}"),
-            (CastBusy::Idle, None, None) if rows.is_empty() => {
-                "No TVs found. Press Y to look again".to_string()
-            }
-            (CastBusy::Idle, None, None) => "Pick a TV to cast the screen to".to_string(),
+            (CastBusy::Idle, None, Some(name)) => filled(MsgKey::CastCastingTo, name),
+            (CastBusy::Idle, None, None) if rows.is_empty() => t(MsgKey::CastNoTvs).to_string(),
+            (CastBusy::Idle, None, None) => t(MsgKey::CastPick).to_string(),
         };
         let picked = v.receivers.get(cursor.min(v.receivers.len().saturating_sub(1)));
         let legends = vec![
             back_legend(),
-            Legend::new(ButtonLegend::Y, "Search"),
+            Legend::new(ButtonLegend::Y, t(MsgKey::CastSearch)),
             Legend::new(
                 ButtonLegend::A,
                 match picked {
-                    Some(r) if casting_to(&r.name) => "Stop",
-                    Some(_) => "Cast",
-                    None => "Search",
+                    Some(r) if casting_to(&r.name) => t(MsgKey::CastStop),
+                    Some(_) => t(MsgKey::CastTitle),
+                    None => t(MsgKey::CastSearch),
                 },
             ),
         ];
         ListPage {
-            title: "Cast".into(),
+            title: t(MsgKey::CastTitle).into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
@@ -3452,7 +3662,7 @@ impl App {
             Action::GbaDown(Btn::A) => match rows.get(cursor) {
                 Some(NetRow::Other) => {
                     self.phase = Phase::Keyboard {
-                        keys: Keyboard::new("Network name", "", false, 1, 32),
+                        keys: Keyboard::new(t(MsgKey::WifiNetworkName), "", false, 1, 32),
                         typing: Typing::HiddenName,
                         cursor,
                     };
@@ -3478,19 +3688,17 @@ impl App {
     /// Joins `net`, or opens the keyboard for its password. Some note when it cannot be joined.
     fn pick_network(&mut self, net: &Network, cursor: usize) -> Option<String> {
         if self.wifi_view.connected.as_deref() == Some(net.ssid.as_str()) {
-            return Some(format!("Already connected to {}", net.ssid));
+            return Some(filled(MsgKey::WifiAlreadyOn, &net.ssid));
         }
         match (net.security, net.saved) {
-            (Security::Unsupported, _) => {
-                Some("Enterprise and WEP networks are not supported".into())
-            }
+            (Security::Unsupported, _) => Some(t(MsgKey::WifiEnterpriseUnsupported).into()),
             (Security::Open, _) | (_, true) => {
                 self.with_wifi(|w| w.join(&net.ssid, None));
                 Some(String::new())
             }
             (Security::Personal, false) => {
                 self.phase = Phase::Keyboard {
-                    keys: Keyboard::new(&format!("Password for {}", net.ssid), "", true, 8, 63),
+                    keys: Keyboard::new(&filled(MsgKey::WifiPasswordPrompt, &net.ssid), "", true, 8, 63),
                     typing: Typing::Password(net.ssid.clone()),
                     cursor,
                 };
@@ -3547,7 +3755,7 @@ impl App {
                 Typing::SsUser => {
                     self.phase = Phase::Keyboard {
                         keys: Keyboard::new(
-                            &format!("ScreenScraper password for {text}"),
+                            &filled(MsgKey::ScreenScraperPasswordPrompt, &text),
                             "",
                             true,
                             1,
@@ -3563,9 +3771,9 @@ impl App {
                 }
                 Typing::RaUser if text.is_empty() => {
                     let line = match self.root.as_deref().map(crate::cheevos::sign_out) {
-                        Some(Ok(())) => "Signed out of RetroAchievements".to_string(),
-                        Some(Err(e)) => format!("Could not sign out: {e}"),
-                        None => "No card to sign out on".to_string(),
+                        Some(Ok(())) => t(MsgKey::RaSignedOut).to_string(),
+                        Some(Err(e)) => filled(MsgKey::RaSignOutFail, e),
+                        None => t(MsgKey::RaNoCardSignOut).to_string(),
                     };
                     self.cheevo_line(line);
                     self.phase = Phase::QuickMenu {
@@ -3575,7 +3783,7 @@ impl App {
                 Typing::RaUser => {
                     self.phase = Phase::Keyboard {
                         keys: Keyboard::new(
-                            &format!("RetroAchievements password for {text}"),
+                            &filled(MsgKey::RaPasswordPrompt, &text),
                             "",
                             true,
                             1,
@@ -3594,7 +3802,7 @@ impl App {
                         });
                     if spawned.is_ok() {
                         self.ra_sign_in = Some(rx);
-                        self.cheevo_line("Signing in to RetroAchievements...".into());
+                        self.cheevo_line(t(MsgKey::RaSigningIn).into());
                     }
                     self.phase = Phase::QuickMenu {
                         row: QuickRow::Achievements,
@@ -3617,7 +3825,7 @@ impl App {
                 Typing::HiddenName => {
                     self.phase = Phase::Keyboard {
                         keys: Keyboard::new(
-                            &format!("Password for {text}, or none if it is open"),
+                            &filled(MsgKey::RaPasswordPromptOpen, &text),
                             "",
                             true,
                             0,
@@ -3667,7 +3875,7 @@ impl App {
             Phase::TailscaleLogin => match &self.services_view.tailnet {
                 Tailnet::SignIn(url) => Some(PageModel::Qr(QrPage {
                     title: "Tailscale".into(),
-                    status: "Scan to sign in, or open the link on another device".into(),
+                    status: t(MsgKey::RaScanToSignIn).into(),
                     url: url.clone(),
                     legends: vec![back_legend(), Legend::new(ButtonLegend::X, "Turn Off")],
                 })),
@@ -3676,7 +3884,7 @@ impl App {
             Phase::SyncthingId => self.services_view.syncthing_id.as_ref().map(|id| {
                 PageModel::Qr(QrPage {
                     title: "Syncthing".into(),
-                    status: "Scan in the Syncthing app to add this device".into(),
+                    status: t(MsgKey::RaScanForSyncthing).into(),
                     url: id.clone(),
                     legends: vec![back_legend()],
                 })
@@ -3692,16 +3900,21 @@ impl App {
     fn networks_page(&self, cursor: usize, note: Option<&str>) -> ListPage {
         let v = &self.wifi_view;
         let nets = self.network_rows();
-        let mut legends = vec![back_legend(), Legend::new(ButtonLegend::Y, "Search")];
+        let mut legends = vec![
+            back_legend(),
+            Legend::new(ButtonLegend::Y, t(MsgKey::BtnSearch)),
+        ];
         match nets.get(cursor.min(nets.len().saturating_sub(1))) {
-            Some(NetRow::Other) => legends.push(Legend::new(ButtonLegend::A, "Join Other")),
+            Some(NetRow::Other) => {
+                legends.push(Legend::new(ButtonLegend::A, t(MsgKey::BtnJoinOther)))
+            }
             Some(NetRow::Network(net)) => {
                 if net.saved {
-                    legends.push(Legend::new(ButtonLegend::X, "Forget"));
+                    legends.push(Legend::new(ButtonLegend::X, t(MsgKey::BtnForget)));
                 }
                 let here = v.connected.as_deref() == Some(net.ssid.as_str());
                 if !here && net.security != Security::Unsupported {
-                    legends.push(Legend::new(ButtonLegend::A, "Join"));
+                    legends.push(Legend::new(ButtonLegend::A, t(MsgKey::BtnJoin)));
                 }
             }
             None => {}
@@ -3710,17 +3923,19 @@ impl App {
             .into_iter()
             .map(|row| match row {
                 NetRow::Other => ListRow {
-                    label: "Other network...".into(),
+                    label: t(MsgKey::BtnOtherNetwork).into(),
                     ..ListRow::default()
                 },
                 NetRow::Network(net) => ListRow {
                     detail: match () {
                         _ if v.connected.as_deref() == Some(net.ssid.as_str()) => {
-                            "Connected".into()
+                            t(MsgKey::BtConnected).into()
                         }
-                        _ if net.saved => "Saved".into(),
-                        _ if net.security == Security::Unsupported => "Not supported".into(),
-                        _ if net.security == Security::Open => "Open".into(),
+                        _ if net.saved => t(MsgKey::WifiSaved).into(),
+                        _ if net.security == Security::Unsupported => {
+                            t(MsgKey::WifiNotSupported).into()
+                        }
+                        _ if net.security == Security::Open => t(MsgKey::WifiOpen).into(),
                         _ => String::new(),
                     },
                     bars: Some(net.bars()),
@@ -3730,19 +3945,21 @@ impl App {
             })
             .collect();
         let status = match (&v.busy, note.filter(|n| !n.is_empty()), &v.error) {
-            (Busy::Starting, ..) => "Turning on Wi-Fi...".to_string(),
-            (Busy::Joining(ssid), ..) => format!("Joining {ssid}..."),
+            (Busy::Starting, ..) => t(MsgKey::WifiTurningOn).to_string(),
+            (Busy::Joining(ssid), ..) => filled(MsgKey::WifiJoining, ssid),
             (_, Some(note), _) => note.to_string(),
             (_, None, Some(error)) => error.clone(),
-            (Busy::Scanning, ..) => "Searching for networks...".to_string(),
+            (Busy::Scanning, ..) => t(MsgKey::WifiSearching).to_string(),
             (Busy::Idle, None, None) => match (&v.connected, &v.ip) {
-                (Some(ssid), Some(ip)) => format!("Connected to {ssid}, {ip}"),
-                (Some(ssid), None) => format!("Connected to {ssid}"),
-                (None, _) => "Not connected".to_string(),
+                (Some(ssid), Some(ip)) => {
+                    saying(MsgKey::WifiConnectedWithIp, &[&ssid, &ip])
+                }
+                (Some(ssid), None) => filled(MsgKey::WifiConnected, ssid),
+                (None, _) => t(MsgKey::DetailNotConnected).to_string(),
             },
         };
         ListPage {
-            title: "Wi-Fi".into(),
+            title: t(MsgKey::PageWifi).into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
@@ -3865,7 +4082,7 @@ impl App {
                 let user = self.cheevos_account().map(|a| a.user).unwrap_or_default();
                 self.phase = Phase::Keyboard {
                     keys: Keyboard::new(
-                        "RetroAchievements username, or none to sign out",
+                        t(MsgKey::RaUserPrompt),
                         &user,
                         false,
                         0,
@@ -3959,6 +4176,7 @@ impl App {
             | QuickRow::BezelOf(_)
             | QuickRow::Wifi
             | QuickRow::Bluetooth
+            | QuickRow::Language
             | QuickRow::Bezel => {}
         }
     }
@@ -4021,6 +4239,15 @@ impl App {
         if row == QuickRow::ShowTitles {
             self.state.show_titles = !self.state.show_titles;
             self.persist();
+            return;
+        }
+        if row == QuickRow::Language {
+            // 切语言：整个界面立刻改口，下次开机也还是它。
+            self.language = self.language.toggle();
+            set_lang(self.language);
+            if let Some(root) = self.root.clone() {
+                let _ = write_language(&root, self.language);
+            }
             return;
         }
         let s = &mut self.state;
@@ -4097,6 +4324,7 @@ impl App {
             | QuickRow::Restart
             | QuickRow::ShutDown
             | QuickRow::Reload
+            | QuickRow::Language
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -4622,6 +4850,7 @@ impl App {
         }
         self.take_rescan();
         self.play_hold();
+        self.x_hold();
         self.repeat_held_dir();
         let offer = self.undo_label();
         if let Some(p) = &mut self.polaroids {
@@ -4825,6 +5054,7 @@ impl App {
     /// Gives each system's shelf the games now on the card, each staying on the cart it was on.
     fn restock_games(&mut self, carts: Vec<Cart>) {
         let shelf_at = self.shelf_at;
+        self.games = carts.clone();
         for (at, (rack, fresh)) in shelves_of(carts).into_iter().enumerate() {
             if rack.platform().is_none() {
                 continue;
@@ -4850,6 +5080,16 @@ impl App {
         }
         self.restock_recents();
         self.restock_favorites();
+        // 重扫之后文件夹可能改名或整个没了，按新的卡带重新筛一遍。
+        let folder = self.shelf_folder.take();
+        match (self.shelves[self.shelf_at].0.platform(), folder) {
+            (Some(platform), Some(folder)) if self.folders_of(platform).contains(&folder) => {
+                self.show_folder(Some(folder))
+            }
+            // 文件夹没了，或者已经不在机种书架上了：回到"全部"。
+            (_, Some(_)) => self.shelf_folder = None,
+            _ => {}
+        }
         if self.shelf_at != shelf_at {
             self.shelf_platform = slot_ui::Printed::default();
             self.slot_letter = None;
@@ -4902,15 +5142,15 @@ impl App {
         let line = match rx.try_recv() {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
             Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                "RetroAchievements did not sign you in".to_string()
+                t(MsgKey::RaSignInFail).to_string()
             }
             Ok(Err(e)) => e,
             Ok(Ok(account)) => match self.root.as_deref() {
                 Some(root) => match crate::cheevos::save_account(root, &account) {
-                    Ok(()) => format!("Signed in to RetroAchievements as {}", account.user),
-                    Err(e) => format!("Could not save the sign in: {e}"),
+                    Ok(()) => filled(MsgKey::RaSignedInAs, &account.user),
+                    Err(e) => filled(MsgKey::RaSignInSaveFail, e),
                 },
-                None => "No card to keep the sign in on".to_string(),
+                None => t(MsgKey::RaNoCardSignIn).to_string(),
             },
         };
         self.ra_sign_in = None;
@@ -5238,6 +5478,14 @@ impl App {
                             self.canvas(),
                             self.shelf_title,
                             self.title_alpha(),
+                            out,
+                        );
+                        // Beside the machine's name: which one this is, out of all the ones
+                        // on the shelf.
+                        slot_ui::draw_count(
+                            self.canvas(),
+                            self.shelf_count,
+                            self.shelf_platform,
                             out,
                         );
                     }
@@ -6012,6 +6260,21 @@ impl App {
         }
     }
 
+    /// X 按够 X_HOLD_MS 就打开搜索，按着的当下开，不等松手；松手时再切子文件夹就晚了。
+    fn x_hold(&mut self) {
+        let Some(at) = self.x_held else {
+            return;
+        };
+        if !self.on_shelf() {
+            self.x_held = None;
+            return;
+        }
+        if self.now().saturating_sub(at) >= X_HOLD_MS {
+            self.x_held = None;
+            self.open_search(false);
+        }
+    }
+
     fn eject(&mut self) {
         if self.single_cart() {
             return self.refuse();
@@ -6251,11 +6514,10 @@ impl App {
             .map(|c| ListRow {
                 label: c.text().into(),
                 detail: match () {
-                    _ if *c == chosen => "In use".into(),
-                    _ if *c == system => "Default".into(),
-                    _ if !self.core_on_card(*c) => {
-                        core_state(&self.cores_view, *c).unwrap_or_else(|| "Download".into())
-                    }
+                    _ if *c == chosen => t(MsgKey::CoreInUse).into(),
+                    _ if *c == system => t(MsgKey::CoreDefault).into(),
+                    _ if !self.core_on_card(*c) => core_state(&self.cores_view, *c)
+                        .unwrap_or_else(|| t(MsgKey::BtnDownload).into()),
                     _ => String::new(),
                 },
                 bars: None,
@@ -6266,20 +6528,20 @@ impl App {
         if !self.core_on_card(core) {
             let pending = self.cores_view.pending(core);
             return Some(ListPage {
-                title: "Core".into(),
+                title: t(MsgKey::PageCore).into(),
                 status: slot_ui::label_text(cart),
                 cursor,
                 rows,
-                legends: with_action((!pending).then_some("Download")),
+                legends: with_action((!pending).then_some(t(MsgKey::BtnDownload))),
             });
         }
-        let mut legends = with_action((core != chosen).then_some("This Game"));
+        let mut legends = with_action((core != chosen).then_some(t(MsgKey::CoreThisGame)));
         if core != system {
-            let all = format!("All {}", cart.platform.short_name());
+            let all = filled(MsgKey::CoreAllOf, cart.platform.short_name());
             legends.push(Legend::new(ButtonLegend::Y, &all));
         }
         Some(ListPage {
-            title: "Core".into(),
+            title: t(MsgKey::PageCore).into(),
             status: slot_ui::label_text(cart),
             cursor,
             rows,
@@ -6291,19 +6553,20 @@ impl App {
     fn open_search(&mut self, again: bool) {
         let query = self.search.as_ref().map_or("", |s| s.query.as_str());
         self.phase = Phase::Keyboard {
-            keys: Keyboard::new("Search for a game", query, false, 1, 48),
+            keys: Keyboard::new(t(MsgKey::KbSearchForAGame), query, false, 1, 48),
             typing: Typing::Search { again },
             cursor: 0,
         };
         self.shelf_mut().release_hold();
         self.play_held = None;
+        self.x_held = None;
     }
 
     /// Looks for `query` on every system's shelf and shows what it found.
     fn search_for(&mut self, query: &str) {
         let carts: Vec<&Cart> = self.carts().collect();
         let names: Vec<String> = carts.iter().map(|c| slot_ui::label_text(c)).collect();
-        let found = crate::search::matches(names.iter().map(String::as_str), query)
+        let found = crate::search::matches(names.iter().map(String::as_str), query, self.language)
             .into_iter()
             .map(|i| (carts[i].platform, carts[i].stem.clone()))
             .collect();
@@ -6422,22 +6685,22 @@ impl App {
             })
             .collect();
         let status = match rows.len() {
-            0 => format!("No games match \u{201c}{}\u{201d}", search.query),
-            1 => format!("1 game matches \u{201c}{}\u{201d}", search.query),
+            0 => filled(MsgKey::SearchNoMatch, &search.query),
+            1 => filled(MsgKey::SearchOneMatch, &search.query),
             n if n == crate::search::MOST => {
-                format!(
-                    "The first {n} games matching \u{201c}{}\u{201d}",
-                    search.query
-                )
+                saying(MsgKey::SearchFirstFew, &[&n, &search.query])
             }
-            n => format!("{n} games match \u{201c}{}\u{201d}", search.query),
+            n => saying(MsgKey::SearchManyMatch, &[&n, &search.query]),
         };
-        let mut legends = vec![back_legend(), Legend::new(ButtonLegend::Y, "New Search")];
+        let mut legends = vec![
+            back_legend(),
+            Legend::new(ButtonLegend::Y, t(MsgKey::SearchNew)),
+        ];
         if !rows.is_empty() {
-            legends.push(Legend::new(ButtonLegend::A, "Go to Game"));
+            legends.push(Legend::new(ButtonLegend::A, t(MsgKey::SearchGoToGame)));
         }
         ListPage {
-            title: "Search".into(),
+            title: t(MsgKey::PageSearch).into(),
             status,
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
@@ -7053,8 +7316,8 @@ impl App {
             return None;
         }
         match self.pending.as_ref()?.0 {
-            PendingUndo::Save { .. } => Some("undo save"),
-            PendingUndo::Load { .. } => Some("undo load"),
+            PendingUndo::Save { .. } => Some(t(MsgKey::UndoSave)),
+            PendingUndo::Load { .. } => Some(t(MsgKey::UndoLoad)),
         }
     }
 
@@ -7212,15 +7475,15 @@ fn downloadable_cores() -> Vec<Core> {
 fn core_state(v: &CoresView, core: Core) -> Option<String> {
     match v.downloading {
         Some((c, pct)) if c == core => Some(format!("{pct}%")),
-        _ if v.queued.contains(&core) => Some("Waiting".into()),
-        _ if v.outdated(core) => Some("Update".into()),
-        _ if v.installed(core) => Some("Downloaded".into()),
+        _ if v.queued.contains(&core) => Some(t(MsgKey::ArtWaiting).into()),
+        _ if v.outdated(core) => Some(t(MsgKey::BtnUpdate).into()),
+        _ if v.installed(core) => Some(t(MsgKey::ArtDownloaded).into()),
         _ => None,
     }
 }
 
 fn back_legend() -> Legend {
-    Legend::new(ButtonLegend::B, "Back")
+    Legend::new(ButtonLegend::B, t(MsgKey::BtnBack))
 }
 
 /// Back, and A for `action` when there is one.

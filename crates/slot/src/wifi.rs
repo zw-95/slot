@@ -11,6 +11,8 @@ use std::sync::mpsc::{channel, Receiver, RecvTimeoutError, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use slot_i18n::{filled, t, MsgKey};
+
 pub const WIFI_CONF: &str = "Config/wifi.conf";
 
 /// How often a connected radio is asked how it is doing.
@@ -75,7 +77,7 @@ pub enum JoinError {
 impl std::fmt::Display for JoinError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            JoinError::WrongPassword => write!(f, "Wrong password"),
+            JoinError::WrongPassword => write!(f, "{}", t(MsgKey::WifiWrongPassword)),
             JoinError::Failed(why) => write!(f, "{why}"),
         }
     }
@@ -470,7 +472,7 @@ impl WifiBackend for SimWifi {
     fn join(&mut self, ssid: &str, psk: Option<&str>) -> Result<(), JoinError> {
         let security = match SimWifi::in_range().into_iter().find(|(s, ..)| *s == ssid) {
             Some((_, _, security)) => security,
-            None => return Err(JoinError::Failed("Not in range".into())),
+            None => return Err(JoinError::Failed(t(MsgKey::WifiNotInRange).into())),
         };
         let saved = self.saved.iter().any(|s| s == ssid);
         let ok = match security {
@@ -607,7 +609,7 @@ mod device {
 
         fn ctrl(&self) -> Result<Ctrl, String> {
             Ctrl::open(&Path::new(CTRL_DIR).join("wlan0"))
-                .map_err(|e| format!("The Wi-Fi did not answer: {e}"))
+                .map_err(|e| filled(MsgKey::WifiNoAnswer, e))
         }
 
         fn ask(ctrl: &Ctrl, cmd: &str) -> Result<String, String> {
@@ -648,7 +650,7 @@ mod device {
                     return Ok(());
                 }
             }
-            Err(JoinError::Failed("Could not connect".into()))
+            Err(JoinError::Failed(t(MsgKey::WifiCouldNotConnect).into()))
         }
     }
 
@@ -658,7 +660,7 @@ mod device {
             if self.script(&["up", &conf.to_string_lossy()]) {
                 Ok(())
             } else {
-                Err("The Wi-Fi would not start".into())
+                Err(t(MsgKey::WifiWouldNotStart).into())
             }
         }
 
@@ -699,7 +701,7 @@ mod device {
                         .map_err(fail)?
                         .trim()
                         .parse()
-                        .map_err(|_| fail("The Wi-Fi would not take a network".into()))?;
+                        .map_err(|_| fail(t(MsgKey::WifiWouldNotTake).into()))?;
                     let set = |field: &str, value: &str| {
                         Self::ok(&ctrl, &format!("SET_NETWORK {id} {field} {value}"))
                     };
@@ -848,7 +850,7 @@ mod tests {
 
         wifi.join("Home-5G", Some("nope"));
         let view = settled(&wifi, |v| v.error.is_some());
-        assert_eq!(view.error.as_deref(), Some("Wrong password"));
+        assert_eq!(view.error.as_deref(), Some(t(MsgKey::WifiWrongPassword)));
         assert_eq!(view.connected, None);
 
         wifi.join("Home-5G", Some(SimWifi::PASSWORD));

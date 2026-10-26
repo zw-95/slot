@@ -9,6 +9,7 @@ use crate::bitmaps::ButtonLegend;
 use crate::page::{label_into, legends_into, over, rounded, Legend, DIM, INK, LIT, LIT_INK};
 use crate::plate::UndoFace;
 use crate::text;
+use slot_i18n::{t, MsgKey};
 
 pub const COLS: usize = 10;
 const ROWS: usize = 5;
@@ -234,16 +235,16 @@ impl Keyboard {
     fn special_label(&self, special: Special) -> &'static str {
         match special {
             Special::Shift => match self.page {
-                Page::Caps => "CAPS",
-                _ => "SHIFT",
+                Page::Caps => t(MsgKey::KbCaps),
+                _ => t(MsgKey::BtnShift),
             },
             Special::Page => match self.page {
                 Page::Symbols => "abc",
                 _ => "#+=",
             },
-            Special::Space => "space",
-            Special::Delete => "del",
-            Special::Done => "OK",
+            Special::Space => t(MsgKey::BtnSpace),
+            Special::Delete => t(MsgKey::BtnDelete),
+            Special::Done => t(MsgKey::BtnOk),
         }
     }
 
@@ -301,16 +302,16 @@ impl Keyboard {
             }
         }
         let mut legends = vec![
-            Legend::new(ButtonLegend::B, "Delete"),
-            Legend::new(ButtonLegend::Y, "Space"),
-            Legend::new(ButtonLegend::X, "Shift"),
-            Legend::pair(ButtonLegend::L1, ButtonLegend::R1, "Symbols"),
+            Legend::new(ButtonLegend::B, t(MsgKey::BtnDelete)),
+            Legend::new(ButtonLegend::Y, t(MsgKey::BtnSpace)),
+            Legend::new(ButtonLegend::X, t(MsgKey::BtnShift)),
+            Legend::pair(ButtonLegend::L1, ButtonLegend::R1, t(MsgKey::BtnSymbols)),
         ];
         if self.secret {
-            legends.push(Legend::new(ButtonLegend::Select, "Show"));
+            legends.push(Legend::new(ButtonLegend::Select, t(MsgKey::ValueShow)));
         }
-        legends.push(Legend::new(ButtonLegend::Start, "Done"));
-        legends.push(Legend::new(ButtonLegend::Menu, "Cancel"));
+        legends.push(Legend::new(ButtonLegend::Start, t(MsgKey::BtnDone)));
+        legends.push(Legend::new(ButtonLegend::Menu, t(MsgKey::BtnCancel)));
         legends_into(
             &mut rgba,
             FACE_W,

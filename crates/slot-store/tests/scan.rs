@@ -1,7 +1,7 @@
 mod common;
 
 use common::tmp_root;
-use slot_store::{scan, Platform};
+use slot_store::{folder_of, scan, Platform};
 use tempfile::TempDir;
 
 fn write_rom(d: &TempDir, rel: &str, title: &str) {
@@ -187,8 +187,16 @@ fn a_multi_disc_game_is_shelved_once_as_its_playlist() {
 #[test]
 fn a_disc_set_in_its_own_folder_is_shelved_as_the_disc_named_after_it() {
     let d = tmp_root();
-    write_file(&d, "DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA).cue", "");
-    write_file(&d, "DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA) (Track 1).bin", "");
+    write_file(
+        &d,
+        "DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA).cue",
+        "",
+    );
+    write_file(
+        &d,
+        "DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA) (Track 1).bin",
+        "",
+    );
     write_file(&d, "DC/downloaded_images/Crazy Taxi.png", "");
     write_file(&d, "DC/Crazy Taxi.chd", "");
     let carts: Vec<_> = scan(d.path())
@@ -256,16 +264,67 @@ fn an_arcade_set_shelves_as_its_game_and_a_bios_not_at_all() {
         .filter(|c| c.platform == Platform::NeoGeo)
         .map(|c| (c.stem.as_str(), c.shelf_name()))
         .collect();
-    // In the order of their games' names, not their sets'.
+    // In the order of their games' names, not their sets'. Both of these have a Chinese name,
+    // so they are shelved under that and sorted by its reading: 合金弹头 before 拳皇'98.
     assert_eq!(
         shelved,
         [
-            ("mslug", "Metal Slug - Super Vehicle-001"),
-            (
-                "kof98",
-                "The King of Fighters '98 - The Slugfest / King of Fighters '98 - Dream Match Never Ends (NGM-2420)"
-            ),
+            ("mslug", "合金弹头"),
+            ("kof98", "拳皇'98-梦战斗未结束"),
         ]
+    );
+}
+
+#[test]
+fn a_game_in_a_subfolder_is_shelved_with_the_rest() {
+    let d = tmp_root();
+    write_rom(&d, "GBA/Metroid Fusion.gba", "METROID");
+    write_file(&d, "GBA/汉化/Pokemon Emerald.gba", "");
+    write_file(&d, "GBA/动作/Sonic Advance.gba", "");
+    let carts = scan(d.path()).unwrap();
+    let stems: Vec<&str> = carts.iter().map(|c| c.stem.as_str()).collect();
+    assert_eq!(
+        stems,
+        ["Metroid Fusion", "Pokemon Emerald", "Sonic Advance"]
+    );
+}
+
+#[test]
+fn a_disc_set_in_a_subfolder_is_still_one_game() {
+    let d = tmp_root();
+    write_file(&d, "DC/动作/Crazy Taxi.chd", "");
+    write_file(&d, "DC/动作/Tony Hawk/Tony Hawk.cue", "");
+    write_file(&d, "DC/动作/Tony Hawk/Tony Hawk (Track 1).bin", "");
+    let carts: Vec<_> = scan(d.path())
+        .unwrap()
+        .into_iter()
+        .filter(|c| c.platform == Platform::Dreamcast)
+        .collect();
+    let stems: Vec<&str> = carts.iter().map(|c| c.stem.as_str()).collect();
+    assert_eq!(stems, ["Crazy Taxi", "Tony Hawk"]);
+}
+
+#[test]
+fn a_cart_knows_which_subfolder_it_sits_in() {
+    let d = tmp_root();
+    write_file(&d, "GBA/Tetris.gba", "");
+    write_file(&d, "GBA/汉化/Pokemon Emerald.gba", "");
+    write_file(&d, "DC/动作/Tony Hawk/Tony Hawk.cue", "");
+    let carts = scan(d.path()).unwrap();
+    let folder = |stem: &str| {
+        let cart = carts.iter().find(|c| c.stem == stem).expect("cart");
+        folder_of(cart.platform, &cart.rom)
+    };
+    assert_eq!(
+        folder("Tetris"),
+        None,
+        "a cart in the system's root has no folder"
+    );
+    assert_eq!(folder("Pokemon Emerald").as_deref(), Some("汉化"));
+    assert_eq!(
+        folder("Tony Hawk").as_deref(),
+        Some("动作"),
+        "a disc set's own folder is the game, not a folder of games"
     );
 }
 

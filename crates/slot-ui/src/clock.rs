@@ -5,6 +5,7 @@ use slot_store::{
 
 use crate::plate::{blit, centred_hints, hint_width, UndoFace, HINT_H, LEGEND_GAP};
 use crate::text;
+use slot_i18n::{t, MsgKey};
 
 const DAY: i64 = 86_400;
 
@@ -27,7 +28,11 @@ const CARET_GAP: f32 = 6.0;
 const HINT_DROP: f32 = 48.0;
 
 const SET_CLOCK_KEY: &str = "A";
-const SET_CLOCK_LABEL: &str = "set the clock";
+
+/// The hint under the clock picker: "set the clock", in whichever tongue the interface is in.
+pub fn set_clock_label() -> &'static str {
+    t(MsgKey::ClockSetHint)
+}
 
 pub fn clock_label(stamp: &str) -> String {
     parse_stamp(stamp).map(hhmm).unwrap_or_default()
@@ -49,12 +54,18 @@ pub fn time_text(secs: i64, twelve: bool) -> String {
         0 => 12,
         h => h,
     };
-    format!("{hour}:{m:02} {}", if h < 12 { "AM" } else { "PM" })
+    let half = if h < 12 {
+        t(MsgKey::TimeAm)
+    } else {
+        t(MsgKey::TimePm)
+    };
+    format!("{hour}:{m:02} {half}")
 }
 
-const MONTHS: [&str; 12] = [
-    "JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC",
-];
+/// The name of the month, in whichever tongue the interface is in: JAN, or 1 月.
+fn month_name(month: i64) -> &'static str {
+    t(MsgKey::MONTHS[((month - 1).max(0) as usize) % 12])
+}
 
 pub fn date_time_text(secs: i64) -> String {
     date_time(secs, false)
@@ -63,11 +74,11 @@ pub fn date_time_text(secs: i64) -> String {
 /// The date and the time, the time on a 12-hour clock when `twelve`.
 pub fn date_time(secs: i64, twelve: bool) -> String {
     let (_, month, day) = civil_from_days(secs.div_euclid(DAY));
-    let name = MONTHS
-        .get((month - 1) as usize)
-        .copied()
-        .unwrap_or_default();
-    format!("{name} {day} {}", time_text(secs, twelve))
+    format!(
+        "{} {day} {}",
+        month_name(month),
+        time_text(secs, twelve)
+    )
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -291,7 +302,7 @@ impl ClockPicker {
             ],
         });
         let hint_y = y + PICKER_H as f32 + HINT_DROP;
-        let hw = hint_width(SET_CLOCK_KEY, SET_CLOCK_LABEL);
+        let hw = hint_width(SET_CLOCK_KEY, set_clock_label());
         let (Some(back), Some(tex)) = (back, hint) else {
             if let Some(tex) = hint {
                 out.push(Draw::Tex {
@@ -319,7 +330,7 @@ impl ClockPicker {
 }
 
 pub fn set_clock_hint_face() -> UndoFace {
-    crate::plate::hint_face(SET_CLOCK_KEY, SET_CLOCK_LABEL)
+    crate::plate::hint_face(SET_CLOCK_KEY, set_clock_label())
 }
 
 fn picker_w() -> u32 {

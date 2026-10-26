@@ -284,6 +284,8 @@ fn frame(font: &Font, px: f32) -> Frame {
 pub fn warm_fonts() {
     let _ = symbols_font();
     let _ = crate::text::label_font();
+    // 中文字体比拉丁字体大得多，解析耗时，提前在后台线程里预热。
+    let _ = crate::text::cjk_font();
 }
 
 pub(crate) fn symbols_font() -> Option<&'static Font> {

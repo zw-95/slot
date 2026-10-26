@@ -5,6 +5,7 @@ use crate::hud::{HUD_INK, PLATE_H};
 use crate::icon::{haloed, HALO_PX};
 use crate::text;
 use crate::CartFace;
+use slot_i18n::{t, MsgKey};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Toast {
@@ -67,29 +68,30 @@ impl Toast {
 
     pub fn detail(self) -> Option<&'static str> {
         match self {
-            Toast::CardUnwritable => Some("Progress is not being saved"),
+            Toast::CardUnwritable => Some(t(MsgKey::ToastCardDetail)),
             _ => None,
         }
     }
 
+    /// What the banner says, in the language the interface is in.
     pub fn text(self) -> &'static str {
         match self {
-            Toast::StateSaved => "State Saved",
-            Toast::StateLoaded => "State Loaded",
-            Toast::NeedsGpsp => "Please switch to gpSP",
-            Toast::NoLink => "No link support",
-            Toast::LinkEnded => "Link ended",
-            Toast::PeerEnded => "Link was ended",
-            Toast::BiosMismatch => "BIOS does not match",
-            Toast::ColourOn => "Correction On",
-            Toast::ColourOff => "Correction Off",
-            Toast::ShaderOff => "Shader: Off",
-            Toast::ShaderLcd3x => "Shader: LCD3x",
-            Toast::ShaderGrid => "Shader: Grid",
-            Toast::ShaderDot => "Shader: Dot",
-            Toast::ShaderSimpletex => "Shader: Simpletex",
-            Toast::CardUnwritable => "Can't write to SD card",
-            Toast::NoBios => "BIOS missing",
+            Toast::StateSaved => t(MsgKey::ToastStateSaved),
+            Toast::StateLoaded => t(MsgKey::ToastStateLoaded),
+            Toast::NeedsGpsp => t(MsgKey::ToastNeedsGpsp),
+            Toast::NoLink => t(MsgKey::ToastNoLink),
+            Toast::LinkEnded => t(MsgKey::ToastLinkEnded),
+            Toast::PeerEnded => t(MsgKey::ToastPeerEnded),
+            Toast::BiosMismatch => t(MsgKey::ToastBiosMismatch),
+            Toast::ColourOn => t(MsgKey::ToastColourOn),
+            Toast::ColourOff => t(MsgKey::ToastColourOff),
+            Toast::ShaderOff => t(MsgKey::ToastShaderOff),
+            Toast::ShaderLcd3x => t(MsgKey::ToastShaderLcd3x),
+            Toast::ShaderGrid => t(MsgKey::ToastShaderGrid),
+            Toast::ShaderDot => t(MsgKey::ToastShaderDot),
+            Toast::ShaderSimpletex => t(MsgKey::ToastShaderSimpletex),
+            Toast::CardUnwritable => t(MsgKey::ToastCardUnwritable),
+            Toast::NoBios => t(MsgKey::ToastNoBios),
             Toast::Palette(p) => p.label(),
         }
     }

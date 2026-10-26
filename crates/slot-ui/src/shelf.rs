@@ -6,11 +6,15 @@ use std::sync::OnceLock;
 use crate::bitmaps::Mould;
 use crate::board::{board_in, Placed};
 use crate::cart::{
-    face_size, label_colour, label_rect, label_text, mould_of, render_of, shows_interior, CART_H,
-    CART_W,
+    face_size, label_colour, label_rect, label_text, mould_of, render_of, shows_interior, CartFace,
+    CART_H, CART_W,
 };
-use crate::hud::Millis;
-use crate::slot_chrome::{draw_empty_slot, MOUTH_H};
+use crate::footer::Printed;
+use crate::hud::{Millis, HUD_INK};
+use crate::icon::haloed;
+use crate::plate::HINT_H;
+use crate::slot_chrome::{draw_empty_slot, MOUTH_H, SLOT_NAME_Y};
+use crate::text;
 
 const SIDE_SCALE: f32 = 0.78;
 const SIDE_ALPHA: f32 = 1.0;
@@ -253,11 +257,11 @@ impl Shelf {
 
     fn start_of_letter(&self, from: usize) -> usize {
         let n = self.carts.len();
-        let letter = slot_store::initial(&self.carts[from].stem);
+        let letter = slot_store::initial(self.carts[from].shelf_name());
         let mut at = from;
         for _ in 0..n {
             let before = (at as i32 - 1).rem_euclid(n as i32) as usize;
-            if slot_store::initial(&self.carts[before].stem) != letter {
+            if slot_store::initial(self.carts[before].shelf_name()) != letter {
                 break;
             }
             at = before;
@@ -271,11 +275,14 @@ impl Shelf {
             return;
         }
         let wrap = |i: i32| i.rem_euclid(n as i32) as usize;
-        let here = slot_store::initial(&self.carts[self.index].stem);
+        // The name the shelf files a game under, which for an arcade set is its name in
+        // Chinese: the shelf is sorted by that name, so a jump by letter has to follow it
+        // rather than the set's file name, or the two disagree about where a letter ends.
+        let here = slot_store::initial(self.carts[self.index].shelf_name());
         if self
             .carts
             .iter()
-            .all(|c| slot_store::initial(&c.stem) == here)
+            .all(|c| slot_store::initial(c.shelf_name()) == here)
         {
             return;
         }
@@ -284,7 +291,7 @@ impl Shelf {
                 let mut at = self.index;
                 for _ in 0..n {
                     at = wrap(at as i32 + 1);
-                    if slot_store::initial(&self.carts[at].stem) != here {
+                    if slot_store::initial(self.carts[at].shelf_name()) != here {
                         break;
                     }
                 }
@@ -562,4 +569,56 @@ fn shrink(offset: f32) -> f32 {
 
 fn recede_alpha(face_alpha: f32) -> f32 {
     (face_alpha / SIDE_ALPHA).clamp(0.0, 1.0)
+}
+
+/// The box "3 / 57" is laid out in: a count is short, and a wide box would leave the number
+/// floating in the middle of nowhere rather than sitting over the cart.
+const COUNT_W: u32 = 120;
+pub const COUNT_H: u32 = 22;
+const COUNT_PX: f32 = 16.0;
+const COUNT_MIN_PX: f32 = 12.0;
+/// How far to the right of the machine's name the count stands: close enough to read as one
+/// line with it, far enough that the two never touch.
+const COUNT_GAP: f32 = 10.0;
+
+/// "3 / 57" in the toasts' own look, so it reads over a wallpaper of any colour.
+pub fn count_face(line: &str) -> CartFace {
+    let Some(font) = text::label_font() else {
+        return CartFace {
+            rgba: Vec::new(),
+            w: 0,
+            h: 0,
+        };
+    };
+    let layout = text::fit(font, line, COUNT_W as f32, 1, COUNT_PX, COUNT_MIN_PX);
+    haloed(
+        &text::coverage(COUNT_W, COUNT_H, &layout),
+        COUNT_W,
+        COUNT_H,
+        HUD_INK,
+    )
+}
+
+/// The count goes **beside the machine's name**, at the top of the screen and a little to its
+/// right, the two reading as one line: which machine and subfolder, and how far into it. It
+/// used to stand over the cart, which moved it with the cart's height and put it under the
+/// HUD plate whenever a pak was tall enough.
+pub fn draw_count(canvas: Canvas, count: Printed, name: Printed, out: &mut Vec<Draw>) {
+    let Some(tex) = count.face else {
+        return;
+    };
+    // Just right of the machine's name, which sits dead centre. With no name up the count
+    // centres itself rather than hanging off an edge.
+    let x = match name.face {
+        Some(_) => canvas.centred(name.w as f32) + name.w as f32 + COUNT_GAP,
+        None => canvas.centred(count.w as f32),
+    };
+    out.push(Draw::Tex {
+        x,
+        y: SLOT_NAME_Y + (HINT_H - COUNT_H) as f32 / 2.0,
+        w: count.w as f32,
+        h: COUNT_H as f32,
+        tex,
+        alpha: 1.0,
+    });
 }

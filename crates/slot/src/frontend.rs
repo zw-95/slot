@@ -4,6 +4,7 @@ use slot_ftrace::{self as ft, ev};
 use slot_gfx::{Canvas, Compositor, Draw, Layout, ScreenEffect, TexId, OUT_H, OUT_W};
 
 const PAPER: &[u8] = include_bytes!("../assets/paper.png");
+use slot_i18n::{t, MsgKey};
 use slot_input::{InputSource, Millis};
 use slot_power::{Platform, Power};
 use slot_store::{format_stamp, BezelPick, Platform as Console};
@@ -16,7 +17,7 @@ use slot_ui::{
     slot_front_light, socket_face, sticker_face, time_text, title_face, toast_face, wallpaper_face,
     word_ink, CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow,
     QuickValue, RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX,
-    HUD_INK, LEGEND,
+    HUD_INK,
 };
 
 use crate::app::{App, LinkRow, Phase};
@@ -82,6 +83,14 @@ pub struct Frontend {
     rebuild: Option<Rebuild>,
     stale_check: Option<std::sync::mpsc::Receiver<Vec<slot_store::Cart>>>,
     ui_faces: Option<std::sync::mpsc::Receiver<UiFaces>>,
+    /// The textures the interface's type was baked into, in the order it was baked. A new
+    /// tongue walks the same order and writes over them instead of piling up new ones.
+    ui_tex: Vec<TexId>,
+    /// How far into `ui_tex` the bake now going has got.
+    ui_baked: usize,
+    /// The tongue the interface was last baked in: when the card says another one, it all has
+    /// to be baked again, or the menus go on reading the old one off their textures.
+    lang: slot_i18n::Lang,
     rebuild_faces: RebuildFaces,
     link_art: LinkArtBuilder,
     link_art_done: bool,
@@ -168,6 +177,8 @@ struct AboutFace {
 struct Clocks {
     line: Option<TexId>,
     hint: Option<TexId>,
+    /// The clock screen's way back, which is a line of type too and so wants re-baking.
+    back_tex: Option<TexId>,
     shelf: Option<TexId>,
     picked: Option<String>,
     shown: String,
@@ -177,6 +188,8 @@ struct Clocks {
     platform_tex: Option<TexId>,
     title: String,
     title_tex: Option<TexId>,
+    count: String,
+    count_tex: Option<TexId>,
     ink: [u8; 3],
     sync: Option<String>,
     sync_tex: Option<TexId>,
@@ -287,6 +300,7 @@ impl Frontend {
         session
             .app_mut()
             .set_power(Power::new(platform, DOZE_TIMEOUT));
+        let lang = session.app().language();
         Frontend {
             session,
             start: now,
@@ -299,6 +313,9 @@ impl Frontend {
             rebuild: None,
             stale_check,
             ui_faces: None,
+            ui_tex: Vec::new(),
+            ui_baked: 0,
+            lang,
             rebuild_faces: RebuildFaces::default(),
             link_art: LinkArtBuilder::spawn(),
             link_art_done: false,
@@ -375,13 +392,11 @@ impl Frontend {
         let alert = icon_face(Icon::Alert, ALERT_PX, ALERT_INK);
         let alert = compositor.create_texture(alert.w, alert.h, &alert.rgba);
         self.session.app_mut().set_alert_face(alert);
-        let legend = legend_faces(compositor, &LEGEND);
+        let legend = legend_faces(compositor, &slot_ui::polaroid_legend());
         self.session.app_mut().set_legend_faces(legend);
-        let hint = set_clock_hint_face();
-        self.clocks.hint = Some(compositor.create_texture(hint.w, hint.h, &hint.rgba));
-        let back = hint_face("B", "Back");
-        let tex = compositor.create_texture(back.w, back.h, &back.rgba);
-        self.session.app_mut().set_clock_back_face((tex, back.w));
+        self.upload_fixed_faces(compositor);
+        // The rebuild screen bakes its title the first time it is shown.
+        self.rebuild_faces.title = None;
         let star = slot_ui::star_face(slot_ui::STAR_SCALE, slot_ui::STAR_INK);
         let id = compositor.texture_nearest(star.w, star.h, &star.rgba);
         self.session.app_mut().set_star_face(id, star.w, star.h);
@@ -501,15 +516,84 @@ impl Frontend {
         }
     }
 
+    /// The lines of type that are not part of the big batch: the clock's hint, and its way
+    /// back. Both are baked again when the tongue moves, into the texture they already have.
+    fn upload_fixed_faces(&mut self, compositor: &mut Compositor) {
+        let hint = set_clock_hint_face();
+        let id = match self.clocks.hint {
+            Some(id) => {
+                compositor.update_texture(id, hint.w, hint.h, &hint.rgba);
+                id
+            }
+            None => compositor.create_texture(hint.w, hint.h, &hint.rgba),
+        };
+        self.clocks.hint = Some(id);
+        let back = hint_face("B", t(MsgKey::BtnBack));
+        let id = match self.clocks.back_tex {
+            Some(id) => {
+                compositor.update_texture(id, back.w, back.h, &back.rgba);
+                id
+            }
+            None => compositor.create_texture(back.w, back.h, &back.rgba),
+        };
+        self.clocks.back_tex = Some(id);
+        self.session.app_mut().set_clock_back_face((id, back.w));
+    }
+
+    /// The tongue moved under the interface. Every line of type in it is a baked texture, so
+    /// the batch is baked again — off the frame, the way it is at boot — and what is left of
+    /// the interface goes over in place.
+    fn relang(&mut self, compositor: &mut Compositor) {
+        slot_i18n::set_lang(self.lang);
+        let (tx, rx) = std::sync::mpsc::channel();
+        let baking = std::thread::Builder::new()
+            .name("relang".to_string())
+            .spawn(move || {
+                let _ = tx.send(UiFaces::build());
+            });
+        match baking {
+            Ok(_) => self.ui_faces = Some(rx),
+            Err(_) => self.place_ui_faces(compositor, UiFaces::build()),
+        }
+        self.upload_fixed_faces(compositor);
+    }
+
+    /// Bakes one face of the interface's type into a texture: into the one it had last time the
+    /// interface was baked, unless this is the first time. How many faces there are does not
+    /// change with the tongue, so the order they arrive in is the order they were made in.
+    /// Writing over them is the whole point: a tongue the player can change is a tongue that
+    /// gets changed more than once, and a second set of textures each time would pile up.
+    fn bake(&mut self, compositor: &mut Compositor, w: u32, h: u32, rgba: &[u8]) -> TexId {
+        let at = self.ui_baked;
+        self.ui_baked += 1;
+        match self.ui_tex.get(at).copied() {
+            Some(id) => {
+                compositor.update_texture(id, w, h, rgba);
+                id
+            }
+            None => {
+                let id = compositor.create_texture(w, h, rgba);
+                self.ui_tex.push(id);
+                id
+            }
+        }
+    }
+
     fn place_ui_faces(&mut self, compositor: &mut Compositor, faces: UiFaces) {
-        let mut cart = |f: CartFace| compositor.create_texture(f.w, f.h, &f.rgba);
+        // The batch is written over the textures the last one was baked into. Should its shape
+        // ever differ — two rows that read the same in one tongue and not in another — the
+        // pool is cut down to what this batch has, and the faces after the change get new
+        // textures rather than the wrong ones.
+        self.ui_tex.truncate(faces.count());
+        self.ui_baked = 0;
+        let mut cart = |f: CartFace| self.bake(compositor, f.w, f.h, &f.rgba);
         let link_badges = faces.link_badges.into_iter().map(&mut cart).collect();
         let toasts = faces.toasts.into_iter().map(&mut cart).collect();
         let sockets = faces.sockets.into_iter().map(&mut cart).collect();
         let chips = faces.chips.into_iter().map(&mut cart).collect();
         let blank = cart(faces.blank_chip);
         let shadow = cart(faces.chip_shadow);
-        let mut up = |f: UndoFace| (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h);
+        let mut up = |f: UndoFace| (self.bake(compositor, f.w, f.h, &f.rgba), f.w, f.h);
         let lines = faces.shutdown.into_iter().map(&mut up).collect();
         let shared: Vec<_> = faces
             .quick_labels
@@ -646,6 +730,16 @@ impl Frontend {
     }
 
     pub fn compose(&mut self, compositor: &mut Compositor) {
+        // The card can say another tongue at any time: the language row does it live. Every
+        // line of type in the interface is a baked texture, so the lot has to be baked again.
+        if self.lang != self.session.app().language() {
+            self.lang = self.session.app().language();
+            self.relang(compositor);
+        }
+        // A batch baked off the frame — at boot, or a moment ago for a new tongue. At boot it
+        // is waited for; here it is only collected when it happens to have landed.
+        self.poll_ui_faces(compositor);
+        self.poll_label_check();
         compositor.set_blue_light(self.session.app().blue_light());
         compositor.set_picture(self.session.app().picture_rect());
         compositor.set_screen_effect(match self.session.app().screen_shader() {
@@ -834,7 +928,7 @@ impl Frontend {
         }
         let faces = &mut self.rebuild_faces;
         let title = *faces.title.get_or_insert_with(|| {
-            let f = rebuild_title_face("Caching New Labels");
+            let f = rebuild_title_face(t(MsgKey::RebuildCaching));
             (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h)
         });
         let done = rebuild.done();
@@ -972,6 +1066,30 @@ struct UiFaces {
 }
 
 impl UiFaces {
+    /// How many textures `place_ui_faces` bakes out of this batch. Every tongue bakes the same
+    /// number, because the interface has the same rows in each of them — but a batch whose
+    /// shape did change would leave the pool of textures out of step with it, and every face
+    /// after the change would be drawn in the wrong one. So the number is checked.
+    fn count(&self) -> usize {
+        self.link_badges.len()
+            + self.toasts.len()
+            + self.sockets.len()
+            + self.chips.len()
+            + 2 // the blank chip, and the shadow under it
+            + self.shutdown.len()
+            + self.quick_labels.len() * 2
+            + 1 // the pointer
+            + self.quick_values.len() * 2
+            + 2 // the carets
+            + self.quick_legend.len() * 2
+            + self.core_legend.len()
+            + self.link_roles.len()
+            + 1 // "linked"
+            + self.link_legend.len() * 2
+            + self.link_steps.len()
+            + self.link_fails.len()
+    }
+
     fn build() -> Self {
         UiFaces {
             link_badges: LinkBadge::FACES
@@ -988,9 +1106,9 @@ impl UiFaces {
                 .iter()
                 .map(|c| {
                     menu_face(match c {
-                        PowerChoice::Restart => "Restarting",
-                        PowerChoice::PowerOff => "Powering Down",
-                        PowerChoice::Reload => "Reloading",
+                        PowerChoice::Restart => t(MsgKey::PowerRestarting),
+                        PowerChoice::PowerOff => t(MsgKey::PoweringDown),
+                        PowerChoice::Reload => t(MsgKey::PowerReloading),
                     })
                 })
                 .collect(),
@@ -1022,7 +1140,7 @@ impl UiFaces {
             chip_shadow: chip_shadow_face(),
             core_legend: core_button_legends(),
             link_roles: LinkRow::ALL.iter().map(|r| menu_face(r.text())).collect(),
-            linked: menu_face("Linked"),
+            linked: menu_face(t(MsgKey::LinkLinked)),
             link_legend: link_legend_faces(footer_ink(false)),
             link_legend_light: link_legend_faces(footer_ink(true)),
             link_steps: LinkStep::ALL.iter().map(|s| menu_face(s.line())).collect(),
@@ -1145,6 +1263,18 @@ fn sync_clock(app: &mut App, compositor: &mut Compositor, clocks: &mut Clocks) {
             let w = face.w;
             let id = upload(compositor, &mut clocks.title_tex, face);
             app.set_shelf_title_face(id, w);
+        }
+    }
+    let count_shown = app.count_text().unwrap_or_default();
+    if count_shown != clocks.count {
+        clocks.count = count_shown.clone();
+        if count_shown.is_empty() {
+            app.clear_shelf_count();
+        } else {
+            let f = slot_ui::count_face(&count_shown);
+            let w = f.w;
+            let id = upload_rgba(compositor, &mut clocks.count_tex, f.w, f.h, &f.rgba);
+            app.set_shelf_count_face(id, w);
         }
     }
     let battery_shown = app

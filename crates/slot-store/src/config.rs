@@ -1,7 +1,14 @@
 use std::io;
 use std::path::Path;
 
+use crate::atomic::atomic_write;
+use slot_i18n::Lang;
+
 pub const CONFIG_DIR: &str = "Config";
+
+/// The language has a file of its own, as the recents and the favorites do: `slot.state` is
+/// written and read field by field, and every test of it names every field.
+const LANGUAGE_FILE: &str = "language.txt";
 
 const MOVED: [&str; 4] = [
     "slot.state",
@@ -35,4 +42,20 @@ pub fn move_config(root: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Which language the interface speaks, as the card remembers it. English when it says nothing.
+pub fn read_language(root: &Path) -> Lang {
+    std::fs::read_to_string(root.join(CONFIG_DIR).join(LANGUAGE_FILE))
+        .ok()
+        .and_then(|text| Lang::parse(text.trim()))
+        .unwrap_or_default()
+}
+
+/// Remembers the language across a restart.
+pub fn write_language(root: &Path, lang: Lang) -> io::Result<()> {
+    atomic_write(
+        &root.join(CONFIG_DIR).join(LANGUAGE_FILE),
+        lang.key().as_bytes(),
+    )
 }

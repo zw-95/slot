@@ -129,7 +129,7 @@ fn y_on_the_core_list_sets_the_core_for_the_whole_system() {
         .iter()
         .map(|r| (r.label.as_str(), r.detail.as_str()))
         .collect();
-assert_eq!(
+    assert_eq!(
         rows,
         [
             ("FinalBurn Neo", "In use"),

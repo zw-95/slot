@@ -3,7 +3,8 @@ use std::path::Path;
 use slot_gfx::{Draw, OUT_H, OUT_W};
 use slot_store::{StateEntry, RING_MAX};
 use slot_ui::{
-    hint_face, hint_width, Polaroids, Printed, DOT, HINT_H, LEGEND, PHOTO_H, PHOTO_W, PLATE_H,
+    hint_face, hint_width, polaroid_legend, Polaroids, Printed, DOT, HINT_H, PHOTO_H, PHOTO_W,
+    PLATE_H,
 };
 
 fn entry(stamp: &str) -> StateEntry {
@@ -239,9 +240,10 @@ fn the_switcher_puts_the_ways_out_on_the_left() {
 }
 
 fn hint_rect(out: &[Draw], key: &str) -> Option<Quad> {
+    let legend = polaroid_legend();
     let i = match key {
-        "X" => LEGEND.len(),
-        _ => LEGEND.iter().position(|(k, _)| *k == key)?,
+        "X" => legend.len(),
+        _ => legend.iter().position(|(k, _)| *k == key)?,
     };
     hint_quads(out).get(i).copied()
 }

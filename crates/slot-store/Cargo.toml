@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 unicode-normalization.workspace = true
 lz4_flex.workspace = true
+slot-i18n = { path = "../slot-i18n" }
+slot-pinyin = { path = "../slot-pinyin" }
 
 [dev-dependencies]
 tempfile.workspace = true

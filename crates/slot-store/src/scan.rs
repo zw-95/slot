@@ -48,6 +48,9 @@ impl Cart {
     }
 }
 
+/// 往子文件夹里最深走几层。够深到能用，浅到不会被意外套娃的目录拖死。
+const MAX_SCAN_DEPTH: usize = 8;
+
 #[derive(Debug)]
 pub enum StoreError {
     Io(std::io::Error),
@@ -78,56 +81,19 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
     let mut carts = Vec::new();
     for platform in Platform::ALL {
         let dir = root.join("Games").join(platform.dir_name());
-        let entries = match std::fs::read_dir(&dir) {
-            Ok(d) => d,
+        match std::fs::read_dir(&dir) {
+            Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => continue,
             Err(e) => {
                 eprintln!("slot: scan: {}: {e}", dir.display());
                 continue;
             }
-        };
+        }
         let labels_dir = root.join("Labels").join(platform.dir_name());
         let labels = listing(&labels_dir);
         let first = carts.len();
-        for entry in entries {
-            let Ok(entry) = entry else {
-                continue;
-            };
-            let rom = entry.path();
-            let arcade = platform.spec().header == Header::Arcade;
-            // A disc set kept in its own folder, as Redump's are, is the disc named after the
-            // folder. Not for arcade, where a folder beside a romset holds that romset's disks.
-            let rom = match !arcade && !is_hidden(&rom) && is_dir(&entry) {
-                true => match disc_in(&rom, platform) {
-                    Some(disc) => disc,
-                    None => continue,
-                },
-                false if is_hidden(&rom) || !platform.accepts(&rom) || !is_file(&entry) => continue,
-                false => rom,
-            };
-            let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {
-                continue;
-            };
-            if arcade && crate::arcade::is_bios(stem) {
-                continue;
-            }
-            let label = labels
-                .get(&format!("{stem}.png").to_lowercase())
-                .map(|name| labels_dir.join(name));
-            carts.push(Cart {
-                platform,
-                stem: stem.to_string(),
-                title: String::new(),
-                code: String::new(),
-                shell: shells.get(&crate::cart_shell::key(stem)).copied(),
-                label,
-                rom,
-            });
-            if arcade {
-                // A table lookup, cheap enough for every game at boot, unlike reading a ROM.
-                carts.last_mut().map(Cart::read_header);
-            }
-        }
+        // 子文件夹也扫：Games/<机种>/<子文件夹>/ 里的游戏同样上架。
+        collect_games(&dir, platform, &labels_dir, &labels, &shells, &mut carts, 0);
         let listed = in_playlists(&carts[first..]);
         let mut at = first;
         carts.retain(|c| {
@@ -140,6 +106,122 @@ pub fn scan(root: &Path) -> Result<Vec<Cart>, StoreError> {
             .cmp(&(b.platform as u8, sort_key(b.shelf_name())))
     });
     Ok(carts)
+}
+
+/// Fills `carts` with everything under `dir`, walking into subfolders as it goes.
+#[allow(clippy::too_many_arguments)]
+fn collect_games(
+    dir: &Path,
+    platform: Platform,
+    labels_dir: &Path,
+    labels: &HashMap<String, String>,
+    shells: &HashMap<String, crate::ShellChoice>,
+    carts: &mut Vec<Cart>,
+    depth: usize,
+) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<std::fs::DirEntry> = entries.filter_map(|e| e.ok()).collect();
+    // 排序后才有一份稳定的上架顺序，不随文件系统返回的顺序变。
+    entries.sort_by_key(|e| e.file_name());
+    let arcade = platform.spec().header == Header::Arcade;
+    for entry in entries {
+        let path = entry.path();
+        if is_hidden(&path) {
+            continue;
+        }
+        if is_dir(&entry) {
+            // A disc set kept in its own folder, as Redump's are, is the disc named after the
+            // folder. Such a folder is one game, so it is not walked into: its every track
+            // would otherwise be a game of its own. Not for arcade, where a folder beside a
+            // romset holds that romset's disks.
+            let disc = match arcade {
+                false => disc_in(&path, platform),
+                true => None,
+            };
+            match disc {
+                Some(disc) => add_cart(carts, platform, &disc, labels_dir, labels, shells, arcade),
+                // 街机不往里走：那里的目录是某个 romset 的碟片目录，不是又一层文件夹。
+                None if !arcade && depth + 1 < MAX_SCAN_DEPTH => {
+                    collect_games(
+                        &path,
+                        platform,
+                        labels_dir,
+                        labels,
+                        shells,
+                        carts,
+                        depth + 1,
+                    );
+                }
+                None => {}
+            }
+            continue;
+        }
+        if !is_file(&entry) || !platform.accepts(&path) {
+            continue;
+        }
+        add_cart(carts, platform, &path, labels_dir, labels, shells, arcade);
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_cart(
+    carts: &mut Vec<Cart>,
+    platform: Platform,
+    rom: &Path,
+    labels_dir: &Path,
+    labels: &HashMap<String, String>,
+    shells: &HashMap<String, crate::ShellChoice>,
+    arcade: bool,
+) {
+    let Some(stem) = rom.file_stem().and_then(|s| s.to_str()) else {
+        return;
+    };
+    if arcade && crate::arcade::is_bios(stem) {
+        return;
+    }
+    let label = labels
+        .get(&format!("{stem}.png").to_lowercase())
+        .map(|name| labels_dir.join(name));
+    carts.push(Cart {
+        platform,
+        stem: stem.to_string(),
+        title: String::new(),
+        code: String::new(),
+        shell: shells.get(&crate::cart_shell::key(stem)).copied(),
+        label,
+        rom: rom.to_path_buf(),
+    });
+    if arcade {
+        // A table lookup, cheap enough for every game at boot, unlike reading a ROM.
+        carts.last_mut().map(Cart::read_header);
+    }
+}
+
+/// Which subfolder of `Games/<system>/` this cart sits in, if it is not in the system's root.
+/// Shelves cycle through these: everything first, then one folder at a time.
+pub fn folder_of(platform: Platform, rom: &Path) -> Option<String> {
+    let mut trail: Vec<String> = Vec::new();
+    let mut at = rom.parent()?;
+    loop {
+        let name = at.file_name()?.to_str()?;
+        if name == platform.dir_name() {
+            break;
+        }
+        trail.push(name.to_string());
+        at = at.parent()?;
+    }
+    // A disc set's folder is named after the disc inside it: it is the game, not a folder of
+    // games. Look one level further out for the folder the player actually made.
+    if let (Some(nearest), Some(stem)) = (trail.first(), rom.file_stem().and_then(|s| s.to_str())) {
+        if nearest == stem {
+            trail.remove(0);
+        }
+    }
+    // `trail` runs innermost first, so its last entry is the outermost: the top-level folder
+    // under the system's own.
+    trail.pop()
 }
 
 /// The discs the shelf's `.m3u` playlists name. A multi-disc game is shown once, as its playlist,
@@ -202,8 +284,20 @@ fn is_file(entry: &std::fs::DirEntry) -> bool {
     }
 }
 
+/// What a game sorts by, and so which letter of the shelf it sits under: its group, then the
+/// letters it reads as. A Chinese name reads as its pinyin initials, so 腾讯翻译 stands among the
+/// Ts instead of after every name in letters.
 pub fn sort_key(stem: &str) -> (u8, String) {
-    (group_of(stem), stem.to_uppercase())
+    (group_of(stem), reading(stem))
+}
+
+/// The letters a name reads as while it is being sorted: `腾讯翻译` is `TXFY`, `洛克人Zero` is
+/// `LKRZERO`. Anything not led by a hanzi is just itself, upper-cased, as it always was.
+fn reading(stem: &str) -> String {
+    match stem.chars().find(|c| !c.is_whitespace()) {
+        Some(c) if slot_pinyin::initial(c).is_some() => slot_pinyin::initials(stem),
+        _ => stem.to_uppercase(),
+    }
 }
 
 fn group_of(stem: &str) -> u8 {
@@ -214,15 +308,19 @@ fn group_of(stem: &str) -> u8 {
     }
 }
 
+/// The letter a game files under, the one the shelf jumps to: for a Chinese name, the first
+/// letter of its reading, so 腾讯翻译 is a T and not 腾. Digits and anything the letters do not
+/// reach are `#`.
 pub fn initial(stem: &str) -> char {
-    match group_of(stem) {
-        1 => stem
-            .chars()
-            .find(|c| !c.is_whitespace())
-            .and_then(|c| c.to_uppercase().next())
-            .unwrap_or('#'),
-        _ => '#',
+    let Some(c) = stem.chars().find(|c| !c.is_whitespace()) else {
+        return '#';
+    };
+    if group_of(stem) != 1 {
+        return '#';
     }
+    slot_pinyin::initial(c)
+        .or_else(|| c.to_uppercase().next())
+        .unwrap_or('#')
 }
 
 pub fn is_hidden(p: &Path) -> bool {

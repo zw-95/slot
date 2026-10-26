@@ -1,5 +1,7 @@
 use std::sync::mpsc::{channel, Receiver, TryRecvError};
 
+use slot_i18n::{t, MsgKey};
+
 use crate::link_net::{Cancel, TcpLink, HOST_BOUND};
 use crate::link_radio::{self, LinkRole, RadioFail};
 
@@ -55,8 +57,8 @@ impl LinkStep {
 
     pub fn line(self) -> &'static str {
         match self {
-            LinkStep::Radio => "Bringing the radio up",
-            LinkStep::Waiting => "Looking for the other player",
+            LinkStep::Radio => t(MsgKey::LinkStepRadio),
+            LinkStep::Waiting => t(MsgKey::LinkStepWaiting),
         }
     }
 
@@ -81,10 +83,10 @@ impl LinkFail {
 
     pub fn line(self) -> &'static str {
         match self {
-            LinkFail::Radio => "The radio did not come up",
-            LinkFail::NobodyCame => "Nobody arrived",
-            LinkFail::PeerVanished => "The other player vanished",
-            LinkFail::Cancelled => "Cancelled",
+            LinkFail::Radio => t(MsgKey::LinkFailRadio),
+            LinkFail::NobodyCame => t(MsgKey::LinkFailNobody),
+            LinkFail::PeerVanished => t(MsgKey::LinkFailVanished),
+            LinkFail::Cancelled => t(MsgKey::LinkFailCancelled),
         }
     }
 }

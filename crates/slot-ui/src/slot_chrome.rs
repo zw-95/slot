@@ -327,9 +327,18 @@ fn for_each_scoop_span(canvas: Canvas, mut span: impl FnMut(f32, f32, f32)) {
 
 const SLOT_NAME_GAP: f32 = 6.0;
 
+/// The line under the carts, where the game's title goes. It hangs below the row but stops
+/// short of the slot, and it is where it always was: the machine's name is the one that moved.
 pub fn slot_name_y() -> f32 {
     OUT_H as f32 - MOUTH_H - HINT_H as f32 - SLOT_NAME_GAP
 }
+
+/// Where the machine's name sits: dead centre at the **very top** of the screen, where nothing
+/// about a cart can move it. It used to share the line under the carts with the game's title,
+/// which is how the two came to be printed on top of each other. The HUD plate is the only
+/// thing that ever covers the top, and it is up for a second and a half when the volume or
+/// the brightness moves — the name lets it cover it rather than sitting below it for good.
+pub const SLOT_NAME_Y: f32 = 10.0;
 
 pub fn draw_slot_name(canvas: Canvas, name: Printed, alpha: f32, out: &mut Vec<Draw>) {
     let (Some(tex), true) = (name.face, alpha > 0.0) else {
@@ -338,7 +347,7 @@ pub fn draw_slot_name(canvas: Canvas, name: Printed, alpha: f32, out: &mut Vec<D
     let (w, h) = (name.w as f32, HINT_H as f32);
     out.push(Draw::Tex {
         x: canvas.centred(w),
-        y: slot_name_y() + canvas.extra(),
+        y: SLOT_NAME_Y + canvas.extra(),
         w,
         h,
         tex,
