@@ -238,7 +238,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             wallpaper: WallpaperPick::Default,
             wallpaper_tint: WallpaperTint::Off,
             show_recents: false,
-            show_titles: false,
+            show_titles: true,
             clock_12h: false,
             menu_sounds: true,
             haptics: true,

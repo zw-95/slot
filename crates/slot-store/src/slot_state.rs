@@ -378,7 +378,7 @@ impl Default for SlotState {
             menu_sounds: true,
             haptics: true,
             tv_sound: true,
-            show_titles: false,
+            show_titles: true,
             wifi: false,
             bluetooth: false,
             ssh: true,
