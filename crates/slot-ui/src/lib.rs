@@ -16,6 +16,7 @@ mod footer;
 mod hud;
 mod icon;
 mod keyboard;
+mod letter;
 mod link_art;
 mod list_page;
 mod media;
@@ -70,6 +71,7 @@ pub use hud::{
 };
 pub use icon::{badge_face, icon_box, icon_face, star_face, warm_fonts, Badge, Icon};
 pub use keyboard::{KeyInput, KeyOutcome, Keyboard};
+pub use letter::{draw_letters, index_of as letter_index_of, letter_face, LETTERS};
 pub use link_art::{
     link_art, LinkArt, ADAPTER_BASE_X, ADAPTER_BASE_Y, ADAPTER_H, ADAPTER_W, ARCS, ARROW_H,
     ARROW_LEFT_X, ARROW_RIGHT_X, ARROW_W, ARROW_Y, CLICKS_H, CLICKS_W, CLICKS_X, CLICKS_Y, PLUG_H,

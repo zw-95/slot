@@ -94,10 +94,6 @@ const SHUTDOWN_SHOW_MS: Millis = 250;
 
 const CORE_PICKER_RECEDE: f32 = 0.26;
 
-const SLOT_NAME_IN_MS: Millis = 200;
-const SLOT_NAME_HOLD_MS: Millis = 1200;
-const SLOT_NAME_OUT_MS: Millis = 800;
-const SLOT_NAME_ALPHA: f32 = 1.0;
 const CORE_PICKER_DIM: f32 = 0.25 / (1.0 - CORE_PICKER_RECEDE);
 const CORE_LEGEND_Y: f32 = OUT_H as f32 - MOUTH_H * 2.0;
 const CORE_LEGEND_GAP: f32 = 24.0;
@@ -552,6 +548,11 @@ pub struct App {
     shelf_count: slot_ui::Printed,
     name_pending: bool,
     slot_letter: Option<char>,
+    /// Where the row of letters is rolled to, which need not be a whole letter while it is
+    /// rolling: 4.5 is halfway from D to E.
+    letter_at: f32,
+    /// One texture a letter, `#` first, in the order of `slot_ui::LETTERS`.
+    letter_texes: Vec<Option<TexId>>,
     shelf_named: Option<Millis>,
     shelf_clock: slot_ui::Printed,
     hud: Hud,
@@ -807,6 +808,8 @@ impl App {
             shelf_count: slot_ui::Printed::default(),
             name_pending: false,
             slot_letter: None,
+            letter_at: 0.0,
+            letter_texes: Vec::new(),
             shelf_named: None,
             shelf_clock: slot_ui::Printed::default(),
             hud: Hud::new(),
@@ -1000,9 +1003,13 @@ impl App {
         let carts: Vec<Cart> = self
             .games
             .iter()
-            .filter(|c| {
-                c.platform == platform
-                    && slot_store::folder_of(platform, &c.rom).as_deref() == folder.as_deref()
+            .filter(|c| c.platform == platform)
+            .filter(|c| match folder.as_deref() {
+                // No folder is the whole system again: every game in it, whichever subfolder
+                // it sits in. Matching only the ones with no folder at all left the cycle
+                // stuck on a system whose games all live in subfolders.
+                None => true,
+                Some(f) => slot_store::folder_of(platform, &c.rom).as_deref() == Some(f),
             })
             .cloned()
             .collect();
@@ -1143,20 +1150,10 @@ impl App {
         self.name_pending = true;
     }
 
+    /// The machine's name is always up, at full strength: it says where the hand is, and that
+    /// is worth knowing the whole time the shelf is up, not only for a moment after a switch.
     fn slot_name_alpha(&self) -> f32 {
-        let Some(at) = self.shelf_named else {
-            return 0.0;
-        };
-        let t = self.now().saturating_sub(at);
-        let level = if t < SLOT_NAME_IN_MS {
-            t as f32 / SLOT_NAME_IN_MS as f32
-        } else if t < SLOT_NAME_IN_MS + SLOT_NAME_HOLD_MS {
-            1.0
-        } else {
-            let out = t - SLOT_NAME_IN_MS - SLOT_NAME_HOLD_MS;
-            1.0 - (out as f32 / SLOT_NAME_OUT_MS as f32).min(1.0)
-        };
-        SLOT_NAME_ALPHA * ease(level)
+        1.0
     }
 
     fn next_shelf(&self, by: i32) -> Option<usize> {
@@ -1777,15 +1774,15 @@ impl App {
         self.language
     }
 
+    /// The game's name is always up, at full strength: switching machine, walking into a
+    /// subfolder and jumping to a letter all change which game is under the hand, which is
+    /// exactly when its name is worth reading. It used to duck out of the way of the machine's
+    /// name, and there was nothing under the row for a second every time.
     fn title_alpha(&self) -> f32 {
-        if !self.state.show_titles || (self.name_pending && self.slot_text().is_some()) {
+        if !self.state.show_titles {
             return 0.0;
         }
-        let named = self.shelf_named.map(|at| self.now().saturating_sub(at));
-        if named.is_some_and(|t| t < SLOT_NAME_IN_MS + SLOT_NAME_HOLD_MS) {
-            return 0.0;
-        }
-        1.0 - self.slot_name_alpha() / SLOT_NAME_ALPHA
+        1.0
     }
 
     pub fn shelf_platform_name(&self) -> Option<&'static str> {
@@ -5474,20 +5471,25 @@ impl App {
                             self.slot_name_alpha(),
                             out,
                         );
+                        // The letters, along the middle of that line: the one the hand is on
+                        // rolled to the front of them, the rest falling away either side.
+                        if !self.letter_texes.is_empty() {
+                            slot_ui::draw_letters(
+                                self.canvas(),
+                                &self.letter_texes,
+                                self.letter_at,
+                                out,
+                            );
+                        }
                         slot_ui::draw_slot_title(
                             self.canvas(),
                             self.shelf_title,
                             self.title_alpha(),
                             out,
                         );
-                        // Beside the machine's name: which one this is, out of all the ones
+                        // The top right-hand corner: which one this is, out of all the ones
                         // on the shelf.
-                        slot_ui::draw_count(
-                            self.canvas(),
-                            self.shelf_count,
-                            self.shelf_platform,
-                            out,
-                        );
+                        slot_ui::draw_count(self.canvas(), self.shelf_count, out);
                     }
                 }
                 draw_footer(

@@ -2256,35 +2256,30 @@ fn slot_text_alpha(a: &App, tex: slot_ui::TexId) -> f32 {
 }
 
 #[test]
-fn a_letter_jump_shows_the_letter_in_the_slot_and_fades_like_the_shelf_name() {
+fn a_letter_jump_rolls_the_row_of_letters_and_the_machine_stays_named() {
     let mut a = app_with_carts(&["Alpha", "Bravo"]);
-    let face = slot_ui::TexId::from_raw(77);
     assert_eq!(
         a.slot_text(),
         None,
         "a one shelf card printed something in the slot"
     );
 
+    // The row of letters rests on the letter the game under the hand starts with, jumped to
+    // or simply walked to. It is the letters that answer a jump now: they used to share one
+    // line with the machine's name, so jumping took the name away.
+    let b = slot_ui::letter_index_of('B').expect("B is one of the letters");
+    assert_ne!(a.letter_index(), Some(b));
     a.apply(Action::GbaDown(Btn::Down));
     a.apply(Action::GbaUp(Btn::Down));
-    assert_eq!(a.slot_text().as_deref(), Some("B"));
-    a.set_shelf_platform_face(face, 20);
-    a.update(1.0 / 60.0);
-    a.update(0.5);
-    assert!(slot_text_alpha(&a, face) > 0.0, "the letter never showed");
-    a.update(5.0);
-    assert_eq!(slot_text_alpha(&a, face), 0.0, "the letter never faded");
+    assert_eq!(a.letter_index(), Some(b));
 
-    a.apply(Action::GbaDown(Btn::Left));
-    a.apply(Action::GbaUp(Btn::Left));
-    a.apply(Action::GbaDown(Btn::Down));
-    a.apply(Action::GbaUp(Btn::Down));
-    assert_eq!(a.slot_text().as_deref(), Some("B"));
-    a.update(1.0 / 60.0);
-    a.update(0.5);
+    // The machine's name keeps the corner the whole time: five seconds on, still up.
+    let face = slot_ui::TexId::from_raw(77);
+    a.set_shelf_platform_face(face, 20);
+    a.update(5.0);
     assert!(
         slot_text_alpha(&a, face) > 0.0,
-        "jumping to the letter already printed did not show it again"
+        "the machine's name faded: it is meant to stay up"
     );
 }
 

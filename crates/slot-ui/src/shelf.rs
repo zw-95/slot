@@ -577,9 +577,8 @@ const COUNT_W: u32 = 120;
 pub const COUNT_H: u32 = 22;
 const COUNT_PX: f32 = 16.0;
 const COUNT_MIN_PX: f32 = 12.0;
-/// How far to the right of the machine's name the count stands: close enough to read as one
-/// line with it, far enough that the two never touch.
-const COUNT_GAP: f32 = 10.0;
+/// How far in from the right-hand edge the count sits.
+const COUNT_EDGE: f32 = 12.0;
 
 /// "3 / 57" in the toasts' own look, so it reads over a wallpaper of any colour.
 pub fn count_face(line: &str) -> CartFace {
@@ -599,22 +598,15 @@ pub fn count_face(line: &str) -> CartFace {
     )
 }
 
-/// The count goes **beside the machine's name**, at the top of the screen and a little to its
-/// right, the two reading as one line: which machine and subfolder, and how far into it. It
-/// used to stand over the cart, which moved it with the cart's height and put it under the
-/// HUD plate whenever a pak was tall enough.
-pub fn draw_count(canvas: Canvas, count: Printed, name: Printed, out: &mut Vec<Draw>) {
+/// The count goes in the **top right-hand corner** of the screen: which one this is, out of all
+/// the ones on the shelf. It used to stand over the cart, which moved it with the cart's height
+/// and put it under the HUD plate whenever a pak was tall enough.
+pub fn draw_count(canvas: Canvas, count: Printed, out: &mut Vec<Draw>) {
     let Some(tex) = count.face else {
         return;
     };
-    // Just right of the machine's name, which sits dead centre. With no name up the count
-    // centres itself rather than hanging off an edge.
-    let x = match name.face {
-        Some(_) => canvas.centred(name.w as f32) + name.w as f32 + COUNT_GAP,
-        None => canvas.centred(count.w as f32),
-    };
     out.push(Draw::Tex {
-        x,
+        x: canvas.w - count.w as f32 - COUNT_EDGE,
         y: SLOT_NAME_Y + (HINT_H - COUNT_H) as f32 / 2.0,
         w: count.w as f32,
         h: COUNT_H as f32,

@@ -340,13 +340,21 @@ pub fn slot_name_y() -> f32 {
 /// the brightness moves — the name lets it cover it rather than sitting below it for good.
 pub const SLOT_NAME_Y: f32 = 10.0;
 
+/// How far in from the left-hand edge the machine's name starts. It takes the top-left corner
+/// to itself and leaves the middle of that line to the letters.
+const NAME_EDGE: f32 = 12.0;
+
+/// The machine's name takes the top-left corner and keeps it: it does not follow the canvas's
+/// width the way the things that are centred in it do, only its height, which a square panel
+/// has more of.
 pub fn draw_slot_name(canvas: Canvas, name: Printed, alpha: f32, out: &mut Vec<Draw>) {
     let (Some(tex), true) = (name.face, alpha > 0.0) else {
         return;
     };
     let (w, h) = (name.w as f32, HINT_H as f32);
     out.push(Draw::Tex {
-        x: canvas.centred(w),
+        // The name keeps to the left edge, leaving the middle of the line to the letters.
+        x: NAME_EDGE,
         y: SLOT_NAME_Y + canvas.extra(),
         w,
         h,

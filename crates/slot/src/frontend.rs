@@ -12,19 +12,18 @@ use slot_ui::{
     badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
     default_game_bezel_face, footer_ink, game_bezel_face, hint_face, icon_face,
     link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, value_face, rebuild_count_face,
-    rebuild_title_face, set_clock_hint_face, slot_back, slot_back_light, slot_front,
-    slot_front_light, socket_face, sticker_face, time_text, title_face, toast_face, wallpaper_face,
-    word_ink, CartFace, GbShell, Icon, LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow,
-    QuickValue, RebuildScreen, StickerFields, Toast, UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX,
-    HUD_INK,
+    quick_legend_faces, quick_pointer_face, value_face, set_clock_hint_face, slot_back,
+    slot_back_light, slot_front, slot_front_light, socket_face, sticker_face, time_text,
+    title_face, toast_face, wallpaper_face, word_ink, CartFace, GbShell, Icon, LinkBadge, Mould,
+    PowerChoice, QuickMenuFaces, QuickRow, QuickValue, StickerFields, Toast, UndoFace, ALERT_PX,
+    BOLT_PX, HUD_ICON_PX, HUD_INK,
 };
 
 use crate::app::{App, LinkRow, Phase};
 use crate::build_info::Build;
 use crate::cart_faces::CartFaces;
 use crate::face_builder::FaceBuilder;
-use crate::label_cache::{self, Rebuild};
+use crate::label_cache;
 use crate::link_art_builder::LinkArtBuilder;
 use crate::link_screen::{LinkSprites, Sprite};
 use crate::link_start::{LinkFail, LinkStep};
@@ -80,7 +79,6 @@ pub struct Frontend {
     title_tex: Option<TexId>,
     faces: FaceBuilder,
     cart_faces: CartFaces,
-    rebuild: Option<Rebuild>,
     stale_check: Option<std::sync::mpsc::Receiver<Vec<slot_store::Cart>>>,
     ui_faces: Option<std::sync::mpsc::Receiver<UiFaces>>,
     /// The textures the interface's type was baked into, in the order it was baked. A new
@@ -91,7 +89,6 @@ pub struct Frontend {
     /// The tongue the interface was last baked in: when the card says another one, it all has
     /// to be baked again, or the menus go on reading the old one off their textures.
     lang: slot_i18n::Lang,
-    rebuild_faces: RebuildFaces,
     link_art: LinkArtBuilder,
     link_art_done: bool,
     core_asked: Option<String>,
@@ -115,14 +112,6 @@ pub struct Frontend {
     /// family's fixed canvas.
     game_aspect: Option<f32>,
     game_rotation: u32,
-}
-
-#[derive(Default)]
-struct RebuildFaces {
-    title: Option<(TexId, u32, u32)>,
-    count: Option<TexId>,
-    count_size: (u32, u32),
-    shown: Option<usize>,
 }
 
 #[derive(Default)]
@@ -310,13 +299,11 @@ impl Frontend {
             title_tex: None,
             faces: FaceBuilder::spawn(),
             cart_faces,
-            rebuild: None,
             stale_check,
             ui_faces: None,
             ui_tex: Vec::new(),
             ui_baked: 0,
             lang,
-            rebuild_faces: RebuildFaces::default(),
             link_art: LinkArtBuilder::spawn(),
             link_art_done: false,
             core_asked: None,
@@ -367,9 +354,7 @@ impl Frontend {
     pub fn upload_boot_faces(&mut self, compositor: &mut Compositor) {
         Self::upload_paper(compositor);
         crate::boot_time::mark("paper");
-        if self.rebuild.is_none() {
-            self.cart_faces.sync(self.session.app_mut(), compositor);
-        }
+        self.cart_faces.sync(self.session.app_mut(), compositor);
         crate::boot_time::mark("cart faces");
         let (tx, rx) = std::sync::mpsc::channel();
         let spawned = std::thread::Builder::new()
@@ -395,8 +380,6 @@ impl Frontend {
         let legend = legend_faces(compositor, &slot_ui::polaroid_legend());
         self.session.app_mut().set_legend_faces(legend);
         self.upload_fixed_faces(compositor);
-        // The rebuild screen bakes its title the first time it is shown.
-        self.rebuild_faces.title = None;
         let star = slot_ui::star_face(slot_ui::STAR_SCALE, slot_ui::STAR_INK);
         let id = compositor.texture_nearest(star.w, star.h, &star.rgba);
         self.session.app_mut().set_star_face(id, star.w, star.h);
@@ -538,6 +521,44 @@ impl Frontend {
         };
         self.clocks.back_tex = Some(id);
         self.session.app_mut().set_clock_back_face((id, back.w));
+        self.upload_letter_faces(compositor);
+    }
+
+    /// One texture a letter, `#` first, baked the once and left alone: a letter is the same
+    /// letter whatever the tongue, so these never need baking again.
+    fn upload_letter_faces(&mut self, compositor: &mut Compositor) {
+        if !self.session.app().letter_texes().is_empty() {
+            return;
+        }
+        let texes: Vec<Option<TexId>> = slot_ui::LETTERS
+            .iter()
+            .map(|c| {
+                let f = slot_ui::letter_face(*c);
+                (!f.rgba.is_empty()).then(|| compositor.create_texture(f.w, f.h, &f.rgba))
+            })
+            .collect();
+        self.session.app_mut().set_letter_faces(texes);
+    }
+
+    /// How much of the way to the letter it is going the row rolls each frame: enough to land
+    /// in a few frames, not so much that it snaps.
+    const ROLL: f32 = 0.3;
+
+    /// Rolls the row of letters towards the one the hand is on. A jump of a place or two turns
+    /// the wheel; anything longer — a different machine, a different subfolder — is a cut,
+    /// because rolling the whole alphabet past the player says nothing they asked to know.
+    fn roll_letters(&mut self) {
+        let Some(want) = self.session.app().letter_index() else {
+            return;
+        };
+        let at = self.session.app().letter_at();
+        let d = want as f32 - at;
+        let next = if d.abs() > 2.5 {
+            want as f32
+        } else {
+            at + d * Self::ROLL
+        };
+        self.session.app_mut().set_letter_at(next);
     }
 
     /// The tongue moved under the interface. Every line of type in it is a baked texture, so
@@ -740,6 +761,7 @@ impl Frontend {
         // is waited for; here it is only collected when it happens to have landed.
         self.poll_ui_faces(compositor);
         self.poll_label_check();
+        self.roll_letters();
         compositor.set_blue_light(self.session.app().blue_light());
         compositor.set_picture(self.session.app().picture_rect());
         compositor.set_screen_effect(match self.session.app().screen_shader() {
@@ -758,9 +780,6 @@ impl Frontend {
         let begun = ft::span(ev::GFX_BEGIN_FRAME, 0);
         compositor.begin_frame(self.session.app().layout());
         drop(begun);
-        if self.draw_rebuild(compositor) {
-            return;
-        }
         if let Some(frame) = self.session.frame() {
             ft::instant(ev::RENDER_FRAME, frame.seq as i64);
             let _s = ft::span(ev::GFX_UPLOAD_GAME, frame.seq as i64);
@@ -877,10 +896,6 @@ impl Frontend {
         self.session.step_emulator(present, timeout)
     }
 
-    pub fn rebuilding_labels(&self) -> bool {
-        self.rebuild.is_some()
-    }
-
     fn check_labels(
         root: &std::path::Path,
         carts: Vec<slot_store::Cart>,
@@ -896,6 +911,9 @@ impl Frontend {
             .map(|_| rx)
     }
 
+    /// How much label art is not baked yet, for the log and nothing else. A cart's art is baked
+    /// the first time its face is drawn and kept from then on, so a cart that is never looked
+    /// at never costs a byte on the card — and no amount of unbaked art can hold up the shelf.
     fn poll_label_check(&mut self) {
         let Some(rx) = &self.stale_check else {
             return;
@@ -906,49 +924,12 @@ impl Frontend {
             Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
         };
         self.stale_check = None;
-        let Some(root) = self.session.app().root().map(|r| r.to_path_buf()) else {
-            return;
-        };
         if !stale.is_empty() {
-            eprintln!("slot: label cache: {} new labels", stale.len());
-            self.rebuild = Some(Rebuild::start(&root, stale));
+            eprintln!(
+                "slot: label cache: {} labels unbaked, baked when looked at",
+                stale.len()
+            );
         }
-    }
-
-    fn draw_rebuild(&mut self, compositor: &mut Compositor) -> bool {
-        self.poll_label_check();
-        self.poll_ui_faces(compositor);
-        let Some(rebuild) = &self.rebuild else {
-            return false;
-        };
-        if rebuild.finished() {
-            self.rebuild = None;
-            self.last = Instant::now();
-            return false;
-        }
-        let faces = &mut self.rebuild_faces;
-        let title = *faces.title.get_or_insert_with(|| {
-            let f = rebuild_title_face(t(MsgKey::RebuildCaching));
-            (compositor.create_texture(f.w, f.h, &f.rgba), f.w, f.h)
-        });
-        let done = rebuild.done();
-        if faces.shown != Some(done) {
-            let f = rebuild_count_face(&format!("{done} / {}", rebuild.total()));
-            faces.count_size = (f.w, f.h);
-            upload(compositor, &mut faces.count, f);
-            faces.shown = Some(done);
-        }
-        let screen = RebuildScreen {
-            title: Some(title),
-            count: faces
-                .count
-                .map(|tex| (tex, faces.count_size.0, faces.count_size.1)),
-            fraction: done as f32 / rebuild.total().max(1) as f32,
-        };
-        self.draws.clear();
-        screen.draw(self.session.app().canvas(), &mut self.draws);
-        compositor.draw_list(&self.draws);
-        true
     }
 
     pub fn advance(&mut self, input: &mut dyn InputSource) {
@@ -956,9 +937,6 @@ impl Frontend {
         let polled = ft::span(ev::INPUT_POLL, 0);
         let events = input.poll(now);
         drop(polled);
-        if self.rebuild.is_some() {
-            return;
-        }
         let fed = ft::span(ev::INPUT_FEED, events.len() as i64);
         self.session
             .set_menu_dpad_display(input.menu_dpad_display());
