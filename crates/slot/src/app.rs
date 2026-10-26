@@ -1719,18 +1719,48 @@ impl App {
     }
 
     pub fn slot_text(&self) -> Option<String> {
-        // The machine's short name on its own for the whole system, and "GBA-动作" when one
-        // of its subfolders is what is showing.
-        match self.slot_letter {
-            Some(letter) => Some(letter.to_string()),
-            None => {
-                let short = self.shelf_platform_short()?;
-                Some(match &self.shelf_folder {
-                    Some(folder) => format!("{short}-{folder}"),
-                    None => short.to_string(),
-                })
-            }
-        }
+        // The machine's short name on its own for the whole system, and "GBA-动作" when one of
+        // its subfolders is what is showing. The letter the hand jumped to is not named here:
+        // the row of letters in the middle of the line speaks for itself.
+        let short = self.shelf_platform_short()?;
+        Some(match &self.shelf_folder {
+            Some(folder) => format!("{short}-{folder}"),
+            None => short.to_string(),
+        })
+    }
+
+    /// Where the hand is in the row of letters: which of `#` and A to Z the game under it files
+    /// under, whether that is somewhere it jumped to or somewhere it simply walked to. It is the
+    /// name the shelf files the game under that decides, which for an arcade set is its name in
+    /// Chinese and not the set's file name.
+    pub fn letter_index(&self) -> Option<usize> {
+        let letter = self.slot_letter.or_else(|| {
+            self.shelf()
+                .carts
+                .get(self.shelf().index)
+                .map(|c| slot_store::initial(c.shelf_name()))
+        })?;
+        slot_ui::letter_index_of(letter)
+    }
+
+    /// Where the row of letters is rolled to: a place in `slot_ui::LETTERS`, and not always a
+    /// whole one, since it sits between two while it is rolling.
+    pub fn letter_at(&self) -> f32 {
+        self.letter_at
+    }
+
+    pub fn set_letter_at(&mut self, at: f32) {
+        self.letter_at = at;
+    }
+
+    /// One texture a letter, `#` first. Baked once at boot and left alone: a letter is the same
+    /// letter in every tongue.
+    pub fn set_letter_faces(&mut self, texes: Vec<Option<TexId>>) {
+        self.letter_texes = texes;
+    }
+
+    pub fn letter_texes(&self) -> &[Option<TexId>] {
+        &self.letter_texes
     }
 
     pub fn title_text(&self) -> Option<String> {
