@@ -1,9 +1,19 @@
 use slot_power::{Battery, Charge};
-use slot_store::{Cart, Platform};
+use slot_store::{Cart, Outline, Platform, ShellChoice, ShellFinish};
 use slot_ui::{
     draw_footer, footer_ink, label_colour, rest_y, Canvas, Draw, Mould, Printed, Shelf, TexId,
     CART_H, CART_W, GB_CART_H, GB_CART_W, LABEL_W, LABEL_X, LABEL_Y, OUT_W,
 };
+
+/// The plastic a see-through cart is asked for by name, now that a cartridge's own code no
+/// longer decides: a ROM is not asked what shell it would like.
+fn see_through() -> Option<ShellChoice> {
+    Some(ShellChoice {
+        outline: Outline::Auto,
+        colour: [0xd9, 0xdb, 0xd8],
+        finish: ShellFinish::Clear,
+    })
+}
 
 fn shelf_with(n: usize) -> Shelf {
     Shelf::new(
@@ -878,7 +888,7 @@ fn a_game_boy_row_backs_its_carts_with_the_game_boy_shadow() {
 }
 
 #[test]
-fn a_colour_pak_and_a_grey_one_are_backed_by_their_own_shells() {
+fn both_paks_are_backed_by_the_one_shell_the_family_has() {
     let d = tempfile::tempdir().expect("tempdir");
     let games = d.path().join("Games/GB");
     std::fs::create_dir_all(&games).expect("create games dir");
@@ -903,7 +913,7 @@ fn a_colour_pak_and_a_grey_one_are_backed_by_their_own_shells() {
 
     let notched = TexId::from_raw(90);
     let rounded = TexId::from_raw(91);
-    for (selected, neighbour_shell) in [(0usize, rounded), (1, notched)] {
+    for selected in [0usize, 1] {
         let mut s = Shelf::new(carts.clone());
         s.select(selected);
         settle(&mut s);
@@ -928,7 +938,7 @@ fn a_colour_pak_and_a_grey_one_are_backed_by_their_own_shells() {
             .collect();
         assert_eq!(
             backings,
-            vec![neighbour_shell; 2],
+            vec![notched; 2],
             "with the {} pak selected, its neighbour was backed by the wrong shell",
             carts[selected].stem
         );
@@ -971,18 +981,18 @@ fn a_cart_pushed_onto_the_row_draws_rather_than_stopping_the_device() {
 
 #[test]
 fn a_clear_cart_is_drawn_over_its_board_and_a_solid_one_is_not() {
-    let cart = |stem: &str, code: &str| Cart {
+    let cart = |stem: &str, clear: bool| Cart {
         platform: Platform::Gba,
         stem: stem.into(),
         rom: format!("Games/GBA/{stem}.gba").into(),
         label: None,
-        code: code.into(),
-        shell: None,
+        code: "BPEE".into(),
+        shell: clear.then_some(see_through().expect("a see-through shell")),
         title: stem.to_uppercase(),
     };
     let board = TexId::from_raw(80);
-    for (code, clear) in [("BPEE", true), ("BPRE", false)] {
-        let mut s = Shelf::new(vec![cart("Game", code)]);
+    for clear in [true, false] {
+        let mut s = Shelf::new(vec![cart("Game", clear)]);
         settle(&mut s);
         let face = TexId::from_raw(20);
         s.set_faces(vec![face]);
@@ -993,7 +1003,7 @@ fn a_clear_cart_is_drawn_over_its_board_and_a_solid_one_is_not() {
             out.iter()
                 .position(|d| matches!(*d, Draw::Tex { tex, .. } if tex == t))
         };
-        assert_eq!(at(board).is_some(), clear, "{code}: board layer");
+        assert_eq!(at(board).is_some(), clear, "clear: {clear}: board layer");
         if clear {
             assert!(at(board) < at(face), "the board was drawn over the plastic");
         }
@@ -1008,7 +1018,7 @@ fn a_clear_cart_draws_its_interior_then_the_board_then_the_plastic() {
         rom: "Games/GBA/Game.gba".into(),
         label: None,
         code: "BPEE".into(),
-        shell: None,
+        shell: see_through(),
         title: "GAME".into(),
     }]);
     settle(&mut s);
@@ -1080,18 +1090,18 @@ fn a_clear_pak_draws_its_interior_then_the_board_then_the_plastic() {
 
 #[test]
 fn only_a_clear_cart_has_anything_behind_its_plastic() {
-    let cart = |stem: &str, code: &str| Cart {
+    let cart = |stem: &str, clear: bool| Cart {
         platform: Platform::Gba,
         stem: stem.into(),
         rom: format!("Games/GBA/{stem}.gba").into(),
         label: None,
-        code: code.into(),
-        shell: None,
+        code: "BPEE".into(),
+        shell: clear.then_some(see_through().expect("a see-through shell")),
         title: stem.to_uppercase(),
     };
     let (interior, board) = (TexId::from_raw(81), TexId::from_raw(80));
-    for (code, clear) in [("BPEE", true), ("BPRE", false)] {
-        let mut s = Shelf::new(vec![cart("Game", code)]);
+    for clear in [true, false] {
+        let mut s = Shelf::new(vec![cart("Game", clear)]);
         s.set_faces(vec![TexId::from_raw(20)]);
         s.set_backing(Mould::Gba, board);
         s.set_interior(0, interior);
@@ -1100,14 +1110,14 @@ fn only_a_clear_cart_has_anything_behind_its_plastic() {
         } else {
             [None, None]
         };
-        assert_eq!(s.behind("Game"), want, "{code}");
+        assert_eq!(s.behind("Game"), want, "clear: {clear}");
     }
-    let s = Shelf::new(vec![cart("Game", "BPEE")]);
+    let s = Shelf::new(vec![cart("Game", true)]);
     assert_eq!(s.behind("Nothing"), [None, None]);
 }
 
 #[test]
-fn a_pak_is_classed_when_it_is_drawn_not_when_the_shelf_is_built() {
+fn a_pak_is_drawn_in_the_family_shape_whether_or_not_its_rom_reads() {
     let d = tempfile::tempdir().expect("tempdir");
     let carts: Vec<Cart> = ["Front", "Clear"]
         .iter()
@@ -1133,10 +1143,19 @@ fn a_pak_is_classed_when_it_is_drawn_not_when_the_shelf_is_built() {
     s.set_shadow(Mould::Rounded, rounded);
     let mut out = Vec::new();
     s.draw_row(Canvas::FRAMED, Some("Front"), 0.0, 0.3, 1.0, &mut out);
-    assert!(
-        out.iter()
-            .any(|d| matches!(*d, Draw::Tex { tex, .. } if tex == rounded)),
-        "the colour-only pak was classed before its ROM could be read"
+    let backed: Vec<TexId> = out
+        .iter()
+        .filter_map(|d| match *d {
+            Draw::Tex { tex, .. } if tex == notched || tex == rounded => Some(tex),
+            _ => None,
+        })
+        .collect();
+    // The family is one shape, so no pak is read for a mould of its own - and one whose ROM
+    // could not be read at all is drawn no differently from one that could.
+    assert_eq!(
+        backed,
+        vec![notched; 2],
+        "a pak was given a shape of its own"
     );
 }
 

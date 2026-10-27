@@ -156,69 +156,34 @@ fn gb_shell(title: &[u8], code: &[u8], cgb: u8, japan: bool) -> slot_ui::Shell {
     shell_for(&scan(d.path()).expect("scan")[0])
 }
 
+/// What a pak's own header says - its title, its code, its flag, whether it shipped in Japan -
+/// picks nothing. Red and Blue, Gold and Crystal, Pinball and Metal Gear all get the one plastic
+/// the family is drawn in: the shelf is not speckled with colours nobody chose, and a shell that
+/// is not that grey is one the card asks for by name.
 #[test]
-fn red_and_blue_are_coloured_outside_japan_only() {
-    let red = gb_shell(b"POKEMON RED", b"", 0x00, false);
-    let blue = gb_shell(b"POKEMON BLUE", b"", 0x00, false);
-    assert!(red.colour[0] > red.colour[2] + 60, "Red is red");
-    assert!(blue.colour[2] > blue.colour[0] + 60, "Blue is blue");
-    assert_eq!(
-        gb_shell(b"POKEMON RED", b"", 0x00, true),
-        DMG_SHELL,
-        "Japan's Red is the grey pak"
-    );
-}
-
-#[test]
-fn gold_is_gold_except_in_japan() {
-    let gold = gb_shell(b"POKEMON_GLD", b"AAUE", 0x80, false);
-    assert_ne!(gold, DUAL_MODE_SHELL);
-    assert_eq!(gold, gb_shell(b"POKEMON_GLD", b"AAUD", 0x80, false));
-    assert_eq!(
-        gb_shell(b"POKEMON_GLD", b"AAUJ", 0x80, true),
-        DUAL_MODE_SHELL
-    );
-    assert_ne!(gb_shell(b"POKEMON_SLV", b"AAXE", 0x80, false), gold);
-}
-
-#[test]
-fn crystal_is_aqua_under_both_its_codes() {
-    let en = gb_shell(b"PM_CRYSTAL", b"BYTE", 0xc0, false);
-    let jp = gb_shell(b"PM_CRYSTAL", b"BXTJ", 0xc0, true);
-    assert_eq!(en, jp);
-    assert_eq!(
-        en.finish,
-        Finish::Glitter,
-        "Crystal's plastic has glitter in it"
-    );
-    assert!(en.colour[2] > en.colour[0], "Crystal is aqua");
-}
-
-#[test]
-fn metal_gear_solid_is_black_not_clear() {
-    assert_eq!(
-        gb_shell(b"METALGEARGB", b"BMGE", 0xc0, false),
-        DUAL_MODE_SHELL
-    );
-}
-
-#[test]
-fn pinball_is_yellow_in_japan_only() {
-    let jp = gb_shell(b"POKEPINBALL", b"VPHJ", 0x80, true);
-    assert!(
-        jp.colour[0] > 0xc0 && jp.colour[2] < 0x60,
-        "Japan's is yellow"
-    );
-    assert_eq!(
-        gb_shell(b"POKEPINBALL", b"VPHE", 0x80, false),
-        DUAL_MODE_SHELL
-    );
-}
-
-#[test]
-fn an_unlisted_pak_keeps_its_flags_plastic() {
-    assert_eq!(gb_shell(b"TETRIS", b"", 0x00, false), DMG_SHELL);
-    assert_eq!(gb_shell(b"ZELDA", b"AZLE", 0x80, false), DUAL_MODE_SHELL);
+fn every_pak_is_the_family_plastic_whatever_its_rom_says() {
+    for (title, code, cgb, japan) in [
+        (&b"POKEMON RED"[..], &b""[..], 0x00u8, false),
+        (b"POKEMON BLUE", b"", 0x00, false),
+        (b"POKEMON RED", b"", 0x00, true),
+        (b"POKEMON_GLD", b"AAUE", 0x80, false),
+        (b"POKEMON_GLD", b"AAUJ", 0x80, true),
+        (b"PM_CRYSTAL", b"BYTE", 0xc0, false),
+        (b"PM_CRYSTAL", b"BXTJ", 0xc0, true),
+        (b"METALGEARGB", b"BMGE", 0xc0, false),
+        (b"POKEPINBALL", b"VPHJ", 0x80, true),
+        (b"POKEPINBALL", b"VPHE", 0x80, false),
+        (b"TETRIS", b"", 0x00, false),
+        (b"ZELDA", b"AZLE", 0x80, false),
+    ] {
+        let s = gb_shell(title, code, cgb, japan);
+        assert_eq!(
+            s,
+            DMG_SHELL,
+            "{} is not the family's plastic",
+            String::from_utf8_lossy(title)
+        );
+    }
 }
 
 #[test]
@@ -233,9 +198,9 @@ fn a_shell_without_a_label_image_is_one_plastic() {
     };
     let flat = px(32, 40);
     assert_eq!(
-        flat,
-        [0xa9, 0x51, 0x3b],
-        "Drill Dozer is not its red plastic"
+        shell_for(cart).colour,
+        DEFAULT_SHELL.colour,
+        "Drill Dozer is the Advance's one plastic: its own code no longer colours it"
     );
     assert_eq!(
         px(LABEL_X, LABEL_Y),
@@ -247,7 +212,7 @@ fn a_shell_without_a_label_image_is_one_plastic() {
         for x in 0..f.w {
             let i = ((y * f.w + x) * 4) as usize;
             if f.rgba[i + 3] > 200
-                && [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]] != [0xa9, 0x51, 0x3b]
+                && [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]] != flat
             {
                 letters += 1;
             }
@@ -311,13 +276,15 @@ fn no_choice_changes_nothing() {
 }
 
 #[test]
-fn a_chosen_outline_wins_on_a_game_boy_cart_and_not_on_gba() {
+fn a_game_boy_cart_is_notched_whatever_outline_its_card_names() {
+    // The family is one shape, so an outline the card names changes nothing about it, and the
+    // Advance has no outline of its own to name at all.
     let (_d, grey) = chosen("GB", 0x00, "", Some("rounded 9a978f solid"));
-    assert_eq!(gb_shell_of(&grey), Some(GbShell::Rounded));
+    assert_eq!(gb_shell_of(&grey), Some(GbShell::Notched));
     let (_d, clear) = chosen("GBC", 0xc0, "", Some("notched 7c7a8a clear"));
     assert_eq!(gb_shell_of(&clear), Some(GbShell::Notched));
     let (_d, auto) = chosen("GBC", 0xc0, "", Some("auto 7c7a8a clear"));
-    assert_eq!(gb_shell_of(&auto), Some(GbShell::Rounded));
+    assert_eq!(gb_shell_of(&auto), Some(GbShell::Notched));
     let (_d, gba) = chosen("GBA", 0, "AMTE", Some("rounded 112233 solid"));
     assert_eq!(gb_shell_of(&gba), None);
 }
@@ -514,7 +481,7 @@ fn fifty_percent_grey_keeps_the_colour_and_either_side_moves_it() {
 
 #[test]
 fn glitter_specks_the_see_through_plastic() {
-    let glitter = pak_face(b"PM_CRYSTAL", b"BYTE", 0xc0, None);
+    let glitter = pak_face(b"PM_CRYSTAL", b"BYTE", 0xc0, Some("auto 86b9bf glitter"));
     let clear = pak_face(b"PM_CRYSTAL", b"BYTE", 0xc0, Some("auto 86b9bf clear"));
     let mut flecks = 0usize;
     let mut same = 0usize;

@@ -11,10 +11,10 @@ use slot_store::{format_stamp, BezelPick, Platform as Console};
 use slot_ui::{
     badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
     default_game_bezel_face, footer_ink, game_bezel_face, hint_face, icon_face,
-    link_button_legends, menu_face, mould_shadow, photo_face, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, value_face, set_clock_hint_face, slot_back,
-    slot_back_light, slot_front, slot_front_light, socket_face, sticker_face, time_text,
-    title_face, toast_face, wallpaper_face, word_ink, CartFace, GbShell, Icon, LinkBadge, Mould,
+    link_button_legends, menu_face, photo_face, quick_caret_face, quick_label_face,
+    quick_legend_faces, quick_pointer_face, set_clock_hint_face, shape_shadow, shapes, slot_back,
+    slot_back_light, slot_front, slot_front_light, socket_face, sticker_face, time_text, title_face,
+    toast_face, value_face, wallpaper_face, word_ink, CartFace, GbShell, Icon, LinkBadge, Mould,
     PowerChoice, QuickMenuFaces, QuickRow, QuickValue, StickerFields, Toast, UndoFace, ALERT_PX,
     BOLT_PX, HUD_ICON_PX, HUD_INK,
 };
@@ -383,10 +383,12 @@ impl Frontend {
         let star = slot_ui::star_face(slot_ui::STAR_SCALE, slot_ui::STAR_INK);
         let id = compositor.texture_nearest(star.w, star.h, &star.rgba);
         self.session.app_mut().set_star_face(id, star.w, star.h);
-        for mould in Mould::ALL {
-            let shadow = mould_shadow(mould);
+        // One a shape: one a mould, and one a template the card brought, which may be of a size
+        // its own and so cannot borrow the mould's shadow.
+        for shape in shapes() {
+            let shadow = shape_shadow(shape);
             let id = compositor.create_texture(shadow.w, shadow.h, &shadow.rgba);
-            self.session.app_mut().set_cart_shadow(mould, id);
+            self.session.app_mut().set_cart_shadow(shape, id);
         }
         for (mould, shell) in [
             (Mould::Gba, None),

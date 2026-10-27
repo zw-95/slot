@@ -8,7 +8,7 @@ use crate::art::decode_png;
 use crate::media::Media;
 
 /// A cart's shape: the Game Boy family's three moulds, or another system's media.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Mould {
     Gba,
     Notched,

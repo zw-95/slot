@@ -1,4 +1,4 @@
-use slot_store::{scan, Platform};
+use slot_store::{scan, Cart, Platform};
 
 use slot_ui::{
     cart_face, clean_label, draw_count, foot_y, gb_label_panel, gb_silhouette, label_colour,
@@ -314,16 +314,30 @@ fn a_rom_with_no_header_title_is_labelled_from_its_stem() {
     );
 }
 
+/// A cart of this platform and nothing more, for the shapes that are asked about without a rom
+/// being scanned.
+fn cart_of(platform: Platform) -> Cart {
+    Cart {
+        platform,
+        stem: "Game".into(),
+        rom: "Games/Game".into(),
+        label: None,
+        code: String::new(),
+        shell: None,
+        title: "GAME".into(),
+    }
+}
+
 #[test]
 fn the_game_boy_pak_body_has_the_scanned_aspect() {
-    let (sw, _) = seated_box(Platform::Gba);
+    let (sw, _) = seated_box(&cart_of(Platform::Gba));
     let body = |w: u32, h: u32| (w as f64 * 227.0 / 240.0) / h as f64;
     assert!(
         (body(GB_CART_W, GB_CART_H) - 0.877).abs() < 0.01,
         "the pak body is {:.3}:1, not a real pak's 0.877",
         body(GB_CART_W, GB_CART_H)
     );
-    let (gw, gh) = seated_box(Platform::Gb);
+    let (gw, gh) = seated_box(&cart_of(Platform::Gb));
     assert_eq!(
         gw, sw,
         "both paks are 57 mm wide, so they seat at one width"
@@ -918,6 +932,11 @@ fn the_arcades_and_the_computers_pictures_are_not_drawn_as_their_cart() {
 #[test]
 fn a_face_seats_as_its_systems_cart_does() {
     for p in [Platform::Gba, Platform::Gb, Platform::Snes, Platform::Genesis, Platform::PlayStation] {
-        assert_eq!(slot_ui::seated_size(slot_ui::cart_box(p)), seated_box(p), "{p:?}");
+        let cart = cart_of(p);
+        assert_eq!(
+            slot_ui::seated_size(slot_ui::cart_box(&cart)),
+            seated_box(&cart),
+            "{p:?}"
+        );
     }
 }

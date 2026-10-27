@@ -1,6 +1,7 @@
 use std::path::Path;
 
 use fontdue::{Font, FontSettings};
+use slot_store::{Cart, Platform};
 
 const GILL: &str = "/System/Library/Fonts/Supplemental/GillSans.ttc";
 const FUTURA: &str = "/System/Library/Fonts/Supplemental/Futura.ttc";
@@ -9,6 +10,19 @@ const FUTURA_MEDIUM: u32 = 0;
 const FUTURA_BOLD: u32 = 2;
 
 const OVER: u32 = 4;
+
+/// A cart of this platform and nothing more, for the boxes the lettering is measured against.
+fn cart_of(platform: Platform) -> Cart {
+    Cart {
+        platform,
+        stem: "Game".into(),
+        rom: "Games/Game".into(),
+        label: None,
+        code: String::new(),
+        shell: None,
+        title: "GAME".into(),
+    }
+}
 
 struct Run<'a> {
     font: &'a Font,
@@ -155,7 +169,7 @@ fn main() {
     let futura = face(FUTURA, FUTURA_MEDIUM);
     let futura_bold = face(FUTURA, FUTURA_BOLD);
     let assets = Path::new(env!("CARGO_MANIFEST_DIR")).join("assets");
-    let (gb_w, gb_h) = slot_ui::seated_box(slot_store::Platform::Gb);
+    let (gb_w, gb_h) = slot_ui::seated_box(&cart_of(Platform::Gb));
 
     let game_boy = |px: f32| Run {
         font: &gill,
@@ -218,7 +232,7 @@ fn main() {
     );
     gbc.write(&assets.join("lettering_gbc.png"));
 
-    let (gba_w, gba_h) = slot_ui::seated_box(slot_store::Platform::Gba);
+    let (gba_w, gba_h) = slot_ui::seated_box(&cart_of(Platform::Gba));
     let mut gba = Canvas::new(gba_w, gba_h);
     gba.line(
         &[

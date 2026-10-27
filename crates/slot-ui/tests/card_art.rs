@@ -1,11 +1,15 @@
-//! A card may carry a platform's own art: a grey template and where its label prints. Anything
-//! wrong with either leaves the built-in shape whole.
+//! A card may carry a platform's own art: any number of grey templates, and where each one takes
+//! its label. Anything wrong with one of them leaves that one out; anything wrong with all of
+//! them leaves the built-in shape whole.
 
 use std::path::Path;
 use std::sync::Mutex;
 
 use slot_store::{scan, Cart, Platform};
-use slot_ui::{cart_box, cart_face, label_size, load_card_art, Media, CARTS, GB_LABEL_H, GB_LABEL_W};
+use slot_ui::{
+    cart_box, cart_face, label_size, load_card_art, pick_of, Media, CARTS, GB_CART_H, GB_CART_W,
+    GB_LABEL_H, GB_LABEL_W,
+};
 use tempfile::TempDir;
 
 /// The art is one global, so the tests here take turns.
@@ -37,15 +41,24 @@ fn write_png(path: &Path, w: u32, h: u32, rgba: [u8; 4]) {
         .expect("png data");
 }
 
-/// Puts a picture and a configuration under `Carts/<dir>`, and reads the card.
-fn card_with(dir: &str, png_at: Option<(u32, u32)>, txt: Option<&str>) -> TempDir {
+/// The size the built-in shape is drawn at, which is the size a picture has to be when the shape
+/// is measured in absolute pixels all the way through.
+fn box_of(platform: Platform) -> (u32, u32) {
+    match Media::of(platform) {
+        Some(m) => m.size(),
+        None => (GB_CART_W, GB_CART_H),
+    }
+}
+
+/// Puts pictures and a configuration under `Carts/<dir>`, and reads the card. Every picture is
+/// `at` big, apart from the ones named in `sizes`.
+fn card_with(dir: &str, at: (u32, u32), txt: Option<&str>, pics: &[&str]) -> TempDir {
     let d = root();
     let art = d.path().join(CARTS).join(dir);
-    if let Some((w, h)) = png_at {
-        write_png(&art.join("cart.png"), w, h, [90, 90, 94, 255]);
+    for name in pics {
+        write_png(&art.join(name), at.0, at.1, [90, 90, 94, 255]);
     }
     if let Some(text) = txt {
-        std::fs::create_dir_all(&art).expect("create dir");
         std::fs::write(art.join("cart.txt"), text).expect("write cart.txt");
     }
     load_card_art(d.path());
@@ -75,6 +88,13 @@ fn gb(d: &TempDir) -> Cart {
     cart(d, "GB", "Game.gb")
 }
 
+/// What each game is drawn with, written beside its label.
+fn pick(d: &TempDir, dir: &str, text: &str) {
+    let labels = d.path().join("Labels").join(dir);
+    std::fs::create_dir_all(&labels).expect("create dir");
+    std::fs::write(labels.join("cart_pick.txt"), text).expect("write cart_pick.txt");
+}
+
 /// The size the built-in label box is, which is what a turned-down card falls back to.
 fn built_in(platform: Platform) -> (u32, u32) {
     match Media::of(platform) {
@@ -89,19 +109,32 @@ fn built_in(platform: Platform) -> (u32, u32) {
 #[test]
 fn a_card_with_its_own_art_uses_it() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let d = card_with("NES", Some(cart_box(Platform::Nes)), Some(LABEL));
+    let d = card_with("NES", box_of(Platform::Nes), Some(LABEL), &["cart.png"]);
     assert_eq!(label_size(&nes(&d)), LABEL_PX);
 }
 
 #[test]
-fn a_picture_of_the_wrong_size_is_ignored() {
+fn a_medium_may_be_drawn_at_a_size_of_its_own() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let (w, h) = box_of(Platform::Nes);
+    let d = card_with("NES", (w + 40, h - 20), Some(LABEL), &["cart.png"]);
+    let cart = nes(&d);
+    assert_eq!(label_size(&cart), LABEL_PX, "the label box still applies");
+    assert_eq!(
+        cart_box(&cart),
+        (w + 40, h - 20),
+        "the cart is drawn at the size its picture is"
+    );
+}
+
+#[test]
+fn a_game_boy_picture_of_the_wrong_size_is_ignored() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let d = root();
     load_card_art(d.path());
-    let want = built_in(Platform::Nes);
-    let (w, h) = cart_box(Platform::Nes);
-    let d = card_with("NES", Some((w + 8, h)), Some(LABEL));
-    assert_eq!(label_size(&nes(&d)), want);
+    let want = built_in(Platform::Gb);
+    let d = card_with("GB", (GB_CART_W + 8, GB_CART_H), Some(LABEL), &["cart.png"]);
+    assert_eq!(label_size(&gb(&d)), want);
 }
 
 #[test]
@@ -110,7 +143,12 @@ fn a_label_box_that_leaves_the_picture_is_ignored() {
     let d = root();
     load_card_art(d.path());
     let want = built_in(Platform::Nes);
-    let d = card_with("NES", Some(cart_box(Platform::Nes)), Some("label = 999 5 30 30"));
+    let d = card_with(
+        "NES",
+        box_of(Platform::Nes),
+        Some("label = 999 5 30 30"),
+        &["cart.png"],
+    );
     assert_eq!(label_size(&nes(&d)), want);
 }
 
@@ -121,7 +159,7 @@ fn a_label_that_is_not_four_numbers_is_ignored() {
     load_card_art(d.path());
     let want = built_in(Platform::Nes);
     for bad in ["label = 5 5", "label = 5 5 30 -30", "label = a b c d"] {
-        let d = card_with("NES", Some(cart_box(Platform::Nes)), Some(bad));
+        let d = card_with("NES", box_of(Platform::Nes), Some(bad), &["cart.png"]);
         assert_eq!(label_size(&nes(&d)), want, "for {bad:?}");
     }
 }
@@ -132,7 +170,7 @@ fn a_configuration_with_no_label_is_ignored() {
     let d = root();
     load_card_art(d.path());
     let want = built_in(Platform::Nes);
-    let d = card_with("NES", Some(cart_box(Platform::Nes)), Some("corner = 6"));
+    let d = card_with("NES", box_of(Platform::Nes), Some("corner = 6"), &["cart.png"]);
     assert_eq!(label_size(&nes(&d)), want);
 }
 
@@ -142,7 +180,7 @@ fn a_picture_with_no_configuration_is_ignored() {
     let d = root();
     load_card_art(d.path());
     let want = built_in(Platform::Nes);
-    let d = card_with("NES", Some(cart_box(Platform::Nes)), None);
+    let d = card_with("NES", box_of(Platform::Nes), None, &["cart.png"]);
     assert_eq!(label_size(&nes(&d)), want);
 }
 
@@ -170,21 +208,48 @@ fn a_card_with_no_art_changes_nothing() {
     assert_eq!(label_size(&nes(&d)), want);
 }
 
+/// More than one picture, each with the label box that applies to it.
 #[test]
-fn a_game_boy_pak_takes_the_cards_art() {
+fn each_template_takes_its_own_label_box() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let d = card_with("GB", Some(cart_box(Platform::Gb)), Some(LABEL));
-    assert_eq!(label_size(&gb(&d)), LABEL_PX);
+    let txt = "template = 1.png 2.png\nlabel = 5 5 30 30\nlabel.2.png = 5 5 40 40";
+    let d = card_with("NES", box_of(Platform::Nes), Some(txt), &["1.png", "2.png"]);
+    assert_eq!(label_size(&nes(&d)), LABEL_PX, "the first is the one used");
+    pick(&d, "NES", "Game = 0 0\n");
+    load_card_art(d.path());
+    assert_eq!(label_size(&nes(&d)), LABEL_PX);
+    pick(&d, "NES", "Game = 1 0\n");
+    load_card_art(d.path());
+    assert_eq!(label_size(&nes(&d)), (40, 40), "the card picked the second");
 }
 
+/// A picture that does not hold up is dropped, and the ones either side of it are kept.
 #[test]
-fn a_game_boy_picture_of_the_wrong_size_is_ignored() {
+fn a_template_that_does_not_hold_up_is_dropped_and_the_rest_are_kept() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let d = root();
+    let txt = "template = 1.png 2.png\nlabel = 5 5 30 30\nlabel.2.png = 9999 5 30 30";
+    let d = card_with("NES", box_of(Platform::Nes), Some(txt), &["1.png", "2.png"]);
+    assert_eq!(label_size(&nes(&d)), LABEL_PX, "the good one is still there");
+    pick(&d, "NES", "Game = 1 0\n");
     load_card_art(d.path());
-    let want = built_in(Platform::Gb);
-    let d = card_with("GB", Some((312 + 8, 337)), Some(LABEL));
-    assert_eq!(label_size(&gb(&d)), want);
+    assert_eq!(
+        label_size(&nes(&d)),
+        LABEL_PX,
+        "the one dropped is not offered, so the pick falls back to the first"
+    );
+}
+
+/// A pick past the end of what the card offers is the first, not nothing at all.
+#[test]
+fn a_pick_past_the_end_falls_back_to_the_first() {
+    let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
+    let txt = "template = 1.png 2.png\nlabel = 5 5 30 30\nlabel.2.png = 5 5 40 40";
+    let d = card_with("NES", box_of(Platform::Nes), Some(txt), &["1.png", "2.png"]);
+    pick(&d, "NES", "Game = 9 0\n");
+    load_card_art(d.path());
+    let cart = nes(&d);
+    assert_eq!(pick_of(&cart).template, 0, "{:?}", pick_of(&cart));
+    assert_eq!(label_size(&cart), LABEL_PX);
 }
 
 /// Red, as the label beside every cart here is painted.
@@ -199,8 +264,9 @@ fn a_rounded_corner_keeps_the_label_out_of_it() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let d = card_with(
         "NES",
-        Some(cart_box(Platform::Nes)),
+        box_of(Platform::Nes),
         Some("label = 5 5 30 30\ncorner = 8"),
+        &["cart.png"],
     );
     let face = cart_face(&nes(&d));
     assert!(red(&face, 20, 20), "the middle of the label box lost its label");
@@ -210,7 +276,7 @@ fn a_rounded_corner_keeps_the_label_out_of_it() {
 #[test]
 fn without_a_corner_the_label_reaches_the_corner() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let d = card_with("NES", Some(cart_box(Platform::Nes)), Some(LABEL));
+    let d = card_with("NES", box_of(Platform::Nes), Some(LABEL), &["cart.png"]);
     let face = cart_face(&nes(&d));
     assert!(red(&face, 5, 5), "the corner was rounded without being asked");
 }
@@ -222,7 +288,7 @@ fn the_cards_picture_clips_the_face() {
     let d = root();
     load_card_art(d.path());
     let plain = cart_face(&nes(&d));
-    let d = card_with("NES", Some(cart_box(Platform::Nes)), Some(LABEL));
+    let d = card_with("NES", box_of(Platform::Nes), Some(LABEL), &["cart.png"]);
     let own = cart_face(&nes(&d));
     assert_eq!((own.w, own.h), (plain.w, plain.h));
     // Our picture is opaque all over, where the built-in shell is not at its corners.

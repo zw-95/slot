@@ -8,7 +8,7 @@ use slot_ui::{
 const CENTRED: f32 = (OUT_W - CART_W) as f32 / 2.0;
 
 fn centred(c: &Cart) -> f32 {
-    (OUT_W - cart_box(c.platform).0) as f32 / 2.0
+    (OUT_W - cart_box(c).0) as f32 / 2.0
 }
 
 fn cart() -> Cart {
@@ -44,7 +44,7 @@ fn label_band(c: &Cart) -> (f32, f32) {
         Platform::Gba => (LABEL_Y as f32, LABEL_H as f32),
         _ => (GB_LABEL_Y as f32, GB_LABEL_H as f32),
     };
-    let k = seated_box(c.platform).1 as f32 / cart_box(c.platform).1 as f32;
+    let k = seated_box(c).1 as f32 / cart_box(c).1 as f32;
     (y * k, h * k)
 }
 
@@ -141,7 +141,7 @@ fn chrome_into(c: &Cart, seat: f32, out: &mut Vec<Draw>) {
     SlotChrome {
         cart: c,
         face: None,
-        size: cart_box(c.platform),
+        size: cart_box(c),
         rest: centred(c),
         scale: 1.0,
         seat,
@@ -176,7 +176,7 @@ fn a_cart_the_row_had_not_finished_moving_slides_across_as_it_goes_in() {
         SlotChrome {
             cart: &c,
             face: Some(face),
-            size: cart_box(c.platform),
+            size: cart_box(&c),
             rest,
             scale,
             seat,
@@ -207,7 +207,7 @@ fn a_cart_the_row_had_not_finished_moving_slides_across_as_it_goes_in() {
         start.y + start.h
     );
     let seated = at(1.0);
-    let sw = seated_box(c.platform).0 as f32;
+    let sw = seated_box(&c).0 as f32;
     let mid = OUT_W as f32 / 2.0;
     assert!(
         (seated.x + seated.w / 2.0 - mid).abs() < 0.01 && (seated.w - sw).abs() < 0.01,
@@ -238,7 +238,7 @@ fn draw_powering_on(t: f32, out: &mut Vec<Draw>) {
     SlotChrome {
         cart: &c,
         face: None,
-        size: cart_box(c.platform),
+        size: cart_box(&c),
         rest: CENTRED,
         scale: 1.0,
         seat: 1.0,
@@ -366,8 +366,8 @@ fn an_unseated_cart_stands_where_the_shelf_left_it() {
 fn a_cart_shrinks_to_the_slot_by_the_lip() {
     let lip = OUT_H as f32 - MOUTH_H;
     for (name, c) in both() {
-        let (w, h) = cart_box(c.platform);
-        let (sw, sh) = seated_box(c.platform);
+        let (w, h) = cart_box(&c);
+        let (sw, sh) = seated_box(&c);
         let start = cart_quad(&c, 0.0);
         assert!(
             (start.w - w as f32).abs() < 0.01 && (start.h - h as f32).abs() < 0.01,
@@ -626,7 +626,7 @@ fn the_seated_cart_never_shows_through_the_fading_housing() {
 #[test]
 fn the_alert_fits_on_the_cart_face() {
     let (w, h) = icon_box(ALERT_PX);
-    let (cw, ch) = seated_box(Platform::Gba);
+    let (cw, ch) = seated_box(&cart());
     assert!(w < cw && h < ch, "a {w}x{h} alert on a {cw}x{ch} cart");
     assert!(h * 4 > ch, "a {h} px alert on a {ch} px cart is a speck");
 }
@@ -654,7 +654,7 @@ fn the_empty_slot_is_the_same_slot_the_chrome_draws() {
     SlotChrome {
         cart: &c,
         face: None,
-        size: cart_box(c.platform),
+        size: cart_box(&c),
         rest: CENTRED,
         scale: 1.0,
         seat: 1.0,
@@ -894,7 +894,7 @@ fn a_clear_carts_board_goes_into_the_slot_and_comes_out_with_it() {
             SlotChrome {
                 cart: &c,
                 face: Some(face),
-                size: cart_box(c.platform),
+                size: cart_box(&c),
                 rest: centred(&c),
                 scale: 1.0,
                 seat,

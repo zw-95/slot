@@ -6,15 +6,24 @@ use slot_store::{Cart, Platform};
 use crate::art;
 use crate::bitmaps::{self, Mould};
 use crate::board::{BOARD_H, BOARD_W};
-use crate::media::Media;
+use crate::card_art::Pick;
+use crate::media::{Media, SEATED_MAX_H};
 use crate::shell::{shell_for, Finish, Shell};
 use crate::silhouette::{cart_mask, gb_cart_mask, GbShell};
 use crate::text;
+
+/// How tall a seated Advance cart is, which is what the Advance cart's own height is measured
+/// back from.
+const SEATED_H: u32 = 141;
 
 pub const CART_W: u32 = 360;
 pub const CART_H: u32 = (CART_W * SEATED_H + SEATED_W / 2) / SEATED_W;
 
 pub const GB_CART_W: u32 = 312;
+
+/// How tall a seated Game Boy pak is, which is as tall as anything sits, and what the pak's own
+/// height is measured back from.
+const GB_SEATED_H: u32 = 259;
 
 pub const GB_CART_H: u32 = (GB_CART_W * GB_SEATED_H + SEATED_W / 2) / SEATED_W;
 
@@ -162,20 +171,27 @@ fn spec(mould: Mould) -> Spec {
 /// half of it in place.
 fn spec_for(cart: &Cart) -> Spec {
     let mut s = spec(mould_of(cart));
-    if let Some(paint) = crate::card_art::neutral(cart.platform) {
+    let pick = crate::card_art::pick_of(cart);
+    if let Some(paint) = crate::card_art::neutral(cart.platform, pick) {
         s.paint = paint;
-        if let Some(mask) = crate::card_art::mask(cart.platform) {
+        if let Some(mask) = crate::card_art::mask(cart.platform, pick) {
             s.mask = mask;
         }
+        // The picture is the size the shell is drawn at. A medium's is measured by nothing but
+        // its own picture, so a card is free to make one of any size it likes.
+        if let Some((w, h)) = crate::card_art::size(cart.platform, pick) {
+            s.w = w;
+            s.h = h;
+        }
     }
-    if let Some(label) = crate::card_art::label(cart.platform) {
+    if let Some(label) = crate::card_art::label(cart.platform, pick) {
         s.label = label;
     }
     // Rounded corners, when the card names a radius. A medium that already prints inside a
     // shape of its own - the disc's ring, the UMD's window - keeps it: rounding a label that
     // is already cut would only cut it twice.
     if s.label_mask.is_none() {
-        if let Some(mask) = crate::card_art::label_mask(cart.platform) {
+        if let Some(mask) = crate::card_art::label_mask(cart.platform, pick) {
             s.label_mask = Some(mask);
         }
     }
@@ -183,26 +199,85 @@ fn spec_for(cart: &Cart) -> Spec {
 }
 
 pub const SEATED_W: u32 = 240;
-const SEATED_H: u32 = 141;
-const GB_SEATED_H: u32 = 259;
 
-pub fn seated_box(platform: Platform) -> (u32, u32) {
-    match Mould::of(platform) {
-        Mould::Gba => (SEATED_W, SEATED_H),
-        Mould::Notched | Mould::Rounded => (SEATED_W, GB_SEATED_H),
-        Mould::Media(m) => m.seated(SEATED_W),
+/// How a shell of this size sits once it is in the slot: as wide as a seated cart, unless that
+/// would stand taller than a seated Game Boy pak, which is as tall as anything sits.
+fn seated(w: u32, h: u32) -> (u32, u32) {
+    let tall = (SEATED_W * h + w / 2) / w;
+    if tall <= SEATED_MAX_H {
+        return (SEATED_W, tall);
+    }
+    ((SEATED_MAX_H * w + h / 2) / h, SEATED_MAX_H)
+}
+
+/// The box a cart is drawn in, which is the size its shell's picture is. Per cart, not per
+/// platform: a card may ship a picture of a size of its own.
+pub fn cart_box(cart: &Cart) -> (u32, u32) {
+    let s = spec_for(cart);
+    (s.w, s.h)
+}
+
+/// The box a cart sits in once it is in the slot.
+pub fn seated_box(cart: &Cart) -> (u32, u32) {
+    let (w, h) = cart_box(cart);
+    seated(w, h)
+}
+
+/// What a cart's shadow and backing are drawn from: the shape the card brought, when it brought
+/// one, else the mould the cart was modelled from. A card may ship a picture of a size of its
+/// own, and a shadow cast from another shape does not sit under it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum Shape {
+    Mould(Mould),
+    Own(Platform, usize),
+}
+
+impl From<Mould> for Shape {
+    fn from(mould: Mould) -> Self {
+        Shape::Mould(mould)
     }
 }
 
-pub fn cart_box(platform: Platform) -> (u32, u32) {
-    let s = spec(Mould::of(platform));
-    (s.w, s.h)
+pub fn shape_of(cart: &Cart) -> Shape {
+    let pick = crate::card_art::pick_of(cart);
+    match crate::card_art::size(cart.platform, pick) {
+        Some(_) => Shape::Own(cart.platform, pick.template),
+        None => Shape::Mould(mould_of(cart)),
+    }
+}
+
+/// Every shape a shadow is wanted for: one a mould, and one a template the card brought.
+pub fn shapes() -> Vec<Shape> {
+    let mut out: Vec<Shape> = Mould::ALL.iter().copied().map(Shape::Mould).collect();
+    for platform in Platform::ALL {
+        for at in 0..crate::card_art::count(platform) {
+            out.push(Shape::Own(platform, at));
+        }
+    }
+    out
 }
 
 /// The shadow a mould casts on the shelf behind a cart that is not the one in front.
 pub fn mould_shadow(mould: Mould) -> CartFace {
     let s = spec(mould);
     shadow(s.w, s.h, s.mask)
+}
+
+/// The shadow a shape casts: the card's own silhouette when the card brought one.
+pub fn shape_shadow(shape: Shape) -> CartFace {
+    match shape {
+        Shape::Mould(mould) => mould_shadow(mould),
+        Shape::Own(platform, template) => {
+            let pick = Pick { template, plastic: 0 };
+            match (
+                crate::card_art::size(platform, pick),
+                crate::card_art::mask(platform, pick),
+            ) {
+                (Some((w, h)), Some(mask)) => shadow(w, h, mask),
+                _ => mould_shadow(Mould::of(platform)),
+            }
+        }
+    }
 }
 
 fn shadow(w: u32, h: u32, mask: &[u8]) -> CartFace {
@@ -380,7 +455,8 @@ pub fn label_size(cart: &Cart) -> (u32, u32) {
 
 pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
     let s = spec_for(cart);
-    let mut face = shell_face(&s, &shell_for(cart), crate::card_art::neutral(cart.platform));
+    let pick = crate::card_art::pick_of(cart);
+    let mut face = shell_face(&s, &shell_for(cart), crate::card_art::neutral(cart.platform, pick));
     let label = match art {
         Some(rgba) => rgba,
         None => generated_label(&s, &label_text(cart)),

@@ -1,13 +1,14 @@
 use slot_gfx::{Canvas, Draw, TexId, OUT_H};
 use slot_store::{Cart, Platform};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
 use crate::bitmaps::Mould;
 use crate::board::{board_in, Placed};
 use crate::cart::{
-    face_size, label_colour, label_rect, label_text, mould_of, render_of, shows_interior, CartFace,
-    CART_H, CART_W,
+    face_size, label_colour, label_rect, label_text, mould_of, render_of, shape_of, shows_interior,
+    CartFace, Shape, CART_H, CART_W,
 };
 use crate::footer::Printed;
 use crate::hud::{Millis, HUD_INK};
@@ -55,8 +56,10 @@ pub struct Shelf {
     pub scroll: f32,
     faces: Vec<Option<TexId>>,
     interiors: Vec<Option<TexId>>,
-    /// One a mould, at its index.
-    shadows: [Option<TexId>; Mould::COUNT],
+    /// One a shape, which is one a mould until the card brings art of a size of its own.
+    shadows: HashMap<Shape, TexId>,
+    /// One a mould: only the Game Boy family and the Advance have a back plastic, and none of
+    /// them is ever drawn at a size but its own.
     backings: [Option<TexId>; Mould::COUNT],
     shells: Vec<OnceLock<Mould>>,
     clears: Vec<OnceLock<bool>>,
@@ -85,7 +88,7 @@ impl Shelf {
             carts,
             index: 0,
             scroll: 0.0,
-            shadows: [None; Mould::COUNT],
+            shadows: HashMap::new(),
             backings: [None; Mould::COUNT],
             ride: 0.0,
             vel: 0.0,
@@ -167,8 +170,8 @@ impl Shelf {
         self.starred = self.carts.iter().map(starred).collect();
     }
 
-    pub fn set_shadow(&mut self, mould: Mould, face: TexId) {
-        self.shadows[mould.index()] = Some(face);
+    pub fn set_shadow(&mut self, shape: impl Into<Shape>, face: TexId) {
+        self.shadows.insert(shape.into(), face);
     }
 
     pub fn set_backing(&mut self, mould: Mould, face: TexId) {
@@ -475,7 +478,11 @@ impl Shelf {
             let x = x + shake;
             let y = foot_y(ch as f32) + canvas.extra() / 2.0 - h;
             if alpha < 1.0 && !self.real(i) {
-                if let Some(tex) = self.shadows[self.shell(i).index()] {
+                if let Some(tex) = self
+                    .carts
+                    .get(i)
+                    .and_then(|cart| self.shadows.get(&shape_of(cart)).copied())
+                {
                     out.push(Draw::Tex {
                         x,
                         y,

@@ -19,8 +19,8 @@ use slot_ui::{
     repeat_gap, shelf_cart_at, shift_down, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind,
     Icon, KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media,
     Millis, Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow,
-    QuickValue, Refusal, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V, CHIP_W,
-    HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U,
+    QuickValue, Refusal, Shape, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V,
+    CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U,
     SOCKET_V, SOCKET_W, TURN_PAD,
 };
 
@@ -1646,9 +1646,10 @@ impl App {
         }
     }
 
-    pub fn set_cart_shadow(&mut self, mould: Mould, face: TexId) {
+    pub fn set_cart_shadow(&mut self, shape: impl Into<Shape>, face: TexId) {
+        let shape = shape.into();
         for (_, shelf) in &mut self.shelves {
-            shelf.set_shadow(mould, face);
+            shelf.set_shadow(shape, face);
         }
     }
 

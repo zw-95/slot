@@ -320,7 +320,7 @@ const PRINT_OUTER: f32 = 58.5 / 60.0;
 const UMD_PRINT_INNER: f32 = 12.6 / 28.4;
 
 /// How tall a medium may sit in the slot: the Game Boy pak's seated height.
-const SEATED_MAX_H: u32 = 259;
+pub(crate) const SEATED_MAX_H: u32 = 259;
 
 impl Media {
     pub const COUNT: usize = 36;
