@@ -36,8 +36,6 @@ pub enum QuickRow {
     Recents,
     ShowTitles,
     WallpaperTint,
-    /// Which of a platform's pictures, and which plastic, a cart is drawn with.
-    Shell,
     Resume,
     States,
     Settings,
@@ -85,7 +83,7 @@ pub enum QuickRow {
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 51] = [
+const GENERIC: [QuickRow; 50] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -105,7 +103,6 @@ const GENERIC: [QuickRow; 51] = [
     QuickRow::Recents,
     QuickRow::ShowTitles,
     QuickRow::WallpaperTint,
-    QuickRow::Shell,
     QuickRow::Resume,
     QuickRow::States,
     QuickRow::Settings,
@@ -250,13 +247,12 @@ impl QuickRow {
         QuickRow::Achievements,
     ];
 
-    pub const GENERAL: [QuickRow; 12] = [
+    pub const GENERAL: [QuickRow; 11] = [
         QuickRow::Wallpaper,
         QuickRow::WallpaperTint,
         QuickRow::Theme,
         QuickRow::Recents,
         QuickRow::ShowTitles,
-        QuickRow::Shell,
         QuickRow::DateTime,
         QuickRow::Clock,
         QuickRow::MenuSounds,
@@ -365,7 +361,6 @@ impl QuickRow {
             | QuickRow::Theme
             | QuickRow::Recents
             | QuickRow::ShowTitles
-            | QuickRow::Shell
             | QuickRow::Language => QuickRow::GENERAL.to_vec(),
             QuickRow::Resume
             | QuickRow::States
@@ -475,7 +470,6 @@ impl QuickRow {
             QuickRow::General => t(MsgKey::RowGeneral),
             QuickRow::Recents => t(MsgKey::RowRecents),
             QuickRow::ShowTitles => t(MsgKey::RowShowTitles),
-            QuickRow::Shell => t(MsgKey::RowShell),
             QuickRow::WallpaperTint => t(MsgKey::RowWallpaperTint),
             QuickRow::Resume => t(MsgKey::RowResume),
             QuickRow::States => t(MsgKey::RowStates),
@@ -529,7 +523,6 @@ impl QuickRow {
                 | QuickRow::PlayCast
                 | QuickRow::Services
                 | QuickRow::Updates
-                | QuickRow::Shell
                 | QuickRow::Cores
                 | QuickRow::GameArt
                 | QuickRow::Achievements

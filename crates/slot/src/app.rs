@@ -1381,7 +1381,6 @@ impl App {
             | QuickRow::BezelOf(_)
             | QuickRow::Network
             | QuickRow::WifiNetworks
-            | QuickRow::Shell
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
@@ -1596,16 +1595,6 @@ impl App {
         }
         if !self.external_display {
             hidden.push(QuickRow::TvSound);
-        }
-        // A platform the card brought no pictures for has nothing to choose between: no
-        // templates to pick from, and no plastics of its own to go with them.
-        let has_pictures = self
-            .shelf()
-            .carts
-            .get(self.shelf().index)
-            .map_or(false, |c| slot_ui::template_count(c.platform) > 0);
-        if !has_pictures {
-            hidden.push(QuickRow::Shell);
         }
         // The Game Boy family's pages are always there; another system's only once the card
         // holds a game for it.
@@ -2588,6 +2577,7 @@ impl App {
                 | Action::QuickMenu
                 | Action::GameMenu
                 | Action::CoreOptions
+                | Action::CartShell
                 | Action::Polaroids
         );
         let (true, Some(before), Some(after)) = (menu_button, before, self.feel()) else {
@@ -2745,6 +2735,8 @@ impl App {
                 Action::GbaDown(Btn::X) => self.x_held = Some(now),
                 // 长按已经开过搜索了，那一刻 x_held 就被清空：能走到这里的是短按。
                 Action::GbaUp(Btn::X) if self.x_held.take().is_some() => self.cycle_folder(),
+                // Select 加 X：这张卡用哪张图、哪种塑料画。
+                Action::CartShell => self.open_shell(),
                 _ => {}
             },
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
@@ -2757,7 +2749,9 @@ impl App {
                 }
                 Action::Eject => self.eject(),
                 Action::GameMenu => self.game_menu_shortcut(),
-                Action::CoreOptions => self.core_options_wanted = true,
+                // Select with X in a game is still the core's options; the chord only means
+                // something else once there is no core running.
+                Action::CoreOptions | Action::CartShell => self.core_options_wanted = true,
                 Action::QuickMenu => self.tap_in_game_menu(Some(QuickRow::PLAY[0])),
                 Action::Polaroids => self.double_tap_states(),
                 Action::SaveState => self.save_state(),
@@ -4153,15 +4147,6 @@ impl App {
                     self.with_cores(CoreDownloads::check);
                 }
             }
-            QuickRow::Shell => {
-                // Open on the picture this cart is drawn with, not the first one.
-                let cursor = self
-                    .shelf()
-                    .carts
-                    .get(self.shelf().index)
-                    .map_or(0, |c| slot_ui::pick_of(c).template);
-                self.phase = Phase::Shell { cursor };
-            }
             QuickRow::Cast => {
                 self.phase = Phase::Casting { cursor: 0 };
                 // TVs come and go, so each visit looks again.
@@ -4383,7 +4368,6 @@ impl App {
             | QuickRow::ShutDown
             | QuickRow::Reload
             | QuickRow::Language
-            | QuickRow::Shell
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -6683,6 +6667,21 @@ impl App {
             Action::GbaDown(Btn::B | Btn::Start) | Action::QuickMenu => Phase::Shelf,
             _ => return,
         };
+    }
+
+    /// Opens the page that picks the cart's shell: which of the card's pictures, and which
+    /// plastic. A platform the card brought no pictures for has nothing to choose between, and
+    /// the chord does nothing rather than open a page with no rows on it.
+    fn open_shell(&mut self) {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
+            return;
+        };
+        if slot_ui::template_count(cart.platform) == 0 {
+            return;
+        }
+        // Open on the picture it is drawn with, not on the first of them.
+        let cursor = slot_ui::pick_of(cart).template;
+        self.phase = Phase::Shell { cursor };
     }
 
     /// Keeps what this cart is drawn with beside its label, then reads the card again: the picks

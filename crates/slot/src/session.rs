@@ -560,6 +560,7 @@ impl Session {
             self.app.colour_correction_for(platform),
             palette,
             player,
+            rom.as_path(),
         );
         self.app.set_named_core(opened.named);
         launch("core opened");

@@ -204,7 +204,6 @@ pub enum MsgKey {
     CoreAllOf,
 
     // Choosing a shell, and the words on the page that does it.
-    RowShell,
     PageShell,
     /// "Template 2": which of a platform's pictures a cart is drawn with. `{}` is its number.
     ShellTemplate,
@@ -394,7 +393,7 @@ impl MsgKey {
         MsgKey::MonthDec,
     ];
 
-    pub const ALL: [MsgKey; 288] = [
+    pub const ALL: [MsgKey; 287] = [
         MsgKey::RowFastForward,
         MsgKey::RowFastForwardSound,
         MsgKey::RowScreen,
@@ -555,7 +554,6 @@ impl MsgKey {
         MsgKey::CoreDefault,
         MsgKey::CoreThisGame,
         MsgKey::CoreAllOf,
-        MsgKey::RowShell,
         MsgKey::PageShell,
         MsgKey::ShellTemplate,
         MsgKey::ShellInUse,

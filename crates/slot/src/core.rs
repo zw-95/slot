@@ -44,9 +44,10 @@ pub fn open_core(
     colour: bool,
     palette: Option<GbPalette>,
     link: Option<u8>,
+    rom: &Path,
 ) -> Opened {
     let paths = candidates(root, core);
-    match open_named(root, core, platform, serial, colour, palette, link, &paths) {
+    match open_named(root, core, platform, serial, colour, palette, link, &paths, Some(rom)) {
         Some(core) => Opened { core, named: true },
         None => {
             report_missing(core, &paths);
@@ -77,7 +78,10 @@ pub fn open_core_for_palette(
     palette: Option<GbPalette>,
     paths: &[PathBuf],
 ) -> Box<dyn RetroCore> {
-    open_named(root, core, platform, serial, colour, palette, None, paths).unwrap_or_else(|| {
+    open_named(
+        root, core, platform, serial, colour, palette, None, paths, None,
+    )
+    .unwrap_or_else(|| {
         report_missing(core, paths);
         Box::new(MockCore::new())
     })
@@ -93,6 +97,9 @@ fn open_named(
     palette: Option<GbPalette>,
     link: Option<u8>,
     paths: &[PathBuf],
+    // The game that is about to be loaded into the core, when one is. Only RPG Maker asks
+    // anything of it: its saves live in the folder slot names after the game.
+    rom: Option<&Path>,
 ) -> Option<Box<dyn RetroCore>> {
     #[cfg(feature = "device")]
     if matches!(
@@ -110,7 +117,7 @@ fn open_named(
             ),
         }
     }
-    open_here(root, core, platform, serial, colour, palette, link, paths)
+    open_here(root, core, platform, serial, colour, palette, link, paths, rom)
 }
 
 /// Opens a core that draws with the GPU in a process of its own, `slot --core-host`, which has
@@ -181,6 +188,9 @@ pub fn host(args: &[String]) -> Result<(), String> {
         None,
         None,
         &paths,
+        // No game yet: a hosted core is opened before the game is handed to it, and none of the
+        // cores that write files of their own are hosted anyway.
+        None,
     )
     .ok_or("no core opened")?;
     slot_retro::serve(opened, stream);
@@ -190,7 +200,7 @@ pub fn host(args: &[String]) -> Result<(), String> {
 /// Where a core that keeps its saves in files of its own writes them. EasyRPG is given one save
 /// directory and writes `Save01.lsd` into it, so every RPG Maker game needs one of its own or
 /// they all share fifteen slots. The game's own folder, which for these is the rom, names it.
-fn game_save_dir(root: &Path, platform: Platform, rom: Option<&PathBuf>) -> PathBuf {
+fn game_save_dir(root: &Path, platform: Platform, rom: Option<&Path>) -> PathBuf {
     let saves = root::saves_dir(root);
     let Some(name) = rom
         .filter(|_| platform.spec().folder)
@@ -217,11 +227,12 @@ fn open_here(
     palette: Option<GbPalette>,
     link: Option<u8>,
     paths: &[PathBuf],
+    rom: Option<&Path>,
 ) -> Option<Box<dyn RetroCore>> {
     crate::gpu::install();
     root::seed_core_files(root, core);
     let bios = root::bios_dir(root);
-    let saves = game_save_dir(root, platform, paths.get(1));
+    let saves = game_save_dir(root, platform, rom);
     let _ = std::fs::create_dir_all(&saves);
     for path in paths {
         if !path.exists() {

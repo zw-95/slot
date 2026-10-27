@@ -496,9 +496,6 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::ZhCn, MsgKey::CoreDefault) => "默认",
 
         // Choosing a shell, and the page that does it.
-        (Lang::En, MsgKey::RowShell) => "Shell",
-        (Lang::ZhCn, MsgKey::RowShell) => "外壳",
-
         (Lang::En, MsgKey::PageShell) => "Shell",
         (Lang::ZhCn, MsgKey::PageShell) => "外壳",
 

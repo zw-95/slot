@@ -37,6 +37,9 @@ pub enum Action {
     QuickMenu,
     GameMenu,
     CoreOptions,
+    /// Select with X. Which of the card's pictures, and which plastic, the cart on the shelf is
+    /// drawn with. Nothing to do with a core: on the shelf the chord had no use at all.
+    CartShell,
     MuteToggle,
     ColourCorrectionToggle,
     PaletteNext,
@@ -485,7 +488,7 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::B => (1024, Action::ShaderPrev),
         Btn::VolUp => (2048, Action::MuteToggle),
         Btn::VolDown => (4096, Action::MuteToggle),
-        Btn::X => (8192, Action::CoreOptions),
+        Btn::X => (8192, Action::CartShell),
         _ => return None,
     })
 }

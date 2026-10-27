@@ -2,7 +2,7 @@ use slot_store::scan;
 use slot_ui::{
     cart_face, gb_plastics, gb_shell_of, gba_plastics, gba_shell_for, label_colour, label_text,
     lookup_order_is_exact_then_family_then_default, shell_for, shell_presets, table_keys, Finish,
-    GbShell, DEFAULT_SHELL, DMG_SHELL, DUAL_MODE_SHELL, LABEL_WELL, LABEL_X, LABEL_Y,
+    GbShell, DEFAULT_SHELL, DMG_SHELL, LABEL_WELL, LABEL_X, LABEL_Y,
 };
 use tempfile::TempDir;
 

@@ -529,10 +529,12 @@ fn a_and_b_on_their_own_are_untouched_by_the_shader_chord() {
 }
 
 #[test]
-fn x_under_select_opens_the_core_options() {
+fn x_under_select_picks_the_cart_shell() {
     let mut g = Gestures::new();
     assert!(g.feed(Down(Select), 0).is_empty());
-    assert_eq!(g.feed(Down(X), 10), vec![CoreOptions]);
+    // In a game this still reaches the core's options; on the shelf a core has nothing to
+    // configure, and the chord asks which shell to draw the cart with instead.
+    assert_eq!(g.feed(Down(X), 10), vec![CartShell]);
 }
 
 #[test]
