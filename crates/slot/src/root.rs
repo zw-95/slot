@@ -39,16 +39,25 @@ pub fn bios_dir(root: &Path) -> PathBuf {
 }
 
 /// Where a core that keeps its own files in the BIOS folder finds them there: PPSSPP's fonts,
-/// atlas and shaders, which ship in System/PPSSPP and are copied over the first time a PSP game
-/// starts. An update can replace System/ but never touches BIOS/, so they go across again after
-/// one only if they went missing.
+/// atlas and shaders, and EasyRPG's MIDI soundfont and fonts, which ship in System/ and are
+/// copied over the first time one of their games starts. An update can replace System/ but never
+/// touches BIOS/, so they go across again after one only if they went missing.
 pub fn seed_core_files(root: &Path, core: slot_store::Core) {
-    let name = match core {
-        slot_store::Core::Ppsspp => "PPSSPP",
+    // PPSSPP keeps to a folder of its own; EasyRPG reads its things out of the system directory
+    // itself, where it looks for the MIDI soundfont behind a RPG Maker game's music and for fonts
+    // wider than the one it carries.
+    let system = root.join("System");
+    let (from, to, marker) = match core {
+        slot_store::Core::Ppsspp => (
+            system.join("PPSSPP"),
+            bios_dir(root).join("PPSSPP"),
+            "ppge_atlas.zim",
+        ),
+        slot_store::Core::EasyRpg => (system.join("EASYRPG"), bios_dir(root), "easyrpg.soundfont"),
         _ => return,
     };
-    let (from, to) = (root.join("System").join(name), bios_dir(root).join(name));
-    if to.join("ppge_atlas.zim").is_file() || !from.is_dir() {
+    // What the card already has for it wins: a soundfont of your own replaces ours for good.
+    if !from.is_dir() || to.join(marker).is_file() {
         return;
     }
     if let Err(e) = copy_tree(&from, &to) {
