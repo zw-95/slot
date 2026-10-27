@@ -128,13 +128,13 @@ fn collect_games(
     let arcade = platform.spec().header == Header::Arcade;
     for entry in entries {
         let path = entry.path();
-        // A game folder is hidden on the other cards that carry RPG Maker games, which name one
+        // A game folder is hidden on the other cards that carry these games, which name one
         // `.Game` rather than `Game`; here they still count as games.
         if is_hidden(&path) && !platform.spec().folder {
             continue;
         }
         if is_dir(&entry) {
-            // An RPG Maker game is its own folder, RPG_RT.ldb and its maps, music and sound
+            // An EasyRPG game is its own folder, RPG_RT.ldb and its maps, music and sound
             // beside it. It is one game, so it is not walked into: every map in it would
             // otherwise be a game of its own.
             if game_in(&path, platform) {
@@ -285,7 +285,7 @@ fn disc_in(dir: &Path, platform: Platform) -> Option<PathBuf> {
         .find(|p| p.is_file())
 }
 
-/// The files that mark a folder out as one RPG Maker game, as EasyRPG names them: either engine's
+/// The files that mark a folder out as one EasyRPG game, as EasyRPG names them: either engine's
 /// database, either engine's own project file, or the Windows player itself.
 const GAME_MARKERS: &[&str] = &["rpg_rt.ldb", "rpg_rt.lmt", "rpg_rt.exe", "easy_rt.edb"];
 

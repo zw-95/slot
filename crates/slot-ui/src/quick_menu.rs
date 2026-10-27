@@ -196,7 +196,7 @@ const SCREEN_ORDER: [Platform; Platform::COUNT] = [
     Platform::Pico8,
     Platform::Tic80,
     Platform::Psp,
-    Platform::RpgMaker,
+    Platform::EasyRpg,
 ];
 
 impl QuickRow {

@@ -103,9 +103,9 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         Platform::Pico8 => (vec!["PICO-8"], 234),
         Platform::Tic80 => (vec!["TIC-80"], 222),
         Platform::Psp => (vec!["Sony - PlayStation Portable"], 61),
-        // No set and no ScreenScraper system has RPG Maker games, so its labels come from the
+        // No set and no ScreenScraper system has these games, so their labels come from the
         // card and nowhere else.
-        Platform::RpgMaker => (vec![], 0),
+        Platform::EasyRpg => (vec![], 0),
     }
 }
 

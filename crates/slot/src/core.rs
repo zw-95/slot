@@ -97,7 +97,7 @@ fn open_named(
     palette: Option<GbPalette>,
     link: Option<u8>,
     paths: &[PathBuf],
-    // The game that is about to be loaded into the core, when one is. Only RPG Maker asks
+    // The game that is about to be loaded into the core, when one is. Only EasyRPG asks
     // anything of it: its saves live in the folder slot names after the game.
     rom: Option<&Path>,
 ) -> Option<Box<dyn RetroCore>> {
@@ -198,7 +198,7 @@ pub fn host(args: &[String]) -> Result<(), String> {
 }
 
 /// Where a core that keeps its saves in files of its own writes them. EasyRPG is given one save
-/// directory and writes `Save01.lsd` into it, so every RPG Maker game needs one of its own or
+/// directory and writes `Save01.lsd` into it, so every EasyRPG game needs one of its own or
 /// they all share fifteen slots. The game's own folder, which for these is the rom, names it.
 fn game_save_dir(root: &Path, platform: Platform, rom: Option<&Path>) -> PathBuf {
     let saves = root::saves_dir(root);

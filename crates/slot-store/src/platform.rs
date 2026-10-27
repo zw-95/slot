@@ -61,7 +61,7 @@ pub enum Platform {
     Pico8,
     Tic80,
     Psp,
-    RpgMaker,
+    EasyRpg,
 }
 
 /// How the scanner finds a game's title, and for the GBA its four-letter code, in the ROM.
@@ -87,7 +87,7 @@ pub struct Spec {
     /// The folder under Games, Labels, Saves, States and Bezels, and the key in config files.
     pub dir: &'static str,
     pub extensions: &'static [&'static str],
-    /// Whether a game can be a folder of files rather than one file, as an RPG Maker game is: a
+    /// Whether a game can be a folder of files rather than one file, as an EasyRPG game is: a
     /// folder holding the game's files is the game, and is not walked into.
     pub folder: bool,
     /// Whether the core's picture is drawn at its own size and aspect. When it is not, the game
@@ -701,8 +701,8 @@ const SPECS: [Spec; Platform::COUNT] = [
         ..HANDHELD
     },
     Spec {
-        name: "RPG Maker",
-        dir: "RPGMAKER",
+        name: "EasyRPG",
+        dir: "EASYRPG",
         // What the core takes: a whole game folder, an RPG_RT.ldb, or the game zipped or lha'd.
         extensions: &["ldb", "zip", "lzh", "easyrpg"],
         folder: true,
@@ -773,7 +773,7 @@ impl Platform {
         Platform::Pico8,
         Platform::Tic80,
         Platform::Psp,
-        Platform::RpgMaker,
+        Platform::EasyRpg,
     ];
 
     pub fn spec(self) -> &'static Spec {

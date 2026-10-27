@@ -44,7 +44,7 @@ pub fn bios_dir(root: &Path) -> PathBuf {
 /// touches BIOS/, so they go across again after one only if they went missing.
 pub fn seed_core_files(root: &Path, core: slot_store::Core) {
     // PPSSPP keeps to a folder of its own; EasyRPG reads its things out of the system directory
-    // itself, where it looks for the MIDI soundfont behind a RPG Maker game's music and for fonts
+    // itself, where it looks for the MIDI soundfont behind an EasyRPG game's music and for fonts
     // wider than the one it carries.
     let system = root.join("System");
     let (from, to, marker) = match core {

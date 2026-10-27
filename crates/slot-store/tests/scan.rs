@@ -338,11 +338,11 @@ fn a_set_the_databases_do_not_know_keeps_its_file_name() {
     assert_eq!(carts[0].shelf_name(), "myhack");
 }
 
-/// Writes an RPG Maker game: a folder with the engine's database in it, and the map files that
+/// Writes an EasyRPG game: a folder with the engine's database in it, and the map files that
 /// must not be shelved as games of their own.
 fn write_rpg(d: &TempDir, game: &str) {
-    write_file(&d, &format!("RPGMAKER/{game}/RPG_RT.ldb"), "ldb");
-    write_file(&d, &format!("RPGMAKER/{game}/Map0001.lmu"), "map");
+    write_file(&d, &format!("EASYRPG/{game}/RPG_RT.ldb"), "ldb");
+    write_file(&d, &format!("EASYRPG/{game}/Map0001.lmu"), "map");
 }
 
 #[test]
@@ -352,11 +352,11 @@ fn an_rpg_maker_game_is_the_folder_it_comes_in() {
     let carts = scan(d.path()).unwrap();
     let carts: Vec<_> = carts
         .into_iter()
-        .filter(|c| c.platform == Platform::RpgMaker)
+        .filter(|c| c.platform == Platform::EasyRpg)
         .collect();
     assert_eq!(carts.len(), 1, "one folder, one game");
     assert_eq!(carts[0].stem, "7DAYS");
-    assert_eq!(carts[0].rom, d.path().join("Games/RPGMAKER/7DAYS"));
+    assert_eq!(carts[0].rom, d.path().join("Games/EASYRPG/7DAYS"));
     assert!(carts[0].rom.is_dir());
 }
 
@@ -368,7 +368,7 @@ fn a_game_folder_hidden_the_way_other_cards_hide_them_is_still_a_game() {
     assert_eq!(carts.len(), 1, "a hidden game folder was passed over");
     assert_eq!(carts[0].stem, "7DAYS", "the dot is not part of its name");
     // Its label is looked for under the name the shelf shows, not the one on the card.
-    write_png(&d, "RPGMAKER/7DAYS.png");
+    write_png(&d, "EASYRPG/7DAYS.png");
     let cart = scan(d.path()).unwrap().remove(0);
     assert!(cart.label.is_some(), "the label was not found");
 }
@@ -377,7 +377,7 @@ fn a_game_folder_hidden_the_way_other_cards_hide_them_is_still_a_game() {
 fn nothing_inside_a_game_folder_is_shelved_of_its_own() {
     let d = tmp_root();
     write_rpg(&d, "OFF 汉化版");
-    write_file(&d, "RPGMAKER/OFF 汉化版/Music/town.mid", "");
+    write_file(&d, "EASYRPG/OFF 汉化版/Music/town.mid", "");
     let carts = scan(d.path()).unwrap();
     assert_eq!(carts.len(), 1, "the game's own files became games");
     assert_eq!(carts[0].stem, "OFF 汉化版");
@@ -401,7 +401,7 @@ fn a_game_folder_in_a_subfolder_is_shelved_with_the_rest() {
 #[test]
 fn a_zipped_rpg_maker_game_is_a_game_too() {
     let d = tmp_root();
-    write_file(&d, "RPGMAKER/Oneshot.zip", "PK");
+    write_file(&d, "EASYRPG/Oneshot.zip", "PK");
     let carts = scan(d.path()).unwrap();
     assert_eq!(carts.len(), 1);
     assert_eq!(carts[0].stem, "Oneshot");
@@ -411,8 +411,8 @@ fn a_zipped_rpg_maker_game_is_a_game_too() {
 #[test]
 fn a_folder_of_nothing_an_engine_knows_is_walked_into_like_any_other() {
     let d = tmp_root();
-    write_file(&d, "RPGMAKER/汉化/ground.zip", "PK");
+    write_file(&d, "EASYRPG/汉化/ground.zip", "PK");
     // A folder whose name the engine does not answer to is just a folder of games.
-    write_file(&d, "RPGMAKER/声音/README.txt", "");
+    write_file(&d, "EASYRPG/声音/README.txt", "");
     assert_eq!(scan(d.path()).unwrap().len(), 1);
 }
