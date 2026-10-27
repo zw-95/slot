@@ -371,6 +371,15 @@ pub fn plastics(platform: Platform) -> &'static [usize] {
     }
 }
 
+/// Which plastic this cart is drawn in, when the card brought the pictures the plastics go
+/// beside. None when it did not: a cart modelled from the built-in asset is left the plastic
+/// that asset was drawn in, rather than recoloured by a list the card never offered.
+pub fn plastic_of(cart: &Cart) -> Option<usize> {
+    own(cart.platform)?;
+    let pick = pick_of(cart);
+    plastics(cart.platform).get(pick.plastic).copied()
+}
+
 /// The card's own neutral shell, decoded once, when it has one that holds up.
 pub fn neutral(platform: Platform, pick: Pick) -> Option<&'static [u8]> {
     let (rgba, _, _) = Template::decoded(template(platform, pick.template)?)?;

@@ -61,6 +61,7 @@ pub enum Platform {
     Pico8,
     Tic80,
     Psp,
+    RpgMaker,
 }
 
 /// How the scanner finds a game's title, and for the GBA its four-letter code, in the ROM.
@@ -86,6 +87,9 @@ pub struct Spec {
     /// The folder under Games, Labels, Saves, States and Bezels, and the key in config files.
     pub dir: &'static str,
     pub extensions: &'static [&'static str],
+    /// Whether a game can be a folder of files rather than one file, as an RPG Maker game is: a
+    /// folder holding the game's files is the game, and is not walked into.
+    pub folder: bool,
     /// Whether the core's picture is drawn at its own size and aspect. When it is not, the game
     /// is centred in the Game Boy family's 240x160 canvas and `picture` says where it sits.
     pub native: bool,
@@ -126,6 +130,7 @@ const CONSOLE: Spec = Spec {
     short: "",
     dir: "",
     extensions: &[],
+    folder: false,
     native: true,
     picture: (240, 160),
     header: Header::None,
@@ -695,10 +700,23 @@ const SPECS: [Spec; Platform::COUNT] = [
         rewind: false,
         ..HANDHELD
     },
+    Spec {
+        name: "RPG Maker",
+        dir: "RPGMAKER",
+        // What the core takes: a whole game folder, an RPG_RT.ldb, or the game zipped or lha'd.
+        extensions: &["ldb", "zip", "lzh", "easyrpg"],
+        folder: true,
+        cores: &[Core::EasyRpg],
+        turbo: false,
+        // The core keeps no state worth rewinding through, and there are no slots to save in a
+        // game that saves when you tell it to.
+        rewind: false,
+        ..CONSOLE
+    },
 ];
 
 impl Platform {
-    pub const COUNT: usize = 55;
+    pub const COUNT: usize = 56;
     pub const ALL: [Platform; Platform::COUNT] = [
         Platform::Gba,
         Platform::Gb,
@@ -755,6 +773,7 @@ impl Platform {
         Platform::Pico8,
         Platform::Tic80,
         Platform::Psp,
+        Platform::RpgMaker,
     ];
 
     pub fn spec(self) -> &'static Spec {

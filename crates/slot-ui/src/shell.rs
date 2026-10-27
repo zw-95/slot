@@ -82,6 +82,11 @@ pub fn shell_for(cart: &Cart) -> Shell {
         };
         return shell(choice.colour, finish);
     }
+    // A card that brought pictures of its own offers plastics of its own beside them: a shell
+    // drawn from a neutral picture takes whatever colour is blended onto it.
+    if let Some(plastic) = crate::card_art::plastic_of(cart) {
+        return shell(crate::card_art::PLASTICS[plastic], Finish::Solid);
+    }
     if let Some(media) = crate::media::Media::of(cart.platform) {
         return shell(media.colour(), Finish::Solid);
     }

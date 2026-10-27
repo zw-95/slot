@@ -495,6 +495,43 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::En, MsgKey::CoreDefault) => "Default",
         (Lang::ZhCn, MsgKey::CoreDefault) => "默认",
 
+        // Choosing a shell, and the page that does it.
+        (Lang::En, MsgKey::RowShell) => "Shell",
+        (Lang::ZhCn, MsgKey::RowShell) => "外壳",
+
+        (Lang::En, MsgKey::PageShell) => "Shell",
+        (Lang::ZhCn, MsgKey::PageShell) => "外壳",
+
+        (Lang::En, MsgKey::ShellTemplate) => "Template {}",
+        (Lang::ZhCn, MsgKey::ShellTemplate) => "模版 {}",
+
+        (Lang::En, MsgKey::ShellInUse) => "In use",
+        (Lang::ZhCn, MsgKey::ShellInUse) => "使用中",
+
+        (Lang::En, MsgKey::PlasticGrey) => "Grey",
+        (Lang::ZhCn, MsgKey::PlasticGrey) => "灰",
+
+        (Lang::En, MsgKey::PlasticBlack) => "Black",
+        (Lang::ZhCn, MsgKey::PlasticBlack) => "黑",
+
+        (Lang::En, MsgKey::PlasticWhite) => "White",
+        (Lang::ZhCn, MsgKey::PlasticWhite) => "白",
+
+        (Lang::En, MsgKey::PlasticBlue) => "Blue",
+        (Lang::ZhCn, MsgKey::PlasticBlue) => "蓝",
+
+        (Lang::En, MsgKey::PlasticPink) => "Pink",
+        (Lang::ZhCn, MsgKey::PlasticPink) => "粉",
+
+        (Lang::En, MsgKey::PlasticRed) => "Red",
+        (Lang::ZhCn, MsgKey::PlasticRed) => "红",
+
+        (Lang::En, MsgKey::PlasticGreen) => "Green",
+        (Lang::ZhCn, MsgKey::PlasticGreen) => "绿",
+
+        (Lang::En, MsgKey::PlasticYellow) => "Yellow",
+        (Lang::ZhCn, MsgKey::PlasticYellow) => "黄",
+
         (Lang::En, MsgKey::CoreThisGame) => "This Game",
         (Lang::ZhCn, MsgKey::CoreThisGame) => "仅本游戏",
 

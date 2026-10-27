@@ -202,6 +202,22 @@ pub enum MsgKey {
     CoreThisGame,
     /// "All GBA", for the core every game of one system runs on. `{}` is the system's name.
     CoreAllOf,
+
+    // Choosing a shell, and the words on the page that does it.
+    RowShell,
+    PageShell,
+    /// "Template 2": which of a platform's pictures a cart is drawn with. `{}` is its number.
+    ShellTemplate,
+    ShellInUse,
+    /// The eight plastics a cart may be moulded in, in `PLASTICS`'s order.
+    PlasticGrey,
+    PlasticBlack,
+    PlasticWhite,
+    PlasticBlue,
+    PlasticPink,
+    PlasticRed,
+    PlasticGreen,
+    PlasticYellow,
     ArtWaiting,
     ArtDownloaded,
     SearchNew,
@@ -378,7 +394,7 @@ impl MsgKey {
         MsgKey::MonthDec,
     ];
 
-    pub const ALL: [MsgKey; 276] = [
+    pub const ALL: [MsgKey; 288] = [
         MsgKey::RowFastForward,
         MsgKey::RowFastForwardSound,
         MsgKey::RowScreen,
@@ -539,6 +555,18 @@ impl MsgKey {
         MsgKey::CoreDefault,
         MsgKey::CoreThisGame,
         MsgKey::CoreAllOf,
+        MsgKey::RowShell,
+        MsgKey::PageShell,
+        MsgKey::ShellTemplate,
+        MsgKey::ShellInUse,
+        MsgKey::PlasticGrey,
+        MsgKey::PlasticBlack,
+        MsgKey::PlasticWhite,
+        MsgKey::PlasticBlue,
+        MsgKey::PlasticPink,
+        MsgKey::PlasticRed,
+        MsgKey::PlasticGreen,
+        MsgKey::PlasticYellow,
         MsgKey::ArtWaiting,
         MsgKey::ArtDownloaded,
         MsgKey::SearchNew,

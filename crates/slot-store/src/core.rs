@@ -62,6 +62,7 @@ pub enum Core {
     Tic80,
     Ppsspp,
     Nodosumi,
+    EasyRpg,
     VbaNext,
     Vbam,
     Gambatte,
@@ -97,7 +98,7 @@ pub enum Core {
 }
 
 impl Core {
-    pub const ALL: [Core; 80] = [
+    pub const ALL: [Core; 81] = [
         Core::Mgba,
         Core::Gpsp,
         Core::Fceumm,
@@ -146,6 +147,7 @@ impl Core {
         Core::Tic80,
         Core::Ppsspp,
         Core::Nodosumi,
+        Core::EasyRpg,
         Core::VbaNext,
         Core::Vbam,
         Core::Gambatte,
@@ -231,6 +233,7 @@ impl Core {
             Core::Tic80 => "tic80",
             Core::Ppsspp => "ppsspp",
             Core::Nodosumi => "nodosumi",
+            Core::EasyRpg => "easyrpg",
             Core::VbaNext => "vba_next",
             Core::Vbam => "vbam",
             Core::Gambatte => "gambatte",
@@ -320,6 +323,7 @@ impl Core {
             Core::Tic80 => "TIC-80",
             Core::Ppsspp => "PPSSPP",
             Core::Nodosumi => "Nodosumi",
+            Core::EasyRpg => "EasyRPG",
             Core::VbaNext => "VBA Next",
             Core::Vbam => "VBA-M",
             Core::Gambatte => "Gambatte",

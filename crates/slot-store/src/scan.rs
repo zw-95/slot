@@ -128,10 +128,19 @@ fn collect_games(
     let arcade = platform.spec().header == Header::Arcade;
     for entry in entries {
         let path = entry.path();
-        if is_hidden(&path) {
+        // A game folder is hidden on the other cards that carry RPG Maker games, which name one
+        // `.Game` rather than `Game`; here they still count as games.
+        if is_hidden(&path) && !platform.spec().folder {
             continue;
         }
         if is_dir(&entry) {
+            // An RPG Maker game is its own folder, RPG_RT.ldb and its maps, music and sound
+            // beside it. It is one game, so it is not walked into: every map in it would
+            // otherwise be a game of its own.
+            if game_in(&path, platform) {
+                add_game_dir(carts, platform, &path, labels_dir, labels, shells);
+                continue;
+            }
             // A disc set kept in its own folder, as Redump's are, is the disc named after the
             // folder. Such a folder is one game, so it is not walked into: its every track
             // would otherwise be a game of its own. Not for arcade, where a folder beside a
@@ -274,6 +283,57 @@ fn disc_in(dir: &Path, platform: Platform) -> Option<PathBuf> {
         .iter()
         .map(|ext| dir.join(format!("{name}.{ext}")))
         .find(|p| p.is_file())
+}
+
+/// The files that mark a folder out as one RPG Maker game, as EasyRPG names them: either engine's
+/// database, either engine's own project file, or the Windows player itself.
+const GAME_MARKERS: &[&str] = &["rpg_rt.ldb", "rpg_rt.lmt", "rpg_rt.exe", "easy_rt.edb"];
+
+/// Whether `dir` is one game rather than a folder of games. Read case-insensitively: a card is
+/// formatted FAT or exFAT, where `RPG_RT.LDB` is the same file.
+fn game_in(dir: &Path, platform: Platform) -> bool {
+    if !platform.spec().folder {
+        return false;
+    }
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return false;
+    };
+    let names: Vec<String> = entries
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().to_lowercase())
+        .collect();
+    GAME_MARKERS.iter().any(|m| names.iter().any(|n| n == m))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_game_dir(
+    carts: &mut Vec<Cart>,
+    platform: Platform,
+    dir: &Path,
+    labels_dir: &Path,
+    labels: &HashMap<String, String>,
+    shells: &HashMap<String, crate::ShellChoice>,
+) {
+    let Some(name) = dir.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    // The dot other cards put in front of a game folder's name is theirs, not the game's.
+    let stem = name.strip_prefix('.').unwrap_or(name).trim();
+    if stem.is_empty() {
+        return;
+    }
+    let label = labels
+        .get(&format!("{stem}.png").to_lowercase())
+        .map(|name| labels_dir.join(name));
+    carts.push(Cart {
+        platform,
+        stem: stem.to_string(),
+        title: String::new(),
+        code: String::new(),
+        shell: shells.get(&crate::cart_shell::key(stem)).copied(),
+        label,
+        rom: dir.to_path_buf(),
+    });
 }
 
 fn is_file(entry: &std::fs::DirEntry) -> bool {

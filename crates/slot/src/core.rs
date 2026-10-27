@@ -187,6 +187,26 @@ pub fn host(args: &[String]) -> Result<(), String> {
     Ok(())
 }
 
+/// Where a core that keeps its saves in files of its own writes them. EasyRPG is given one save
+/// directory and writes `Save01.lsd` into it, so every RPG Maker game needs one of its own or
+/// they all share fifteen slots. The game's own folder, which for these is the rom, names it.
+fn game_save_dir(root: &Path, platform: Platform, rom: Option<&PathBuf>) -> PathBuf {
+    let saves = root::saves_dir(root);
+    let Some(name) = rom
+        .filter(|_| platform.spec().folder)
+        .and_then(|rom| rom.file_name())
+        .and_then(|name| name.to_str())
+    else {
+        return saves;
+    };
+    // Hidden the way muOS and Tianma hide a game folder: the dot is not part of the game's name.
+    let name = name.strip_prefix('.').unwrap_or(name).trim();
+    if name.is_empty() {
+        return saves;
+    }
+    saves.join(platform.dir_name()).join(name)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn open_here(
     root: &Path,
@@ -201,7 +221,8 @@ fn open_here(
     crate::gpu::install();
     root::seed_core_files(root, core);
     let bios = root::bios_dir(root);
-    let saves = root::saves_dir(root);
+    let saves = game_save_dir(root, platform, paths.get(1));
+    let _ = std::fs::create_dir_all(&saves);
     for path in paths {
         if !path.exists() {
             continue;

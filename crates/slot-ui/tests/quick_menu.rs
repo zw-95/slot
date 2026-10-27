@@ -104,6 +104,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Theme",
             "Recents",
             "Game Titles",
+            "Shell",
             "Date & Time",
             "Clock",
             "Menu Sounds",
@@ -179,6 +180,7 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::About,
             QuickRow::Game,
             QuickRow::General,
+            QuickRow::Shell,
             QuickRow::Resume,
             QuickRow::States,
             QuickRow::Settings,
@@ -197,6 +199,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::ShutDown,
             QuickRow::Reload,
             QuickRow::Achievements,
+            QuickRow::Cast,
+            QuickRow::PlayCast,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))

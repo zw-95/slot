@@ -18,7 +18,7 @@ use slot_ui::{
     draw_slot_name, draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board,
     repeat_gap, shelf_cart_at, shift_down, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind,
     Icon, KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media,
-    Millis, Mould, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow,
+    Millis, Mould, Pick, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow,
     QuickValue, Refusal, Shape, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V,
     CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U,
     SOCKET_V, SOCKET_W, TURN_PAD,
@@ -320,6 +320,10 @@ pub enum Phase {
     /// The cores that run the game on the shelf, for a system other than the GBA, whose cores
     /// are picked on its board instead.
     Cores {
+        cursor: usize,
+    },
+    /// Which of the card's pictures, and which plastic, the cart on the shelf is drawn with.
+    Shell {
         cursor: usize,
     },
     /// The games a search found, from X on the shelf.
@@ -1122,6 +1126,7 @@ impl App {
             | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
+            | Phase::Shell { .. }
             | Phase::Search { .. } => vertical,
             Phase::Shelf => vertical && self.core_picker.is_none(),
             Phase::Polaroids { .. } => !vertical,
@@ -1376,6 +1381,7 @@ impl App {
             | QuickRow::BezelOf(_)
             | QuickRow::Network
             | QuickRow::WifiNetworks
+            | QuickRow::Shell
             | QuickRow::Bezel => None,
             QuickRow::Wifi => Some(QuickValue::flag(self.state.wifi)),
             QuickRow::Bluetooth => Some(QuickValue::flag(self.state.bluetooth)),
@@ -1590,6 +1596,16 @@ impl App {
         }
         if !self.external_display {
             hidden.push(QuickRow::TvSound);
+        }
+        // A platform the card brought no pictures for has nothing to choose between: no
+        // templates to pick from, and no plastics of its own to go with them.
+        let has_pictures = self
+            .shelf()
+            .carts
+            .get(self.shelf().index)
+            .map_or(false, |c| slot_ui::template_count(c.platform) > 0);
+        if !has_pictures {
+            hidden.push(QuickRow::Shell);
         }
         // The Game Boy family's pages are always there; another system's only once the card
         // holds a game for it.
@@ -2537,7 +2553,9 @@ impl App {
             | Phase::Updates { cursor }
             | Phase::CoreDownloads { cursor }
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
-            Phase::Cores { cursor } | Phase::Search { cursor } => (1, cursor.to_string()),
+            Phase::Cores { cursor } | Phase::Shell { cursor } | Phase::Search { cursor } => {
+                (1, cursor.to_string())
+            }
             Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
             Phase::TailscaleLogin | Phase::SyncthingId => (4, String::new()),
             Phase::Polaroids { .. } => (
@@ -2589,6 +2607,7 @@ impl App {
                 | Phase::CoreDownloads { .. }
                 | Phase::GameArt { .. }
                 | Phase::Cores { .. }
+                | Phase::Shell { .. }
                 | Phase::Search { .. }
         );
         let sfx = match () {
@@ -2773,6 +2792,7 @@ impl App {
             Phase::CoreDownloads { cursor } => self.core_downloads_input(cursor, action),
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
+            Phase::Shell { cursor } => self.shell_input(cursor, action),
             Phase::Search { cursor } => self.search_input(cursor, action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
@@ -3896,6 +3916,7 @@ impl App {
                 Some(PageModel::List(self.core_downloads_page(*cursor)))
             }
             Phase::Cores { cursor } => self.cores_page(*cursor).map(PageModel::List),
+            Phase::Shell { cursor } => self.shell_page(*cursor).map(PageModel::List),
             Phase::Search { cursor } => Some(PageModel::List(self.search_page(*cursor))),
             Phase::GameArt { cursor, note } => Some(PageModel::List(
                 self.game_art_page(*cursor, note.as_deref()),
@@ -4132,6 +4153,15 @@ impl App {
                     self.with_cores(CoreDownloads::check);
                 }
             }
+            QuickRow::Shell => {
+                // Open on the picture this cart is drawn with, not the first one.
+                let cursor = self
+                    .shelf()
+                    .carts
+                    .get(self.shelf().index)
+                    .map_or(0, |c| slot_ui::pick_of(c).template);
+                self.phase = Phase::Shell { cursor };
+            }
             QuickRow::Cast => {
                 self.phase = Phase::Casting { cursor: 0 };
                 // TVs come and go, so each visit looks again.
@@ -4353,6 +4383,7 @@ impl App {
             | QuickRow::ShutDown
             | QuickRow::Reload
             | QuickRow::Language
+            | QuickRow::Shell
             | QuickRow::Bezel => return,
         }
         self.persist();
@@ -5561,6 +5592,7 @@ impl App {
             | Phase::CoreDownloads { .. }
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
+            | Phase::Shell { .. }
             | Phase::Search { .. }
             | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
@@ -6582,6 +6614,114 @@ impl App {
         })
     }
 
+    /// The picture and the plastic the cart on the shelf is drawn with: every picture the card
+    /// brought for its platform, then every plastic it offers. One list rather than two pages,
+    /// since both are the same thing asked of the same cart.
+    fn shell_page(&self, cursor: usize) -> Option<ListPage> {
+        let cart = self.shelf().carts.get(self.shelf().index)?;
+        let platform = cart.platform;
+        // Nothing to pick from until the card brings the pictures the plastics go beside.
+        let templates = slot_ui::template_count(platform);
+        if templates == 0 {
+            return None;
+        }
+        let pick = slot_ui::pick_of(cart);
+        let plastics = slot_ui::plastics(platform);
+        let used = |at: bool| {
+            match at {
+                true => t(MsgKey::ShellInUse).to_string(),
+                false => String::new(),
+            }
+        };
+        let rows = (0..templates)
+            .map(|at| ListRow {
+                label: filled(MsgKey::ShellTemplate, at + 1),
+                detail: used(at == pick.template),
+                bars: None,
+                icon: None,
+            })
+            .chain(plastics.iter().enumerate().map(|(at, plastic)| ListRow {
+                label: plastic_name(*plastic).into(),
+                detail: used(at == pick.plastic),
+                bars: None,
+                icon: None,
+            }))
+            .collect();
+        let n = templates + plastics.len();
+        Some(ListPage {
+            title: t(MsgKey::PageShell).into(),
+            status: slot_ui::label_text(cart),
+            cursor: cursor.min(n - 1),
+            rows,
+            legends: with_action(Some(t(MsgKey::BtnChoose))),
+        })
+    }
+
+    fn shell_input(&mut self, cursor: usize, action: Action) {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index).cloned() else {
+            self.phase = Phase::Shelf;
+            return;
+        };
+        let templates = slot_ui::template_count(cart.platform);
+        if templates == 0 {
+            self.phase = Phase::Shelf;
+            return;
+        }
+        let n = templates + slot_ui::plastics(cart.platform).len();
+        let cursor = cursor.min(n - 1);
+        self.phase = match action {
+            Action::GbaDown(Btn::Up) => Phase::Shell {
+                cursor: (cursor + n - 1) % n,
+            },
+            Action::GbaDown(Btn::Down) => Phase::Shell {
+                cursor: (cursor + 1) % n,
+            },
+            Action::GbaDown(Btn::A) => {
+                self.write_shell(&cart, cursor);
+                Phase::Shelf
+            }
+            Action::GbaDown(Btn::B | Btn::Start) | Action::QuickMenu => Phase::Shelf,
+            _ => return,
+        };
+    }
+
+    /// Keeps what this cart is drawn with beside its label, then reads the card again: the picks
+    /// are read once when slot starts, so the shelf would go on drawing the cart as it was.
+    fn write_shell(&mut self, cart: &Cart, cursor: usize) {
+        let Some(root) = self.root.clone() else {
+            return;
+        };
+        let templates = slot_ui::template_count(cart.platform);
+        let was = slot_ui::pick_of(cart);
+        // The pictures come first in the list, the plastics after them.
+        let pick = match cursor < templates {
+            true => Pick {
+                template: cursor,
+                plastic: was.plastic,
+            },
+            false => Pick {
+                template: was.template,
+                plastic: cursor - templates,
+            },
+        };
+        let file = format!("Labels/{}/cart_pick.txt", cart.platform.dir_name());
+        let written = slot_store::ini::write(
+            &root,
+            &file,
+            &cart.stem,
+            &format!("{} {}", pick.template, pick.plastic),
+        );
+        if let Err(e) = &written {
+            eprintln!("slot: carts: {file}: {e}");
+        }
+        self.card_writes.wrote(&file, &written);
+        slot_ui::load_card_art(&root);
+        // Built again from the cart as it is now: a new picture is a new size.
+        let at = self.shelf_at;
+        let index = self.shelf().index;
+        self.relabelled.push((at, index));
+    }
+
     /// The keyboard, for a game's name: the last search's to start from.
     fn open_search(&mut self, again: bool) {
         let query = self.search.as_ref().map_or("", |s| s.query.as_str());
@@ -7524,6 +7664,22 @@ fn with_action(action: Option<&str>) -> Vec<Legend> {
     let mut legends = vec![back_legend()];
     legends.extend(action.map(|a| Legend::new(ButtonLegend::A, a)));
     legends
+}
+
+/// The word for one of `PLASTICS`, in the order that table keeps them. Past the end is the
+/// last of them: the table only ever grows, and a pick naming one that is gone still has to
+/// say something.
+fn plastic_name(at: usize) -> &'static str {
+    t(match at {
+        0 => MsgKey::PlasticGrey,
+        1 => MsgKey::PlasticBlack,
+        2 => MsgKey::PlasticWhite,
+        3 => MsgKey::PlasticBlue,
+        4 => MsgKey::PlasticPink,
+        5 => MsgKey::PlasticRed,
+        6 => MsgKey::PlasticGreen,
+        _ => MsgKey::PlasticYellow,
+    })
 }
 
 fn shader_value(shader: Shader) -> QuickValue {

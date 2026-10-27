@@ -103,6 +103,9 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         Platform::Pico8 => (vec!["PICO-8"], 234),
         Platform::Tic80 => (vec!["TIC-80"], 222),
         Platform::Psp => (vec!["Sony - PlayStation Portable"], 61),
+        // No set and no ScreenScraper system has RPG Maker games, so its labels come from the
+        // card and nowhere else.
+        Platform::RpgMaker => (vec![], 0),
     }
 }
 
@@ -587,6 +590,15 @@ fn label_for(
     cart: &Cart,
 ) -> Result<Found, String> {
     let (sets, system) = source(cart.platform, &cart.rom);
+    // A system no set covers has nothing to look itself up in, and asking an empty system id
+    // gets nothing back but a turn away.
+    if sets.is_empty() {
+        return Ok(Found {
+            png: None,
+            render: None,
+            turned_away: false,
+        });
+    }
     // A disc's crc is not what ScreenScraper knows it by.
     let crc = match is_disc(&cart.rom) {
         false => crc_of(&cart.rom),

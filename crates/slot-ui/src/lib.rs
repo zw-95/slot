@@ -1,6 +1,9 @@
 mod art;
 pub use art::{contain, cover, is_cutout};
-pub use card_art::{load_card_art, plastics, pick_of, Pick, CARTS, PLASTICS, PLASTIC_COUNT};
+pub use card_art::{
+    count as template_count, load_card_art, plastic_of, plastics, pick_of, Pick, CARTS, PLASTICS,
+    PLASTIC_COUNT,
+};
 mod bitmaps;
 pub use bitmaps::{
     link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, Mould,

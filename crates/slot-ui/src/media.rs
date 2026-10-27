@@ -412,6 +412,7 @@ impl Media {
             Platform::ZxSpectrum => Media::Tape,
             Platform::AmstradCpc => Media::AmstradDisk,
             Platform::Psp => Media::Umd,
+            Platform::RpgMaker => Media::Floppy35,
             Platform::Pico8 | Platform::Tic80 => Media::Fantasy,
         })
     }
