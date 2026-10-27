@@ -1,11 +1,11 @@
 use slot_store::{scan, Platform};
 
 use slot_ui::{
-    cart_face, clean_label, foot_y, gb_label_panel, gb_silhouette, label_colour, label_panel,
-    label_text, rest_y, seated_box, shell_for, silhouette, Finish, GbShell, CART_H, CART_W,
-    GBC_LABEL_H, GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y, GB_CART_H, GB_CART_W, GB_LABEL_H,
-    GB_LABEL_W, GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_X, LABEL_Y, MOUTH_H, OUT_H,
-    PLATE_H,
+    cart_face, clean_label, draw_count, foot_y, gb_label_panel, gb_silhouette, label_colour,
+    label_panel, label_text, rest_y, seated_box, shell_for, silhouette, Canvas, Draw, Finish,
+    GbShell, Printed, TexId, CART_H, CART_W, GBC_LABEL_H, GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y,
+    GB_CART_H, GB_CART_W, GB_LABEL_H, GB_LABEL_W, GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W,
+    LABEL_X, LABEL_Y, MOUTH_H, OUT_H, PLATE_H,
 };
 use tempfile::TempDir;
 
@@ -413,7 +413,7 @@ fn the_game_boy_label_well_is_near_square_and_sits_under_the_lettering_plate() {
 }
 
 #[test]
-fn the_colour_only_shell_rounds_off_the_corner_the_older_mould_keeps() {
+fn every_game_boy_pak_keeps_the_notched_corner() {
     let d = tmp_root();
     write_gb_rom(&d, "GBC", "Rolled.gbc", 0xc0);
     write_gb_rom(&d, "GB", "Flat.gb", 0x00);
@@ -426,16 +426,14 @@ fn the_colour_only_shell_rounds_off_the_corner_the_older_mould_keeps() {
                 .unwrap_or_else(|| panic!("no cart {stem}")),
         )
     };
-    let rolled = face("Rolled");
-    let flat = face("Flat");
-    assert!(
-        pixel_alpha(&flat, 12, 0) > 128,
-        "the notched mould lost its top corner"
-    );
-    assert!(
-        pixel_alpha(&rolled, 12, 0) < 8,
-        "the rounded mould still has a square corner"
-    );
+    // The family is one shape now: a colour-only pak is moulded no differently from an old one.
+    for stem in ["Rolled", "Flat"] {
+        let drawn = face(stem);
+        assert!(
+            pixel_alpha(&drawn, 12, 0) > 128,
+            "{stem} lost the corner the notched mould keeps"
+        );
+    }
 }
 
 #[test]
@@ -477,7 +475,37 @@ fn every_cartridge_is_centred_on_the_row_and_clears_both_the_plate_and_the_slot(
 }
 
 #[test]
-fn each_of_the_three_cgb_flags_gets_its_own_plastic() {
+fn the_count_sits_at_the_top_of_the_screen_off_the_plastic() {
+    // It used to stand over the cart, which dragged it about with the cart's height and
+    // pushed it under the HUD plate whenever a pak was tall. Now it sits at the top, beside
+    // the machine's name, and no cart can move it — which is why the platform is not asked.
+    let mut out = Vec::new();
+    draw_count(
+        Canvas::FRAMED,
+        Printed::new(TexId::from_raw(1), 120),
+        &mut out,
+    );
+    let Draw::Tex { x, y, w, h, .. } = out[0] else {
+        panic!("the count is not drawn as a texture");
+    };
+    assert!(
+        x + w > Canvas::FRAMED.w * 0.75,
+        "the count ends at {}, well short of the right-hand corner",
+        x + w
+    );
+    assert!(
+        y >= 0.0,
+        "the count at {y} has fallen off the top of the screen"
+    );
+    assert!(
+        y + h <= OUT_H as f32 / 2.0,
+        "the count ends at {}, past the middle of the screen: it has drifted back down",
+        y + h
+    );
+}
+
+#[test]
+fn all_three_cgb_flags_get_the_same_plastic() {
     let d = tmp_root();
     write_gb_rom(&d, "GB", "Tetris.gb", 0x00);
     write_gb_rom(&d, "GBC", "Colour Enhanced.gbc", 0x80);
@@ -494,31 +522,44 @@ fn each_of_the_three_cgb_flags_gets_its_own_plastic() {
     let black = shell_for(by_stem("Colour Enhanced"));
     let clear = shell_for(by_stem("Colour Only"));
 
-    assert_eq!(grey.finish, Finish::Solid);
-    assert_eq!(
-        black.finish,
-        Finish::Solid,
-        "the 0x80 pak is black plastic, not clear"
-    );
-    assert_eq!(clear.finish, Finish::Translucent);
-
-    let luma = |s: slot_ui::Shell| s.colour.iter().map(|c| *c as u32).sum::<u32>();
-    assert!(
-        luma(black) + 120 < luma(grey),
-        "the black pak at {} is not darker than the grey one at {}",
-        luma(black),
-        luma(grey)
-    );
-    for (a, b) in [(grey, black), (black, clear), (grey, clear)] {
-        assert_ne!(
-            a.colour, b.colour,
-            "two of the three plastics are one colour"
-        );
+    // Which class a ROM is no longer decides its plastic: the shelf is not speckled with
+    // colours nobody chose, and a clear shell is one the card asks for.
+    for (stem, s) in [
+        ("Tetris", grey),
+        ("Colour Enhanced", black),
+        ("Colour Only", clear),
+    ] {
+        assert_eq!(s.finish, Finish::Solid, "{stem} was given a see-through shell");
+        assert_eq!(s.colour, grey.colour, "{stem} was given its own plastic");
     }
 }
 
 #[test]
-fn the_notch_follows_the_cgb_flag_and_not_the_folder() {
+fn a_clear_pak_is_the_one_the_card_asks_for() {
+    let d = tmp_root();
+    write_gb_rom(&d, "GBC", "Clear.gbc", 0xc0);
+    write_gb_rom(&d, "GB", "Grey.gb", 0x00);
+    std::fs::write(
+        d.path().join("Config/cart_shell.txt"),
+        "Clear = auto d9dbd8 clear\n",
+    )
+    .expect("write cart_shell.txt");
+    let carts = scan(d.path()).unwrap();
+    let face = |stem: &str| cart_face(carts.iter().find(|c| c.stem == stem).expect("scanned"));
+    let beside_label = ((GB_CART_W * 24 + 120) / 240, GB_CART_H / 2);
+    let (clear, grey) = (face("Clear"), face("Grey"));
+    assert_eq!(pixel_alpha(&clear, beside_label.0, beside_label.1), 204);
+    assert_eq!(pixel_alpha(&grey, beside_label.0, beside_label.1), 255);
+    let [r, g, b] = pixel(&clear, beside_label.0, beside_label.1);
+    assert!(
+        !(g > r + 8 && g > b),
+        "a board is baked into the clear pak: {:?}",
+        [r, g, b]
+    );
+}
+
+#[test]
+fn the_notch_ignores_the_cgb_flag_and_the_folder() {
     let d = tmp_root();
     write_gb_rom(&d, "GB", "Filed As Mono.gb", 0xc0);
     write_gb_rom(&d, "GBC", "Filed As Colour.gbc", 0x80);
@@ -527,18 +568,15 @@ fn the_notch_follows_the_cgb_flag_and_not_the_folder() {
         let cart = carts.iter().find(|c| c.stem == stem).expect("scanned");
         pixel_alpha(&cart_face(cart), GB_CART_W - 20, 8) < 8
     };
-    assert!(
-        !notched_away("Filed As Mono"),
-        "a 0xc0 rom in the GB folder was drawn with a notch it never had"
-    );
-    assert!(
-        notched_away("Filed As Colour"),
-        "a 0x80 rom in the GBC folder lost the notch its shell was moulded with"
-    );
+    // Which flag a ROM carries and which folder it was filed in decide nothing about the shape:
+    // both come out notched, so the corner a notched pak has cut away is cut away on both.
+    for stem in ["Filed As Mono", "Filed As Colour"] {
+        assert!(notched_away(stem), "{stem} lost the notch every pak keeps");
+    }
 }
 
 #[test]
-fn notched_paks_share_one_bitmap_and_the_rounded_pak_does_not() {
+fn notched_paks_share_one_bitmap_and_one_plastic() {
     let d = tmp_root();
     write_gb_rom(&d, "GB", "Grey.gb", 0x00);
     write_gb_rom(&d, "GB", "Black.gb", 0x80);
@@ -546,14 +584,16 @@ fn notched_paks_share_one_bitmap_and_the_rounded_pak_does_not() {
     let carts = scan(d.path()).unwrap();
     let face = |stem: &str| cart_face(carts.iter().find(|c| c.stem == stem).expect("scanned"));
     let (grey, black, clear) = (face("Grey"), face("Black"), face("Clear"));
-    assert_ne!(
+    // A ROM's own flag no longer colours the plastic, so the two are drawn the same.
+    assert_eq!(
         pixel(&grey, 40, 50),
         pixel(&black, 40, 50),
-        "the grey pak and the black pak were painted the same colour"
+        "the grey pak and the black pak were given plastics of their own"
     );
+    // One outline for the family: the colour-only pak no longer gets a shape of its own.
     assert!(
-        pixel_alpha(&grey, 12, 0) > 128 && pixel_alpha(&clear, 12, 0) < 8,
-        "the rounded bitmap kept the notched corner"
+        pixel_alpha(&grey, 12, 0) > 128 && pixel_alpha(&clear, 12, 0) > 128,
+        "the colour-only pak was drawn with a rounded corner"
     );
 }
 
@@ -562,6 +602,11 @@ fn the_clear_shell_is_a_different_bitmap_from_the_plain_one() {
     let d = tmp_root();
     write_gb_rom(&d, "GB", "Tetris.gb", 0x00);
     write_gb_rom(&d, "GBC", "Colour Only.gbc", 0xc0);
+    std::fs::write(
+        d.path().join("Config/cart_shell.txt"),
+        "Colour Only = auto d9dbd8 clear\n",
+    )
+    .expect("write cart_shell.txt");
     let carts = scan(d.path()).unwrap();
     let face = |stem: &str| cart_face(carts.iter().find(|c| c.stem == stem).expect("scanned"));
     let (plain, clear) = (face("Tetris"), face("Colour Only"));
@@ -606,19 +651,17 @@ fn a_game_boy_title_stays_inside_its_near_square_label() {
 }
 
 #[test]
-fn a_game_boy_color_title_sits_in_its_own_well_not_the_game_boys() {
-    assert_eq!(
-        (GBC_LABEL_X, GBC_LABEL_Y, GBC_LABEL_W, GBC_LABEL_H),
-        (45, 110, 223, 199)
-    );
+fn a_game_boy_color_title_sits_in_the_game_boys_well() {
+    // The family is one shape, so a colour-only pak's label prints in the Game Boy's well
+    // rather than the one 1px right and 15px lower that its own mould used to carry.
     let stem = "Colour";
     let d = tmp_root();
     write_gb_rom(&d, "GBC", &format!("{stem}.gbc"), 0xc0);
     let cart = &scan(d.path()).unwrap()[0];
-    assert_eq!(slot_ui::label_size(cart), (GBC_LABEL_W, GBC_LABEL_H));
+    assert_eq!(slot_ui::label_size(cart), (GB_LABEL_W, GB_LABEL_H));
     let face = cart_face(cart);
-    let at = |x: u32, y: u32| pixel(&face, GBC_LABEL_X + x, GBC_LABEL_Y + y);
-    let (w, h) = (GBC_LABEL_W, GBC_LABEL_H);
+    let at = |x: u32, y: u32| pixel(&face, GB_LABEL_X + x, GB_LABEL_Y + y);
+    let (w, h) = (GB_LABEL_W, GB_LABEL_H);
     let bg = label_colour(stem);
     let margin = 5;
     for y in 0..h {
@@ -687,33 +730,6 @@ fn each_game_boy_shell_gets_a_black_shadow_of_its_own_exact_outline() {
 }
 
 #[test]
-fn a_clear_pak_is_see_through_and_a_solid_one_is_not() {
-    let d = tmp_root();
-    write_gb_rom(&d, "GBC", "Clear.gbc", 0xc0);
-    write_gb_rom(&d, "GB", "Grey.gb", 0x00);
-    let carts = scan(d.path()).unwrap();
-    let face = |stem: &str| cart_face(carts.iter().find(|c| c.stem == stem).expect("scanned"));
-    let beside_label = ((GB_CART_W * 24 + 120) / 240, GB_CART_H / 2);
-    let (clear, grey) = (face("Clear"), face("Grey"));
-    assert_eq!(pixel_alpha(&clear, beside_label.0, beside_label.1), 204);
-    assert_eq!(pixel_alpha(&grey, beside_label.0, beside_label.1), 255);
-    assert_eq!(
-        pixel_alpha(
-            &clear,
-            GBC_LABEL_X + GBC_LABEL_W / 2,
-            GBC_LABEL_Y + GBC_LABEL_H / 2
-        ),
-        255,
-        "the label of a clear pak is see-through"
-    );
-    let [r, g, b] = pixel(&clear, beside_label.0, beside_label.1);
-    assert!(
-        !(g > r + 8 && g > b),
-        "a board is baked into the clear pak: {:?}",
-        [r, g, b]
-    );
-}
-
 #[test]
 fn each_mould_is_its_own_bitmap() {
     let d = tmp_root();
@@ -727,13 +743,20 @@ fn each_mould_is_its_own_bitmap() {
     assert_eq!((grey.w, grey.h), (GB_CART_W, GB_CART_H));
     assert!(pixel_alpha(&gba, CART_W / 2, CART_H / 2) > 250);
     assert!(pixel_alpha(&grey, 12, 0) > 128);
-    assert!(pixel_alpha(&clear, 12, 0) < 8);
+    // A Game Boy pak is notched whichever folder it came from, so it shares the one bitmap.
+    assert!(pixel_alpha(&clear, 12, 0) > 128);
 }
 
 fn clear_gba(d: &TempDir) -> slot_ui::CartFace {
     let mut rom = vec![0u8; 0x100];
     rom[0xac..0xb0].copy_from_slice(b"U3IE");
     std::fs::write(d.path().join("Games/GBA/Boktai.gba"), rom).expect("write rom");
+    // A ROM no longer colours its own shell, so a clear one is one the card asks for by name.
+    std::fs::write(
+        d.path().join("Config/cart_shell.txt"),
+        "Boktai = auto d9dbd8 clear\n",
+    )
+    .expect("write cart_shell.txt");
     let carts = scan(d.path()).unwrap();
     let cart = carts.iter().find(|c| c.stem == "Boktai").expect("scanned");
     assert_eq!(shell_for(cart).finish, Finish::Translucent);

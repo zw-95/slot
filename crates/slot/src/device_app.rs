@@ -92,6 +92,9 @@ pub fn run() {
     let root = std::env::var_os("SLOT_ROOT")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from(CARD));
+    // A card's own art, before anything draws: reading it only parses each platform's
+    // configuration, the pictures themselves being decoded as they are first needed.
+    slot_ui::load_card_art(&root);
     let opened = match synced.fb {
         Some(size) => FbdevSurface::sized(size),
         None => FbdevSurface::new(),

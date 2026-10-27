@@ -1,7 +1,7 @@
+use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use slot_store::gb::Class;
-use slot_store::{Cart, Outline, Platform};
+use slot_store::{Cart, Platform};
 
 use crate::art;
 use crate::bitmaps::{self, Mould};
@@ -79,18 +79,11 @@ struct Spec {
     paint: &'static [u8],
 }
 
+/// Every Game Boy pak is drawn notched: whichever class the ROM is, and whichever outline the
+/// card asks for in `cart_shell.txt`. The card's own art is one shape for the family, and the
+/// shelf keeps one shadow a mould.
 pub fn gb_shell_of(cart: &Cart) -> Option<GbShell> {
-    if !matches!(cart.platform, Platform::Gb | Platform::Gbc) {
-        return None;
-    }
-    Some(match cart.shell.map(|c| c.outline) {
-        Some(Outline::Notched) => GbShell::Notched,
-        Some(Outline::Rounded) => GbShell::Rounded,
-        _ => match slot_store::gb::cached_class(&cart.rom) {
-            Class::ColourOnly => GbShell::Rounded,
-            Class::Original | Class::DualMode => GbShell::Notched,
-        },
-    })
+    matches!(cart.platform, Platform::Gb | Platform::Gbc).then_some(GbShell::Notched)
 }
 
 fn gb_mould(shell: GbShell) -> Mould {
@@ -161,6 +154,32 @@ fn spec(mould: Mould) -> Spec {
             }
         }
     }
+}
+
+/// The shape a cart is drawn with: its mould's, with the card's own art over it where the card
+/// brought any that held up. The picture, its coverage and the label box all come from the one
+/// place, so a card's art that was turned down leaves the built-in shape whole rather than
+/// half of it in place.
+fn spec_for(cart: &Cart) -> Spec {
+    let mut s = spec(mould_of(cart));
+    if let Some(paint) = crate::card_art::neutral(cart.platform) {
+        s.paint = paint;
+        if let Some(mask) = crate::card_art::mask(cart.platform) {
+            s.mask = mask;
+        }
+    }
+    if let Some(label) = crate::card_art::label(cart.platform) {
+        s.label = label;
+    }
+    // Rounded corners, when the card names a radius. A medium that already prints inside a
+    // shape of its own - the disc's ring, the UMD's window - keeps it: rounding a label that
+    // is already cut would only cut it twice.
+    if s.label_mask.is_none() {
+        if let Some(mask) = crate::card_art::label_mask(cart.platform) {
+            s.label_mask = Some(mask);
+        }
+    }
+    s
 }
 
 pub const SEATED_W: u32 = 240;
@@ -297,21 +316,42 @@ pub fn has_real_media(platform: Platform) -> bool {
     )
 }
 
+/// The folder the scanner reads this cart's labels from: `Labels/<机种>` beside the ROM's
+/// `Games/<机种>`, the ROM sitting in that folder or in a folder under it.
+fn labels_dir_of(cart: &Cart) -> Option<PathBuf> {
+    let mut dir = cart.rom.parent()?;
+    while dir.file_name() != Some(OsStr::new("Games")) {
+        dir = dir.parent()?;
+    }
+    Some(dir.parent()?.join("Labels").join(cart.platform.dir_name()))
+}
+
 /// The picture of the game's real cart, drawn whole in place of the modelled one, when the
-/// scraper found one: `Renders/<the label's name>` beside its label.
+/// scraper found one: `Renders/<the label's name>` beside its label, or beside where its label
+/// would be for a cart kept as a picture of the real thing and given no label of its own.
 pub fn render_of(cart: &Cart) -> Option<PathBuf> {
     if !has_real_media(cart.platform) {
         return None;
     }
-    let label = cart.label.as_deref()?;
-    let path = label.parent()?.join(RENDERS).join(label.file_name()?);
-    path.is_file().then_some(path)
+    let beside_label = cart.label.as_deref().and_then(|label| {
+        let path = label.parent()?.join(RENDERS).join(label.file_name()?);
+        path.is_file().then_some(path)
+    });
+    beside_label.or_else(|| {
+        let path = labels_dir_of(cart)?
+            .join(RENDERS)
+            .join(format!("{}.png", cart.stem));
+        path.is_file().then_some(path)
+    })
 }
 
 /// The size of a cart's face: its mould's, or for a picture of the real cart, the picture fitted
 /// as wide as a GBA cart at most and as tall as a Game Boy pak at most, so every system's real
 /// cart stands as big as the Game Boy family's do.
 pub fn face_size(cart: &Cart) -> (u32, u32) {
+    // A picture of the real cart fetched from the scraper is fitted as wide as a GBA cart and as
+    // tall as a Game Boy pak. A cart drawn from no such picture keeps the size the card's own
+    // pictures give it, or the mould's.
     if let Some((w, h)) = render_of(cart).and_then(|p| art::png_size(&p)) {
         let scale = (CART_W as f32 / w as f32).min(GB_CART_H as f32 / h as f32);
         return (
@@ -319,7 +359,7 @@ pub fn face_size(cart: &Cart) -> (u32, u32) {
             ((h as f32 * scale).round() as u32).clamp(1, GB_CART_H),
         );
     }
-    let s = spec(mould_of(cart));
+    let s = spec_for(cart);
     (s.w, s.h)
 }
 
@@ -334,13 +374,13 @@ pub fn seated_size((w, h): (u32, u32)) -> (u32, u32) {
 }
 
 pub fn label_size(cart: &Cart) -> (u32, u32) {
-    let (_, _, lw, lh) = spec(mould_of(cart)).label;
+    let (_, _, lw, lh) = spec_for(cart).label;
     (lw, lh)
 }
 
 pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
-    let s = spec(mould_of(cart));
-    let mut face = shell_face(&s, &shell_for(cart));
+    let s = spec_for(cart);
+    let mut face = shell_face(&s, &shell_for(cart), crate::card_art::neutral(cart.platform));
     let label = match art {
         Some(rgba) => rgba,
         None => generated_label(&s, &label_text(cart)),
@@ -596,9 +636,9 @@ fn overlay(base: u8, colour: u8) -> u8 {
     out.clamp(0, 255) as u8
 }
 
-fn shell_face(s: &Spec, shell: &Shell) -> CartFace {
+fn shell_face(s: &Spec, shell: &Shell, own: Option<&'static [u8]>) -> CartFace {
     let clear = shell.finish != Finish::Solid;
-    let src = bitmaps::shell_asset(s.mould, clear);
+    let src = own.unwrap_or_else(|| bitmaps::shell_asset(s.mould, clear));
     assert_eq!(
         src.len(),
         (s.w * s.h * 4) as usize,

@@ -131,7 +131,7 @@ pub fn png_size(path: &Path) -> Option<(u32, u32)> {
     (w > 0 && h > 0).then_some((w, h))
 }
 
-fn decode(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
+pub fn decode(path: &Path) -> Option<(Vec<u8>, u32, u32)> {
     let bytes = std::fs::read(path).ok()?;
     decode_bytes(&bytes)
 }

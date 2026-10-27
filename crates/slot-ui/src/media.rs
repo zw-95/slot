@@ -428,7 +428,8 @@ impl Media {
         (self.art().w, self.art().h)
     }
 
-    /// The label box, x, y, w, h in the shell's pixels.
+    /// The label box, x, y, w, h in the shell's pixels. The card's own art, when it brings any,
+    /// is put over this by `spec_for`: a medium knows nothing of which platform asked.
     pub fn label(self) -> (u32, u32, u32, u32) {
         self.art().label
     }
@@ -449,7 +450,8 @@ impl Media {
         ((SEATED_MAX_H * w + h / 2) / h, SEATED_MAX_H)
     }
 
-    /// The neutral shell, decoded once.
+    /// The neutral shell, decoded once. The card's own, when it brings any, is put over this by
+    /// `spec_for`.
     pub fn neutral(self) -> &'static [u8] {
         static SHELLS: [OnceLock<Vec<u8>>; Media::COUNT] =
             [const { OnceLock::new() }; Media::COUNT];

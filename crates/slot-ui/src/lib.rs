@@ -1,5 +1,6 @@
 mod art;
 pub use art::{contain, cover, is_cutout};
+pub use card_art::{load_card_art, CARTS};
 mod bitmaps;
 pub use bitmaps::{
     link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, Mould,
@@ -9,6 +10,7 @@ mod backdrop;
 mod barcode;
 mod battery;
 mod board;
+mod card_art;
 mod cart;
 mod clock;
 mod draw;

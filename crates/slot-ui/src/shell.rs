@@ -1,8 +1,3 @@
-use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::{Mutex, OnceLock};
-
-use slot_store::gb::Class;
 use slot_store::{Cart, Platform, ShellFinish};
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
@@ -90,52 +85,19 @@ pub fn shell_for(cart: &Cart) -> Shell {
     if let Some(media) = crate::media::Media::of(cart.platform) {
         return shell(media.colour(), Finish::Solid);
     }
+    // A pak is no longer coloured by what its ROM says it is. That gave Boktai a clear shell
+    // and Pokémon a red one whether or not anyone asked, speckling the shelf with colours
+    // nobody chose. One plastic a platform until the card's own picker says otherwise.
     match cart.platform {
-        Platform::Gba => gba_shell_for(&gba_code(cart)),
-        _ => gb_shell_for(&cart.rom),
+        Platform::Gba => DEFAULT_SHELL,
+        _ => DMG_SHELL,
     }
 }
 
-fn gba_code(cart: &Cart) -> String {
-    if !cart.code.is_empty() {
-        return cart.code.clone();
-    }
-    static CODES: OnceLock<Mutex<HashMap<PathBuf, String>>> = OnceLock::new();
-    let mut codes = CODES
-        .get_or_init(Mutex::default)
-        .lock()
-        .unwrap_or_else(|e| e.into_inner());
-    codes
-        .entry(cart.rom.clone())
-        .or_insert_with(|| slot_store::code(&cart.rom).unwrap_or_default())
-        .clone()
-}
-
+/// What a cartridge's own code would have got it, kept for the presets the picker offers. No
+/// longer asked on a cart's behalf: `shell_for` gives every cart of a platform one plastic.
 pub fn gba_shell_for(code: &str) -> Shell {
     lookup(code, EXACT, FAMILY)
-}
-
-fn gb_shell_for(rom: &Path) -> Shell {
-    let Some(h) = slot_store::gb::cached_header(rom) else {
-        return flag_shell(slot_store::gb::class(rom));
-    };
-    let by_title = || {
-        GB_OVERSEAS_TITLES
-            .iter()
-            .find(|(t, _)| !h.japan && *t == h.title)
-            .map(|(_, s)| *s)
-    };
-    by_code(&h.code, GB_CODES)
-        .or_else(by_title)
-        .unwrap_or_else(|| flag_shell(h.class()))
-}
-
-fn flag_shell(class: Class) -> Shell {
-    match class {
-        Class::Original => DMG_SHELL,
-        Class::DualMode => DUAL_MODE_SHELL,
-        Class::ColourOnly => GB_CLEAR_SHELL,
-    }
 }
 
 pub fn table_keys() -> Vec<&'static str> {
