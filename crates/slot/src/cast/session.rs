@@ -176,7 +176,7 @@ impl Session {
         let (session, transport) = launch(&mut control)?;
         let streaming = agree(&mut control, &tap, to, &transport).and_then(|agreed| {
             let udp = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).map_err(|e| e.to_string())?;
-            udp.connect((to.addr.ip(), agreed.0))
+            udp.connect((addr.ip(), agreed.0))
                 .map_err(|e| e.to_string())?;
             udp.set_read_timeout(Some(Duration::from_millis(100)))
                 .map_err(|e| e.to_string())?;
