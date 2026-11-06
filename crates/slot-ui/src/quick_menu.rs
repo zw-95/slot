@@ -80,10 +80,14 @@ pub enum QuickRow {
     ShaderOf(Platform),
     ColourCorrectionOf(Platform),
     BezelOf(Platform),
+    /// How the game being played is made to fill the screen: the row over a game.
+    Display,
+    /// The same, for every game on a machine that has not chosen for itself.
+    DisplayOf(Platform),
 }
 
 /// The rows that are the same whatever the platform, in index order.
-const GENERIC: [QuickRow; 50] = [
+const GENERIC: [QuickRow; 51] = [
     QuickRow::FastForward,
     QuickRow::FastForwardSound,
     QuickRow::Screen,
@@ -110,6 +114,7 @@ const GENERIC: [QuickRow; 50] = [
     QuickRow::PlayScreen,
     QuickRow::PlayGameplay,
     QuickRow::Shader,
+    QuickRow::Display,
     QuickRow::ColourCorrection,
     QuickRow::Palette,
     QuickRow::Bezel,
@@ -304,6 +309,7 @@ impl QuickRow {
             rows.push(QuickRow::GbPalettes);
         }
         rows.push(QuickRow::BezelOf(platform));
+        rows.push(QuickRow::DisplayOf(platform));
         rows
     }
 
@@ -314,6 +320,7 @@ impl QuickRow {
             QuickRow::ShaderOf(p) => own(1, p),
             QuickRow::ColourCorrectionOf(p) => own(2, p),
             QuickRow::BezelOf(p) => own(3, p),
+            QuickRow::DisplayOf(p) => own(4, p),
             row => GENERIC
                 .iter()
                 .position(|r| *r == row)
@@ -327,7 +334,8 @@ impl QuickRow {
             QuickRow::ScreenOf(p)
             | QuickRow::ShaderOf(p)
             | QuickRow::ColourCorrectionOf(p)
-            | QuickRow::BezelOf(p) => Some(p),
+            | QuickRow::BezelOf(p)
+            | QuickRow::DisplayOf(p) => Some(p),
             QuickRow::GbPalettes => Platform::ALL.into_iter().find(|p| p.spec().palettes),
             _ => None,
         }
@@ -339,6 +347,7 @@ impl QuickRow {
             QuickRow::ShaderOf(_)
             | QuickRow::ColourCorrectionOf(_)
             | QuickRow::BezelOf(_)
+            | QuickRow::DisplayOf(_)
             | QuickRow::GbPalettes => match self.platform() {
                 Some(p) => QuickRow::screen_of(p),
                 None => QuickRow::MAIN.to_vec(),
@@ -480,6 +489,7 @@ impl QuickRow {
                 t(MsgKey::RowColourCorrection)
             }
             QuickRow::Bezel | QuickRow::BezelOf(_) => t(MsgKey::RowBezel),
+            QuickRow::Display | QuickRow::DisplayOf(_) => t(MsgKey::RowDisplay),
             QuickRow::ScreenOf(p) => p.name(),
             QuickRow::Disc => t(MsgKey::RowDisc),
             QuickRow::Network => t(MsgKey::RowNetwork),
@@ -574,10 +584,13 @@ pub enum QuickValue {
     /// The language row's own two choices, each named in its own tongue.
     LangEn,
     LangZh,
+    DisplayInteger,
+    DisplayFit,
+    DisplayStretch,
 }
 
 impl QuickValue {
-    pub const ALL: [QuickValue; 27] = [
+    pub const ALL: [QuickValue; 30] = [
         QuickValue::Speed2,
         QuickValue::Speed3,
         QuickValue::Speed4,
@@ -603,6 +616,9 @@ impl QuickValue {
         QuickValue::Disc5,
         QuickValue::Hours24,
         QuickValue::Hours12,
+        QuickValue::DisplayInteger,
+        QuickValue::DisplayFit,
+        QuickValue::DisplayStretch,
         QuickValue::LangEn,
         QuickValue::LangZh,
     ];
@@ -640,6 +656,9 @@ impl QuickValue {
             QuickValue::Disc5 => t(MsgKey::ValueDisc5),
             QuickValue::Hours24 => t(MsgKey::ValueHours24),
             QuickValue::Hours12 => t(MsgKey::ValueHours12),
+            QuickValue::DisplayInteger => t(MsgKey::ValueDisplayInteger),
+            QuickValue::DisplayFit => t(MsgKey::ValueDisplayFit),
+            QuickValue::DisplayStretch => t(MsgKey::ValueDisplayStretch),
             QuickValue::LangEn => t(MsgKey::ValueLangEn),
             QuickValue::LangZh => t(MsgKey::ValueLangZh),
         }
@@ -677,7 +696,11 @@ impl QuickValue {
     }
 
     pub fn flag(on: bool) -> QuickValue {
-        if on { QuickValue::On } else { QuickValue::Off }
+        if on {
+            QuickValue::On
+        } else {
+            QuickValue::Off
+        }
     }
 }
 
@@ -808,7 +831,12 @@ pub fn quick_legend_faces(ink: [u8; 3]) -> [UndoFace; 5] {
             hint,
             false,
         ),
-        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnOpen), hint, false),
+        with_hint(
+            button_face(ButtonLegend::A),
+            t(MsgKey::BtnOpen),
+            hint,
+            false,
+        ),
         with_hint(
             button_face(ButtonLegend::B),
             t(MsgKey::RowResume),
@@ -824,34 +852,34 @@ pub fn quick_legend_faces(ink: [u8; 3]) -> [UndoFace; 5] {
     ]
 }
 
-/// Cancel, Swap, Choose. Swap keeps the button before the word, the way the old arrows did.
-pub fn core_button_legends() -> Vec<UndoFace> {
-    vec![
-        with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnCancel), None, true),
-        with_hint(
-            button_pair(ButtonLegend::Left, ButtonLegend::Right),
-            t(MsgKey::BtnSwap),
-            None,
-            true,
-        ),
-        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnChoose), None, false),
-        with_hint(button_face(ButtonLegend::Y), t(MsgKey::BtnAllGba), None, false),
-    ]
-}
-
 /// Cancel, Mode, Swap, Link, OK, Back, End Link.
 pub fn link_button_legends(ink: [u8; 3]) -> Vec<UndoFace> {
     let hint = Some(ink);
     vec![
-        with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnCancel), hint, true),
-        with_hint(button_face(ButtonLegend::Select), t(MsgKey::BtnMode), hint, true),
+        with_hint(
+            button_face(ButtonLegend::B),
+            t(MsgKey::BtnCancel),
+            hint,
+            true,
+        ),
+        with_hint(
+            button_face(ButtonLegend::Select),
+            t(MsgKey::BtnMode),
+            hint,
+            true,
+        ),
         with_hint(
             button_pair(ButtonLegend::Left, ButtonLegend::Right),
             t(MsgKey::BtnSwap),
             hint,
             false,
         ),
-        with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnLink), hint, false),
+        with_hint(
+            button_face(ButtonLegend::A),
+            t(MsgKey::BtnLink),
+            hint,
+            false,
+        ),
         with_hint(button_face(ButtonLegend::A), t(MsgKey::BtnOk), hint, false),
         with_hint(button_face(ButtonLegend::B), t(MsgKey::BtnBack), hint, true),
         with_hint(

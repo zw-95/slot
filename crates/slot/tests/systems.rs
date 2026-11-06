@@ -306,7 +306,10 @@ fn a_on_a_core_not_downloaded_yet_downloads_it_into_cores() {
         "a core still downloading was set for the game"
     );
 
-    let file = d.path().join(slot_store::CORES_DIR).join(Core::Mame2003.file_name());
+    let file = d
+        .path()
+        .join(slot_store::CORES_DIR)
+        .join(Core::Mame2003.file_name());
     let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
     while !file.is_file() {
         assert!(std::time::Instant::now() < deadline, "the core never came");
@@ -333,23 +336,28 @@ fn a_on_a_core_not_downloaded_yet_downloads_it_into_cores() {
     );
 }
 
+/// Every machine picks from the one list, whether or not its other cores have been downloaded: a
+/// GBA with nothing but its own two used to be given a board with a socket each instead, and two
+/// ways to choose one core is one more than anyone can keep in their head.
 #[test]
-fn the_gba_board_gives_way_to_a_list_once_another_gba_core_is_downloaded() {
-    let d = card_with(&["GBA/emerald.gba", "GBA/zzz.gba"]);
-    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
-    a.apply(Action::GbaDown(Btn::Start));
-    assert!(a.core_picker().is_some(), "{:?}", a.phase());
-
-    let d = card_with(&["GBA/emerald.gba", "GBA/zzz.gba"]);
-    let cores = d.path().join(slot_store::CORES_DIR);
-    std::fs::create_dir_all(&cores).unwrap();
-    std::fs::write(cores.join(Core::VbaNext.file_name()), b"pretend").unwrap();
-    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
-    press(&mut a, Btn::Start);
-    assert_eq!(a.core_picker(), None);
-    let Some(PageModel::List(page)) = a.page_model() else {
-        panic!("no core list: {:?}", a.phase());
-    };
-    let labels: Vec<&str> = page.rows.iter().map(|r| r.label.as_str()).collect();
-    assert_eq!(labels, ["mGBA", "gpSP", "VBA Next", "VBA-M"]);
+fn every_system_chooses_its_core_from_a_list() {
+    for downloaded in [false, true] {
+        let d = card_with(&["GBA/emerald.gba", "GBA/zzz.gba"]);
+        if downloaded {
+            let cores = d.path().join(slot_store::CORES_DIR);
+            std::fs::create_dir_all(&cores).unwrap();
+            std::fs::write(cores.join(Core::VbaNext.file_name()), b"pretend").unwrap();
+        }
+        let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+        press(&mut a, Btn::Start);
+        let Some(PageModel::List(page)) = a.page_model() else {
+            panic!("no core list, downloaded={downloaded}: {:?}", a.phase());
+        };
+        let labels: Vec<&str> = page.rows.iter().map(|r| r.label.as_str()).collect();
+        assert_eq!(
+            labels,
+            ["mGBA", "gpSP", "VBA Next", "VBA-M"],
+            "downloaded={downloaded}"
+        );
+    }
 }

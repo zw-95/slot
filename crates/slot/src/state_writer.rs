@@ -1,10 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
+use std::time::Duration;
 
 use slot_store::{write_slot_state, SlotState};
 
 use crate::card_log::CardWrites;
+
+/// How long a change sits before it is written, so that a run of them is one write and not one per
+/// step: a shelf scrolled past ten carts is ten moves but one place worth coming back to. The card
+/// is a card - it wears, and it is the writes that fail which raise the alarm.
+const COALESCE: Duration = Duration::from_millis(400);
 
 #[derive(Default)]
 struct Queue {
@@ -85,6 +91,13 @@ fn work(shared: &Shared, failing: &CardWrites) {
                 }
                 q = wake.wait(q).unwrap_or_else(|e| e.into_inner());
             }
+        };
+        // Whatever is newest when the wait is over is the only state worth writing; the ones it
+        // replaced never leave the shelf.
+        thread::sleep(COALESCE);
+        let (root, state) = {
+            let mut q = lock.lock().unwrap_or_else(|e| e.into_inner());
+            q.next.take().unwrap_or((root, state))
         };
         write(&root, &state, failing);
         lock.lock().unwrap_or_else(|e| e.into_inner()).busy = false;

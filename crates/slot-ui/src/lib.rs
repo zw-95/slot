@@ -1,8 +1,8 @@
 mod art;
-pub use art::{contain, cover, is_cutout};
+pub use art::{contain, cover, cover_bytes, is_cutout};
 pub use card_art::{
-    count as template_count, load_card_art, plastic_of, plastics, pick_of, Pick, CARTS, PLASTICS,
-    PLASTIC_COUNT,
+    count as template_count, load_card_art, pick_of, plastic_of, plastic_slot, plastics, Pick,
+    CARTS, PLASTICS, PLASTIC_COUNT,
 };
 mod bitmaps;
 pub use bitmaps::{
@@ -26,6 +26,7 @@ mod link_art;
 mod list_page;
 mod media;
 mod page;
+mod palette_picker;
 mod plate;
 mod polaroids;
 mod power_menu;
@@ -36,6 +37,7 @@ mod refusal;
 mod scraped;
 mod shelf;
 mod shell;
+mod shell_picker;
 mod silhouette;
 mod slot_chrome;
 mod sticker;
@@ -60,9 +62,10 @@ pub use cart::{
     cart_backing, cart_box, cart_face, cart_face_with, cart_interior, clean_label, face_size,
     gb_label_panel, gb_shell_of, has_real_media, is_clear, label_colour, label_panel, label_size,
     label_tags, label_text, mould_of, mould_shadow, neutral_shell, render_of, seated_box,
-    seated_size, shape_of, shape_shadow, shapes, shows_interior, Shape, CartFace, CART_H, CART_W,
-    GBC_LABEL_H, GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y, GB_CART_H, GB_CART_W, GB_LABEL_H,
-    GB_LABEL_W, GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_WELL, LABEL_X, LABEL_Y, RENDERS,
+    seated_size, shape_of, shape_shadow, shapes, shell_preview, shows_interior, CartFace, Shape,
+    CART_H, CART_W, GBC_LABEL_H, GBC_LABEL_W, GBC_LABEL_X, GBC_LABEL_Y, GB_CART_H, GB_CART_W,
+    GB_LABEL_H, GB_LABEL_W, GB_LABEL_X, GB_LABEL_Y, LABEL_H, LABEL_W, LABEL_WELL, LABEL_X, LABEL_Y,
+    RENDERS,
 };
 pub use clock::{
     clock_label, date_time, date_time_text, hhmm, set_clock_hint_face, time_text, ClockPicker,
@@ -85,6 +88,7 @@ pub use link_art::{
 pub use list_page::{ListIcon, ListPage, ListRow, LIST_ROWS};
 pub use media::Media;
 pub use page::Legend;
+pub use palette_picker::{PaletteOption, PalettePicker, PREVIEW_H, PREVIEW_W};
 pub use plate::{
     arrows_hint_coloured, arrows_hint_face, arrows_hint_width, cap_width, centred_hints,
     hint_coloured, hint_face, hint_quad, hint_row, hint_width, title_face, title_line_face,
@@ -95,22 +99,23 @@ pub use polaroids::{photo_face, polaroid_legend, PhotoFace, Polaroids, DOT, PHOT
 pub use power_menu::{menu_face, PowerChoice, MENU_PAD};
 pub use qr_page::QrPage;
 pub use quick_menu::{
-    core_button_legends, draw_menu_ground, link_button_legends, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, quick_row_top, quick_row_top_at, value_face, QuickMenu,
-    QuickMenuFaces, QuickRow, QuickValue, QUICK_EDGE, QUICK_LABEL_X, QUICK_PITCH, QUICK_ROWS_MAX,
+    draw_menu_ground, link_button_legends, quick_caret_face, quick_label_face, quick_legend_faces,
+    quick_pointer_face, quick_row_top, quick_row_top_at, value_face, QuickMenu, QuickMenuFaces,
+    QuickRow, QuickValue, QUICK_EDGE, QUICK_LABEL_X, QUICK_PITCH, QUICK_ROWS_MAX,
 };
 pub use rebuild::{rebuild_count_face, rebuild_title_face, RebuildScreen};
 pub use refusal::Refusal;
 pub use scraped::{box_hue, hue_of, scraped_label};
 pub use shelf::{
-    count_face, draw_count, foot_y, repeat_gap, rest_y, Shelf, COUNT_H, REPEAT_DELAY_MS,
-    STAR_INK, STAR_SCALE,
+    count_face, draw_count, foot_y, repeat_gap, rest_y, Shelf, COUNT_H, REPEAT_DELAY_MS, STAR_INK,
+    STAR_SCALE,
 };
 pub use shell::{
     gb_plastics, gb_table_shells, gba_plastics, gba_shell_for,
     lookup_order_is_exact_then_family_then_default, shell_for, shell_presets, table_keys, Finish,
     Shell, DEFAULT_SHELL, DMG_SHELL, DUAL_MODE_SHELL, GB_CLEAR_SHELL,
 };
+pub use shell_picker::{ShellOption, ShellPicker, PICK_H, PICK_W};
 pub use silhouette::{gb_silhouette, silhouette, GbShell};
 pub use slot_chrome::{
     draw_empty_slot, draw_slot_name, draw_slot_title, ease, edge, housing, opening, recess,

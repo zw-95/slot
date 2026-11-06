@@ -1,6 +1,6 @@
 use slot_ui::{
-    centred_hints, core_button_legends, footer_ink, link_button_legends, quick_legend_faces,
-    Canvas, TexId, UndoFace, HINT_EDGE, LEGEND_GAP, MOUTH_H, OUT_W,
+    centred_hints, footer_ink, link_button_legends, quick_legend_faces, Canvas, TexId, UndoFace,
+    HINT_EDGE, LEGEND_GAP, MOUTH_H, OUT_W,
 };
 
 #[test]
@@ -56,20 +56,6 @@ fn footer_legends_keep_the_hint_on_the_inner_side() {
     assert!(
         hint_is_beside(&link[2], false),
         "Swap sits to the left of the d-pad"
-    );
-    let core = core_button_legends();
-    assert!(core.iter().all(|f| f.h == MOUTH_H as u32));
-    assert!(
-        hint_is_beside(&core[0], true),
-        "Cancel sits to the right of B"
-    );
-    assert!(
-        hint_is_beside(&core[1], true),
-        "Swap sits to the right of the d-pad"
-    );
-    assert!(
-        hint_is_beside(&core[2], false),
-        "Choose sits to the left of A"
     );
 }
 

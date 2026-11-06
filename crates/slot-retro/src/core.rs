@@ -155,7 +155,9 @@ pub trait RetroCore: Send {
     }
     /// As `serialize`, into `buf`, which is `state_size` long.
     fn serialize_to(&mut self, _buf: &mut [u8]) -> Result<(), CoreError> {
-        Err(CoreError::Unsupported("the core makes its own state".into()))
+        Err(CoreError::Unsupported(
+            "the core makes its own state".into(),
+        ))
     }
     fn unserialize(&mut self, data: &[u8]) -> Result<(), CoreError>;
     fn save_ram(&self) -> Option<Vec<u8>>;

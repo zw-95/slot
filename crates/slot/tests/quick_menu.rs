@@ -753,11 +753,19 @@ fn fake_faces(a: &mut App) {
 }
 
 fn label(row: QuickRow, lit: bool) -> usize {
-    if lit { 130 + row.index() } else { 100 + row.index() }
+    if lit {
+        130 + row.index()
+    } else {
+        100 + row.index()
+    }
 }
 
 fn value(v: QuickValue, lit: bool) -> usize {
-    if lit { 210 + v.index() } else { 200 + v.index() }
+    if lit {
+        210 + v.index()
+    } else {
+        200 + v.index()
+    }
 }
 
 fn frame(a: &App) -> Vec<Draw> {

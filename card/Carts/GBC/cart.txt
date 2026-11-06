@@ -1,0 +1,5 @@
+# 模版、封面填充区、四角圆角。
+# corner 写一个数 = 四角同半径；写四个 = 左上 右上 右下 左下（顺时针）。
+template = gbc_base_01.png
+label.gbc_base_01.png = 43 106 211 186
+corner.gbc_base_01.png = 7

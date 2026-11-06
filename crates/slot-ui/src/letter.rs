@@ -16,8 +16,8 @@ use crate::text;
 /// every game that starts with a digit, a symbol, or a character there is no reading for — a
 /// row that began at A would leave those with nowhere to stand.
 pub const LETTERS: [char; 27] = [
-    '#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
-    'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
+    '#', 'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q', 'R',
+    'S', 'T', 'U', 'V', 'W', 'X', 'Y', 'Z',
 ];
 
 /// Where a letter stands in that row, or None for a character that is not one of them.

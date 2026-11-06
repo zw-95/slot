@@ -90,7 +90,7 @@ impl ListPage {
             (0, 0, LIST_W, TITLE_H),
             &self.title,
             DIM,
-            20.0,
+            24.0,
             true,
         );
         label_into(
@@ -99,7 +99,7 @@ impl ListPage {
             (0, STATUS_Y, LIST_W, STATUS_H),
             &self.status,
             INK,
-            18.0,
+            20.0,
             false,
         );
         let first = self.first_shown();
@@ -146,7 +146,7 @@ impl ListPage {
                 (label_x, y, label_w, ROW_H),
                 &row.label,
                 ink,
-                22.0,
+                26.0,
             );
             if !row.detail.is_empty() {
                 let dim = if lit { LIT_INK } else { DIM };
@@ -156,7 +156,7 @@ impl ListPage {
                     (detail_x, y, DETAIL_W, ROW_H),
                     &row.detail,
                     dim,
-                    16.0,
+                    18.0,
                     false,
                 );
             }
@@ -172,7 +172,7 @@ impl ListPage {
                 (0, ROWS_Y + LIST_ROWS as u32 * ROW_H, LIST_W, 10),
                 &more,
                 DIM,
-                12.0,
+                14.0,
                 false,
             );
         }

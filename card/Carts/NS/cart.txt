@@ -1,0 +1,8 @@
+# 模版、封面填充区、四角圆角。
+# corner 写一个数 = 四角同半径；写四个 = 左上 右上 右下 左下（顺时针）。
+# 注意：unslot 没有这个机种，Carts/NS 不会被读取。
+# 卡上没有这个机种的封面，预览用的是占位色块。
+template = ns_base_01.png
+label.ns_base_01.png = 26 34 193 251
+# 填充区是按图测出来的（此图没有品红标记），请看 preview 核对。
+corner.ns_base_01.png = 9

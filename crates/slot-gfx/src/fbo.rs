@@ -48,6 +48,22 @@ pub struct Compositor {
 }
 
 impl Compositor {
+    /// What the picture's colour is put through: a 3x3 in `gamma` space with a black point added
+    /// after it. Identity, zero and 1.0 change nothing, which is where it starts.
+    pub fn set_colour(&mut self, cc: [[f32; 3]; 3], bias: [f32; 3], gamma: f32) {
+        self.game.set_colour(cc, bias, gamma);
+    }
+
+    /// A greyscale machine's palette, as 256 RGBA texels read by the picture's own grey.
+    pub fn set_palette_lut(&mut self, rgba: &[u8]) {
+        self.game.set_palette_lut(rgba);
+    }
+
+    /// The pixel-art / tone-map cube, 1024x32 RGBA.
+    pub fn set_pix_lut(&mut self, rgba: &[u8]) {
+        self.game.set_pix_lut(rgba);
+    }
+
     pub fn new(surface: &dyn Surface) -> Result<Self, GfxError> {
         crate::gl::load(surface);
         let blit = crate::shaders::program(BLIT_VERT, BLIT_FRAG)?;
@@ -150,6 +166,10 @@ impl Compositor {
         self.game.set_aspect(aspect);
     }
 
+    pub fn set_game_integer(&mut self, on: bool) {
+        self.game.set_integer(on);
+    }
+
     pub fn set_game_rotation(&mut self, quarter_turns: u32) {
         self.game.set_rotation(quarter_turns);
     }
@@ -169,10 +189,21 @@ impl Compositor {
                         c.draw_game_bezel();
                     });
                 }
-                Draw::Shot { tex } => {
+                Draw::Shot { tex, w, h } => {
                     self.sprites.draw(&items[from..i], &self.quad);
                     if let Some(tex) = self.sprites.source(tex) {
+                        // The picture is drawn the size it was taken at, and a whole number of
+                        // times over: the game's own shape is borrowed for the moment it takes to
+                        // draw, and given straight back. A photograph stretched to fit the frame
+                        // is not what was on the screen.
+                        let was = (self.game.aspect(), self.game.integer());
+                        self.game.set_still(Some((w, h)));
+                        self.game.set_aspect(Some(w as f32 / h.max(1) as f32));
+                        self.game.set_integer(true);
                         self.in_game_rect(|c| c.game.draw_still(tex, &c.quad));
+                        self.game.set_still(None);
+                        self.game.set_aspect(was.0);
+                        self.game.set_integer(was.1);
                     }
                 }
                 _ => continue,

@@ -14,21 +14,17 @@ use slot_store::{
     RING_MAX, RUN_AHEAD_MAX, VOLUME_MAX,
 };
 use slot_ui::{
-    board_from, board_zoom, centred_hints, draw_empty_slot, draw_footer, draw_ground,
-    draw_slot_name, draw_sticker, ease, footer_ink, grown, lid_at, lid_from, lift_of, on_board,
-    repeat_gap, shelf_cart_at, shift_down, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind,
-    Icon, KeyInput, KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media,
-    Millis, Mould, Pick, Placed, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow,
-    QuickValue, Refusal, Shape, Shelf, SlotChrome, TexId, Toast, CART_W, CHIP_H, CHIP_U, CHIP_V,
-    CHIP_W, HINT_EDGE, HOP_LIFT, MOUTH_H, REPEAT_DELAY_MS, SHADOW_H, SHADOW_W, SOCKET_H, SOCKET_U,
-    SOCKET_V, SOCKET_W, TURN_PAD,
+    draw_empty_slot, draw_footer, draw_ground, draw_slot_name, draw_sticker, ease, footer_ink,
+    repeat_gap, shift_down, ButtonLegend, ClockPicker, Draw, FfState, Hud, HudKind, Icon, KeyInput,
+    KeyOutcome, Keyboard, Legend, LinkBadge, ListIcon, ListPage, ListRow, Media, Millis, Mould,
+    Pick, Polaroids, PowerChoice, QrPage, QuickMenu, QuickMenuFaces, QuickRow, QuickValue, Refusal,
+    Shape, Shelf, SlotChrome, TexId, Toast, HINT_EDGE, MOUTH_H, REPEAT_DELAY_MS,
 };
 
 use crate::audio::Sfx;
 use crate::bluetooth::{Bluetooth, BtBusy, BtView};
 use crate::cast::{Cast, CastBusy, CastView};
 use crate::core_downloads::{CoreDownloads, CoresView};
-use crate::core_picker::{Chip, CorePicker, Outcome, Press};
 use crate::link_kind::{link_carried, link_kind, serial_option, LinkKind};
 use crate::link_radio::{radio_jobs, LinkRole, RadioJob, RadioJobs};
 use crate::link_screen::LinkSprites;
@@ -92,21 +88,11 @@ const X_HOLD_MS: Millis = 500;
 
 const SHUTDOWN_SHOW_MS: Millis = 250;
 
-const CORE_PICKER_RECEDE: f32 = 0.26;
-
-const CORE_PICKER_DIM: f32 = 0.25 / (1.0 - CORE_PICKER_RECEDE);
-const CORE_LEGEND_Y: f32 = OUT_H as f32 - MOUTH_H * 2.0;
-const CORE_LEGEND_GAP: f32 = 24.0;
 const LINK_TEXT_Y: f32 = 44.0;
 const LINK_LEGEND_Y: f32 = OUT_H as f32 - MOUTH_H;
 pub const LINK_SCRIM: [f32; 4] = [0.0, 0.0, 0.0, 0.5];
 const LINK_LEGEND_GAP: f32 = 40.0;
 const LINK_LEGEND_EDGE: f32 = 0.0;
-const LID_SHADOW_W: f32 = 168.0;
-const LID_SHADOW_H: f32 = 18.0;
-const LID_SHADOW_DROP: f32 = 27.1;
-const LID_SHADOW_ALPHA: f32 = 0.8;
-const FACES_WAIT_MS: Millis = 1500;
 
 const ALERT_HOLD: f32 = 0.45;
 const ALERT_GONE: f32 = 0.9;
@@ -326,6 +312,11 @@ pub enum Phase {
     Shell {
         cursor: usize,
     },
+    /// The colour the screen wears, as a board of swatches: grades for a colour machine, palettes
+    /// for a Game Boy.
+    Palette {
+        cursor: usize,
+    },
     /// The games a search found, from X on the shelf.
     Search {
         cursor: usize,
@@ -387,6 +378,10 @@ impl ServiceRow {
 #[derive(Clone, PartialEq, Debug)]
 pub enum PageModel {
     List(ListPage),
+    /// The shell picker: a row of carts rather than a list of names.
+    Shell(slot_ui::ShellPicker),
+    /// The colour browser: a board of swatches, one cell per grade or palette.
+    Palette(slot_ui::PalettePicker),
     Keys(Keyboard),
     Qr(QrPage),
 }
@@ -452,6 +447,23 @@ pub struct App {
     games: Vec<Cart>,
     /// 当前机种书架上正在看的那个子文件夹；None 是"全部"。
     shelf_folder: Option<String>,
+    /// 封面选择器举着的那些卡，开页时画一次。每挪一格光标就把十来张卡重画一遍，
+    /// 那是一次能感觉到的停顿，而光标挪动时变的只是选了哪一个。
+    shell_options: Vec<slot_ui::ShellOption>,
+    /// Which machine's colour the browser is choosing. The row says "colour"; what colour *means*
+    /// is the machine's to say — a Game Boy walks its palettes, a colour machine its grades.
+    palette_for: Platform,
+    /// What the page holds a choice against: the screen over a game, else a game's own art. Taken
+    /// once when the page opens — asking the core again would be a round trip redrawn every frame.
+    palette_art: Option<Vec<u8>>,
+    /// The preview last drawn: the entry it was put through, and the pixels it came to. A page that
+    /// has not moved is not put through the grade again.
+    palette_shown: Option<(usize, Vec<u8>)>,
+    /// The row the browser was opened from, if it was the menu that opened it.
+    palette_back: Option<QuickRow>,
+    /// The game that was running when the chord opened it, so closing goes back to the game
+    /// rather than to a menu the hand never came from.
+    palette_cart: Option<String>,
     shelf_at: usize,
     orphaned: Vec<TexId>,
     play_held: Option<Millis>,
@@ -462,16 +474,6 @@ pub struct App {
     refused_from: Option<f32>,
     alert_face: Option<TexId>,
     shutdown_faces: Vec<(TexId, u32, u32)>,
-    core_picker: Option<CorePicker>,
-    core_board_face: Option<TexId>,
-    core_interior_face: Option<TexId>,
-    core_lid_face: Option<TexId>,
-    core_faces_stem: Option<String>,
-    core_socket_faces: Vec<TexId>,
-    core_chip_faces: Vec<TexId>,
-    core_blank_chip_face: Option<TexId>,
-    core_chip_shadow_face: Option<TexId>,
-    core_legend_faces: Vec<(TexId, u32)>,
     game_menu: Option<GameMenu>,
     link_sprites: Option<LinkSprites>,
     link_shot: Option<TexId>,
@@ -499,6 +501,10 @@ pub struct App {
     snapshot: Option<Box<dyn Snapshot>>,
     core: Core,
     colour_pending: Option<bool>,
+    /// What the browser picked, waiting to be handed to the picture. **An index**: into `GRADES`
+    /// for a colour machine, into `GB_PALETTES` for a Game Boy. 0 is the machine's own output on
+    /// either, so the way back is a pick like any other.
+    look_pending: Option<u16>,
     palette_live: bool,
     palette_pending: Option<GbPalette>,
     /// The running game's discs and which is in the drive.
@@ -720,6 +726,12 @@ impl App {
             language: Lang::En,
             games: carts,
             shelf_folder: None,
+            shell_options: Vec::new(),
+            palette_for: Platform::Gba,
+            palette_art: None,
+            palette_shown: None,
+            palette_back: None,
+            palette_cart: None,
             shelf_at,
             orphaned: Vec::new(),
             play_held: None,
@@ -729,16 +741,6 @@ impl App {
             refused_from: None,
             alert_face: None,
             shutdown_faces: Vec::new(),
-            core_picker: None,
-            core_board_face: None,
-            core_interior_face: None,
-            core_lid_face: None,
-            core_faces_stem: None,
-            core_socket_faces: Vec::new(),
-            core_chip_faces: Vec::new(),
-            core_blank_chip_face: None,
-            core_chip_shadow_face: None,
-            core_legend_faces: Vec::new(),
             game_menu: None,
             link_sprites: None,
             link_shot: None,
@@ -765,6 +767,7 @@ impl App {
             snapshot: None,
             core: Core::default(),
             colour_pending: None,
+            look_pending: None,
             palette_live: false,
             palette_pending: None,
             disks: (0, 0),
@@ -1022,24 +1025,15 @@ impl App {
         if carts.is_empty() {
             return;
         }
-        let (was, picked) = (
-            self.shelves[at].1.index,
-            self.shelves[at]
-                .1
-                .carts
-                .get(self.shelves[at].1.index)
-                .map(|c| c.rom.clone()),
-        );
         let changed = self.restock(at, carts);
         if !changed && self.shelf_folder == folder {
             return;
         }
+        // 换了文件夹就从头开始：原来选的那只多半不在这个文件夹里，留着它只会让游标停在一个
+        // 跟眼前列表无关的位置上。
         let shelf = &mut self.shelves[at].1;
-        let i = picked
-            .and_then(|rom| shelf.carts.iter().position(|c| c.rom == rom))
-            .unwrap_or_else(|| was.min(shelf.carts.len().saturating_sub(1)));
         if !shelf.carts.is_empty() {
-            shelf.select(i);
+            shelf.select(0);
         }
         self.shelf_folder = folder;
         self.shelf_platform = slot_ui::Printed::default();
@@ -1127,8 +1121,9 @@ impl App {
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
             | Phase::Shell { .. }
+            | Phase::Palette { .. }
             | Phase::Search { .. } => vertical,
-            Phase::Shelf => vertical && self.core_picker.is_none(),
+            Phase::Shelf => false,
             Phase::Polaroids { .. } => !vertical,
             Phase::Playing { .. } => vertical && self.in_game_menu.is_some(),
             _ => false,
@@ -1304,7 +1299,18 @@ impl App {
         self.quick_palette_faces = Some([dim, lit]);
     }
 
+    /// What the display row reads: the three ways the picture is made to fill the screen.
+    fn display_value(mode: VideoMode) -> QuickValue {
+        match mode {
+            VideoMode::Integer => QuickValue::DisplayInteger,
+            VideoMode::Fit => QuickValue::DisplayFit,
+            VideoMode::Stretch => QuickValue::DisplayStretch,
+        }
+    }
+
     fn playing_row(&self, row: QuickRow) -> QuickRow {
+        // Display is not one of these: how the game being played is shown is that game's own
+        // choice, and only the row under a machine speaks for the machine.
         let platform = self.playing_platform();
         match row {
             QuickRow::Shader => QuickRow::ShaderOf(platform),
@@ -1316,13 +1322,25 @@ impl App {
 
     pub fn quick_value(&self, row: QuickRow) -> Option<QuickValue> {
         match row {
+            // The game over which the row sits speaks for itself; the machine's row speaks for
+            // every game on it that has not.
+            QuickRow::Display => Some(Self::display_value(self.video_mode)),
+            QuickRow::DisplayOf(p) => Some(Self::display_value(
+                self.root
+                    .as_deref()
+                    .map(|root| crate::video_mode::platform_video_mode(root, p))
+                    .unwrap_or_default(),
+            )),
             QuickRow::Shader | QuickRow::ColourCorrection => {
                 self.quick_value(self.playing_row(row))
             }
             QuickRow::FastForward => QuickValue::speed(self.state.ff_speed),
             QuickRow::FastForwardSound => Some(QuickValue::flag(self.state.ff_sound)),
+            // The row no longer holds a switch but a pick, and there are too many names to print:
+            // what it can say is whether the screen is wearing one at all. 0 is the machine's own
+            // output, so 0 is off.
             QuickRow::ColourCorrectionOf(p) => {
-                Some(QuickValue::flag(self.state.screen(p).colour_correction))
+                Some(QuickValue::flag(self.state.palettes[p.index()] > 0))
             }
             QuickRow::GbPalettes => Some(QuickValue::flag(self.state.gb_palettes)),
             QuickRow::Disc => QuickValue::disc(self.disks.1),
@@ -2006,7 +2024,7 @@ impl App {
     }
 
     pub fn source_rect(&self) -> [f32; 4] {
-        video_mode::source_rect(self.platform, self.video_mode)
+        video_mode::source_rect(self.platform)
     }
 
     fn slot_owns_the_shoulders(&self) -> bool {
@@ -2036,7 +2054,7 @@ impl App {
         let (Some(root), Phase::Playing { cart }) = (self.root.clone(), &self.phase) else {
             return;
         };
-        let written = video_mode::write_video_mode(&root, cart, mode);
+        let written = video_mode::write_video_mode(&root, self.platform, cart, mode);
         if let Err(e) = &written {
             eprintln!("slot: video: could not write video_mode.txt: {e}");
         }
@@ -2329,14 +2347,6 @@ impl App {
         self.external_display = on;
     }
 
-    pub fn core_picker(&self) -> Option<Core> {
-        self.core_picker.map(|p| p.seat())
-    }
-
-    pub fn core_picker_chip(&self) -> Option<Chip> {
-        self.core_picker.map(|p| p.chip(self.now()))
-    }
-
     pub fn game_menu_open(&self) -> bool {
         self.game_menu.is_some()
     }
@@ -2438,6 +2448,31 @@ impl App {
         self.colour_pending.take()
     }
 
+    /// What the browser picked, if it picked one since the last time this was asked: an index into
+    /// `GRADES` for a colour machine, into `GB_PALETTES` for a Game Boy. 0 is the machine's own
+    /// output, so it is handed over too rather than being read as "nothing happened".
+    pub fn take_look(&mut self) -> Option<u16> {
+        self.look_pending.take()
+    }
+
+    /// The machine the browser is open on, or was last open on.
+    pub fn palette_for(&self) -> Platform {
+        self.palette_for
+    }
+
+    /// What the screen's colour is set to today, as an index into the table its machine walks.
+    /// A fact about the card rather than an event, which is why the renderer asks every frame.
+    pub fn palette_pick(&self) -> u16 {
+        let platform = self.playing_platform();
+        let machine = self.state.palettes[platform.index()];
+        // The game being played, when there is one, may have chosen for itself; a game that has not
+        // wears what its machine wears.
+        match (self.root.as_deref(), self.state.cart.as_deref()) {
+            (Some(root), Some(stem)) => crate::palette_store::palette_for(root, machine, stem),
+            _ => machine,
+        }
+    }
+
     pub fn gb_palette(&self) -> Option<GbPalette> {
         self.state.gb_palettes.then_some(self.state.gb_palette)
     }
@@ -2528,10 +2563,7 @@ impl App {
                 .count()
         };
         let (depth, spot) = match &self.phase {
-            Phase::Shelf => match &self.core_picker {
-                Some(picker) => (1, format!("{:?}", picker.seat())),
-                None => (0, self.shelf().index.to_string()),
-            },
+            Phase::Shelf => (0, self.shelf().index.to_string()),
             Phase::QuickMenu { row } => (1 + hops(*row), format!("{row:?}")),
             Phase::About => (2, String::new()),
             Phase::SetClock { picker, .. } => (3, format!("{picker:?}")),
@@ -2542,9 +2574,10 @@ impl App {
             | Phase::Updates { cursor }
             | Phase::CoreDownloads { cursor }
             | Phase::GameArt { cursor, .. } => (3, cursor.to_string()),
-            Phase::Cores { cursor } | Phase::Shell { cursor } | Phase::Search { cursor } => {
-                (1, cursor.to_string())
-            }
+            Phase::Cores { cursor }
+            | Phase::Shell { cursor }
+            | Phase::Palette { cursor }
+            | Phase::Search { cursor } => (1, cursor.to_string()),
             Phase::Keyboard { keys, .. } => (4, format!("{keys:?}")),
             Phase::TailscaleLogin | Phase::SyncthingId => (4, String::new()),
             Phase::Polaroids { .. } => (
@@ -2598,6 +2631,7 @@ impl App {
                 | Phase::GameArt { .. }
                 | Phase::Cores { .. }
                 | Phase::Shell { .. }
+                | Phase::Palette { .. }
                 | Phase::Search { .. }
         );
         let sfx = match () {
@@ -2710,10 +2744,7 @@ impl App {
         let now = self.now();
         match self.phase {
             Phase::Shelf => match action {
-                Action::GbaDown(Btn::Start) if self.core_picker.is_none() => {
-                    self.open_core_picker()
-                }
-                _ if self.core_picker.is_some() => self.core_picker_input(action),
+                Action::GbaDown(Btn::Start) => self.open_core_picker(),
                 Action::GbaDown(Btn::Up) => self.jump_letter(-1),
                 Action::GbaDown(Btn::Down) => self.jump_letter(1),
                 Action::ShelfLeft | Action::GbaDown(Btn::Left) => self.shelf_mut().hold_left(now),
@@ -2741,12 +2772,6 @@ impl App {
             },
             Phase::Inserting { .. } if action == Action::Eject => self.eject(),
             Phase::Playing { .. } => match action {
-                Action::GbaDown(Btn::L1) if self.slot_owns_the_shoulders() => {
-                    self.set_picture(VideoMode::Stretch)
-                }
-                Action::GbaDown(Btn::R1) if self.slot_owns_the_shoulders() => {
-                    self.set_picture(VideoMode::Actual)
-                }
                 Action::Eject => self.eject(),
                 Action::GameMenu => self.game_menu_shortcut(),
                 // Select with X in a game is still the core's options; the chord only means
@@ -2787,6 +2812,7 @@ impl App {
             Phase::GameArt { cursor, .. } => self.game_art_input(cursor, action),
             Phase::Cores { cursor } => self.cores_input(cursor, action),
             Phase::Shell { cursor } => self.shell_input(cursor, action),
+            Phase::Palette { cursor } => self.palette_input(cursor, action),
             Phase::Search { cursor } => self.search_input(cursor, action),
             Phase::Keyboard { .. } => self.keyboard_input(action),
             _ => {}
@@ -2922,7 +2948,9 @@ impl App {
                 let (label, detail) = match row {
                     ServiceRow::Ssh => (t(MsgKey::ServiceSsh), on(self.state.ssh)),
                     ServiceRow::Sharing => (t(MsgKey::ServiceSharing), on(self.state.samba)),
-                    ServiceRow::Syncthing => (t(MsgKey::ServiceSyncthing), on(self.state.syncthing)),
+                    ServiceRow::Syncthing => {
+                        (t(MsgKey::ServiceSyncthing), on(self.state.syncthing))
+                    }
                     ServiceRow::Tailscale => (
                         t(MsgKey::ServiceTailscale),
                         match (&v.tailnet, self.state.tailscale) {
@@ -3049,9 +3077,7 @@ impl App {
         let root = self.root.clone()?;
         let saved = crate::scrape::save_ss_login(&root, user, password);
         self.ss_state = crate::scrape::ss_state(&root);
-        saved
-            .err()
-            .map(|e| filled(MsgKey::LoginSaveFail, e))
+        saved.err().map(|e| filled(MsgKey::LoginSaveFail, e))
     }
 
     fn game_art_input(&mut self, cursor: usize, action: Action) {
@@ -3068,13 +3094,7 @@ impl App {
                     _ => String::new(),
                 };
                 self.phase = Phase::Keyboard {
-                    keys: Keyboard::new(
-                        t(MsgKey::ScreenScraperUserPrompt),
-                        &user,
-                        false,
-                        0,
-                        64,
-                    ),
+                    keys: Keyboard::new(t(MsgKey::ScreenScraperUserPrompt), &user, false, 0, 64),
                     typing: Typing::SsUser,
                     cursor,
                 };
@@ -3312,15 +3332,9 @@ impl App {
             }
             Some(Stage::Ready(_)) => {
                 legends.push(Legend::new(ButtonLegend::Y, t(MsgKey::BtnCheckAgain)));
-                legends.push(Legend::new(
-                    ButtonLegend::A,
-                    t(MsgKey::BtnRestartToInstall),
-                ));
+                legends.push(Legend::new(ButtonLegend::A, t(MsgKey::BtnRestartToInstall)));
             }
-            _ => legends.push(Legend::new(
-                ButtonLegend::A,
-                t(MsgKey::BtnCheckForUpdates),
-            )),
+            _ => legends.push(Legend::new(ButtonLegend::A, t(MsgKey::BtnCheckForUpdates))),
         }
         ListPage {
             title: t(MsgKey::PageUpdates).into(),
@@ -3624,7 +3638,9 @@ impl App {
             (CastBusy::Idle, None, None) if rows.is_empty() => t(MsgKey::CastNoTvs).to_string(),
             (CastBusy::Idle, None, None) => t(MsgKey::CastPick).to_string(),
         };
-        let picked = v.receivers.get(cursor.min(v.receivers.len().saturating_sub(1)));
+        let picked = v
+            .receivers
+            .get(cursor.min(v.receivers.len().saturating_sub(1)));
         let legends = vec![
             back_legend(),
             Legend::new(ButtonLegend::Y, t(MsgKey::CastSearch)),
@@ -3740,7 +3756,13 @@ impl App {
             }
             (Security::Personal, false) => {
                 self.phase = Phase::Keyboard {
-                    keys: Keyboard::new(&filled(MsgKey::WifiPasswordPrompt, &net.ssid), "", true, 8, 63),
+                    keys: Keyboard::new(
+                        &filled(MsgKey::WifiPasswordPrompt, &net.ssid),
+                        "",
+                        true,
+                        8,
+                        63,
+                    ),
                     typing: Typing::Password(net.ssid.clone()),
                     cursor,
                 };
@@ -3910,7 +3932,8 @@ impl App {
                 Some(PageModel::List(self.core_downloads_page(*cursor)))
             }
             Phase::Cores { cursor } => self.cores_page(*cursor).map(PageModel::List),
-            Phase::Shell { cursor } => self.shell_page(*cursor).map(PageModel::List),
+            Phase::Shell { cursor } => self.shell_page(*cursor).map(PageModel::Shell),
+            Phase::Palette { cursor } => self.palette_page(*cursor).map(PageModel::Palette),
             Phase::Search { cursor } => Some(PageModel::List(self.search_page(*cursor))),
             Phase::GameArt { cursor, note } => Some(PageModel::List(
                 self.game_art_page(*cursor, note.as_deref()),
@@ -3994,9 +4017,7 @@ impl App {
             (_, None, Some(error)) => error.clone(),
             (Busy::Scanning, ..) => t(MsgKey::WifiSearching).to_string(),
             (Busy::Idle, None, None) => match (&v.connected, &v.ip) {
-                (Some(ssid), Some(ip)) => {
-                    saying(MsgKey::WifiConnectedWithIp, &[&ssid, &ip])
-                }
+                (Some(ssid), Some(ip)) => saying(MsgKey::WifiConnectedWithIp, &[&ssid, &ip]),
                 (Some(ssid), None) => filled(MsgKey::WifiConnected, ssid),
                 (None, _) => t(MsgKey::DetailNotConnected).to_string(),
             },
@@ -4105,10 +4126,15 @@ impl App {
 
     fn open_quick_row(&mut self, row: QuickRow) {
         match row {
+            // Neither opens a page of its own: both are walked with the d-pad where they stand.
+            QuickRow::Display | QuickRow::DisplayOf(_) => {}
             QuickRow::DateTime => {
                 self.phase = clock_screen(self.utc_secs(), self.state.utc_offset_min, true);
             }
             QuickRow::About => self.phase = Phase::About,
+            // A colour is not a switch you flip blind: it is a board of them, and the row opens
+            // it rather than stepping to the next one.
+            QuickRow::ColourCorrectionOf(_) => self.open_palette(Some(row)),
             QuickRow::Services => {
                 self.phase = Phase::Services {
                     cursor: 0,
@@ -4124,13 +4150,7 @@ impl App {
             QuickRow::Achievements => {
                 let user = self.cheevos_account().map(|a| a.user).unwrap_or_default();
                 self.phase = Phase::Keyboard {
-                    keys: Keyboard::new(
-                        t(MsgKey::RaUserPrompt),
-                        &user,
-                        false,
-                        0,
-                        64,
-                    ),
+                    keys: Keyboard::new(t(MsgKey::RaUserPrompt), &user, false, 0, 64),
                     typing: Typing::RaUser,
                     cursor: 0,
                 };
@@ -4251,7 +4271,7 @@ impl App {
             };
             self.state.gb_palette = to;
             self.palette_pending = Some(to);
-            self.persist();
+            self.persist_soon();
             return;
         }
         if row == QuickRow::Disc {
@@ -4265,18 +4285,18 @@ impl App {
         }
         if let QuickRow::BezelOf(platform) = row {
             self.cycle_bezel(platform, right);
-            self.persist();
+            self.persist_soon();
             return;
         }
         if row == QuickRow::Wallpaper {
             self.cycle_wallpaper(right);
-            self.persist();
+            self.persist_soon();
             return;
         }
         if row == QuickRow::Recents {
             self.state.show_recents = !self.state.show_recents;
             self.restock_recents();
-            self.persist();
+            self.persist_soon();
             return;
         }
         if row == QuickRow::ShowTitles {
@@ -4293,8 +4313,40 @@ impl App {
             }
             return;
         }
+        if row == QuickRow::Display {
+            // How the game being played is shown, and that game's own to say.
+            let to = self.video_mode.step(right);
+            if to != self.video_mode {
+                self.set_picture(to);
+            }
+            return;
+        }
+        if let QuickRow::DisplayOf(platform) = row {
+            // How a machine's games are shown, which every one of them follows until it speaks for
+            // itself. Unlike the settings above this is the card's to keep, so it is written.
+            let Some(root) = self.root.clone() else {
+                return;
+            };
+            let from = crate::video_mode::platform_video_mode(&root, platform);
+            let to = from.step(right);
+            if to == from {
+                return;
+            }
+            if let Err(e) = crate::video_mode::write_platform_video_mode(&root, platform, to) {
+                eprintln!("slot: display: {}: {e}", platform.dir_name());
+            }
+            // The game being played follows its machine, unless it has spoken for itself.
+            if self.platform == platform {
+                if let Some(cart) = self.state.cart.clone() {
+                    self.video_mode = crate::video_mode::video_mode_for(&root, platform, &cart);
+                }
+            }
+            return;
+        }
         let s = &mut self.state;
         match row {
+            // Both were stepped before this: they are the card's to keep, not the state's.
+            QuickRow::Display | QuickRow::DisplayOf(_) => {}
             QuickRow::FastForward => {
                 let to = ff_next(s.ff_speed, right);
                 if to == s.ff_speed {
@@ -4425,9 +4477,19 @@ impl App {
                 };
                 self.state.gb_palette = to;
                 self.palette_pending = Some(to);
-                self.persist();
+                self.persist_soon();
                 self.hud.toast(Toast::Palette(to), self.now());
             }
+            return true;
+        }
+        if action == Action::PaletteBrowser {
+            // A way in from inside a game, where the machine is the one that is playing. Off the
+            // shelf the page is reached from the machine's own row, which is the row that can name
+            // the machine - and a chord that names nothing is not one to answer here.
+            if !matches!(self.phase, Phase::Playing { .. }) {
+                return false;
+            }
+            self.open_palette(None);
             return true;
         }
         if action == Action::ColourCorrectionToggle {
@@ -4601,15 +4663,6 @@ impl App {
         self.poll_ra_sign_in();
         self.expire_cheevo();
         let now = self.now();
-        let ready = self.core_faces_ready();
-        if let Some(picker) = &mut self.core_picker {
-            if picker.waiting() && (ready || picker.waited(now) >= FACES_WAIT_MS) {
-                picker.start(now);
-            }
-        }
-        if self.core_picker.is_some_and(|p| p.finished(now)) {
-            self.core_picker = None;
-        }
         if !self.on_shelf() {
             self.shelf_mut().release_hold();
         }
@@ -5087,7 +5140,7 @@ impl App {
                 self.rescan();
             }
         }
-        if self.on_shelf() && self.core_picker.is_none() {
+        if self.on_shelf() {
             if let Some(carts) = self.rescanned.take() {
                 self.restock_games(carts);
             }
@@ -5184,9 +5237,7 @@ impl App {
         };
         let line = match rx.try_recv() {
             Err(std::sync::mpsc::TryRecvError::Empty) => return,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
-                t(MsgKey::RaSignInFail).to_string()
-            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => t(MsgKey::RaSignInFail).to_string(),
             Ok(Err(e)) => e,
             Ok(Ok(account)) => match self.root.as_deref() {
                 Some(root) => match crate::cheevos::save_account(root, &account) {
@@ -5223,7 +5274,7 @@ impl App {
             self.shelf_named = None;
             self.name_pending = true;
         }
-        self.persist();
+        self.persist_soon();
     }
 
     fn record_cart(&mut self, cart: Option<String>) {
@@ -5234,7 +5285,7 @@ impl App {
                 let stem = stem.clone();
                 self.state.played(platform, &stem);
                 self.restock_recents();
-                self.persist();
+                self.persist_soon();
             }
         }
         if self.state.cart == cart && self.state.cart_platform == platform {
@@ -5242,7 +5293,7 @@ impl App {
         }
         self.state.cart = cart;
         self.state.cart_platform = platform;
-        self.persist();
+        self.persist_soon();
     }
 
     fn persist(&self) {
@@ -5494,50 +5545,23 @@ impl App {
             .draw(out),
             Phase::Shelf => {
                 self.draw_background(out);
-                match (self.core_picker_shown(), self.selected_stem()) {
-                    (Some(picker), Some(stem)) => {
-                        let open = ease(picker.openness(self.now()));
-                        let dim = 1.0 + (CORE_PICKER_DIM - 1.0) * open;
-                        self.shelf().draw_row(
-                            self.canvas(),
-                            Some(stem),
-                            0.0,
-                            CORE_PICKER_RECEDE * open,
-                            dim,
-                            out,
-                        );
-                        draw_empty_slot(self.canvas(), self.slot_faces, out);
-                    }
-                    _ => {
-                        self.shelf()
-                            .draw(self.canvas(), self.shelf_shake(), self.slot_faces, out);
-                        draw_slot_name(
-                            self.canvas(),
-                            self.shelf_platform,
-                            self.slot_name_alpha(),
-                            out,
-                        );
-                        // The letters, along the middle of that line: the one the hand is on
-                        // rolled to the front of them, the rest falling away either side.
-                        if !self.letter_texes.is_empty() {
-                            slot_ui::draw_letters(
-                                self.canvas(),
-                                &self.letter_texes,
-                                self.letter_at,
-                                out,
-                            );
-                        }
-                        slot_ui::draw_slot_title(
-                            self.canvas(),
-                            self.shelf_title,
-                            self.title_alpha(),
-                            out,
-                        );
-                        // The top right-hand corner: which one this is, out of all the ones
-                        // on the shelf.
-                        slot_ui::draw_count(self.canvas(), self.shelf_count, out);
-                    }
+                self.shelf()
+                    .draw(self.canvas(), self.shelf_shake(), self.slot_faces, out);
+                draw_slot_name(
+                    self.canvas(),
+                    self.shelf_platform,
+                    self.slot_name_alpha(),
+                    out,
+                );
+                // The letters, along the middle of that line: the one the hand is on
+                // rolled to the front of them, the rest falling away either side.
+                if !self.letter_texes.is_empty() {
+                    slot_ui::draw_letters(self.canvas(), &self.letter_texes, self.letter_at, out);
                 }
+                slot_ui::draw_slot_title(self.canvas(), self.shelf_title, self.title_alpha(), out);
+                // The top right-hand corner: which one this is, out of all the ones
+                // on the shelf.
+                slot_ui::draw_count(self.canvas(), self.shelf_count, out);
                 draw_footer(
                     self.canvas(),
                     self.battery,
@@ -5577,6 +5601,7 @@ impl App {
             | Phase::GameArt { .. }
             | Phase::Cores { .. }
             | Phase::Shell { .. }
+            | Phase::Palette { .. }
             | Phase::Search { .. }
             | Phase::Keyboard { .. } => {
                 slot_ui::draw_menu_ground(self.canvas(), self.menu_ground(), out);
@@ -5698,9 +5723,6 @@ impl App {
         }
         self.draw_menu_footer(out);
         self.draw_close_footer(out);
-        if let Some(picker) = self.core_picker_shown() {
-            self.draw_core_picker(&picker, out);
-        }
         if let Some(menu) = self.game_menu {
             self.draw_game_menu(menu, out);
         }
@@ -5730,7 +5752,7 @@ impl App {
     }
 
     pub fn shelf_shake(&self) -> f32 {
-        self.shake_when(self.on_shelf() && self.core_picker.is_none(), self.now())
+        self.shake_when(self.on_shelf(), self.now())
     }
 
     fn shake_when(&self, mine: bool, now: Millis) -> f32 {
@@ -5932,33 +5954,6 @@ impl App {
         self.shutdown_faces = faces;
     }
 
-    pub fn set_core_interior_face(&mut self, interior: TexId) {
-        self.core_interior_face = Some(interior);
-    }
-
-    pub fn set_core_board_faces(&mut self, board: TexId, lid: TexId) {
-        self.core_board_face = Some(board);
-        self.core_lid_face = Some(lid);
-        self.core_faces_stem = self.selected_stem().map(str::to_string);
-    }
-
-    pub fn set_core_part_faces(
-        &mut self,
-        sockets: Vec<TexId>,
-        chips: Vec<TexId>,
-        blank: TexId,
-        shadow: TexId,
-    ) {
-        self.core_socket_faces = sockets;
-        self.core_chip_faces = chips;
-        self.core_blank_chip_face = Some(blank);
-        self.core_chip_shadow_face = Some(shadow);
-    }
-
-    pub fn set_core_legend_faces(&mut self, faces: Vec<(TexId, u32)>) {
-        self.core_legend_faces = faces;
-    }
-
     pub fn set_link_menu_faces(&mut self, faces: Vec<(TexId, u32, u32)>) {
         self.link_menu_faces = faces;
     }
@@ -5995,153 +5990,6 @@ impl App {
 
     pub fn link_sprites_ready(&self) -> bool {
         self.link_sprites.is_some()
-    }
-
-    fn core_picker_shown(&self) -> Option<CorePicker> {
-        self.core_picker.filter(|p| !p.waiting())
-    }
-
-    fn draw_core_picker(&self, picker: &CorePicker, out: &mut Vec<Draw>) {
-        let now = self.now();
-        let progress = picker.openness(now);
-        let lift = lift_of(progress);
-        let start = out.len();
-        let (rest, scale) = self.shelf().selected_at(self.canvas());
-        let shelf = shelf_cart_at(rest, scale);
-        let board = board_from(self.canvas(), shelf, progress);
-        let zoom = board_zoom(board);
-        let ready = self.core_faces_ready();
-
-        if ready {
-            if let Some(tex) = self.core_interior_face {
-                out.push(Draw::Tex {
-                    x: board.x,
-                    y: board.y,
-                    w: board.w,
-                    h: board.h,
-                    tex,
-                    alpha: 1.0,
-                });
-            }
-            if let Some(tex) = self.core_board_face {
-                out.push(Draw::Tex {
-                    x: board.x,
-                    y: board.y,
-                    w: board.w,
-                    h: board.h,
-                    tex,
-                    alpha: 1.0,
-                });
-            }
-            for (i, tex) in self.core_socket_faces.iter().copied().enumerate() {
-                let (x, y) = on_board(board, SOCKET_U[i], SOCKET_V);
-                out.push(Draw::Tex {
-                    x: x.round(),
-                    y: y.round(),
-                    w: SOCKET_W as f32 * zoom,
-                    h: SOCKET_H as f32 * zoom,
-                    tex,
-                    alpha: 1.0,
-                });
-            }
-
-            let chip = picker.chip(now);
-            let u = CHIP_U[0] + (CHIP_U[1] - CHIP_U[0]) * chip.across;
-            if chip.lift > 0.0 {
-                if let Some(tex) = self.core_chip_shadow_face {
-                    let (cx, cy) = on_board(board, u + 19.0, CHIP_V + 29.4);
-                    let (w, h) = (SHADOW_W as f32 * zoom, SHADOW_H as f32 * zoom);
-                    out.push(Draw::Tex {
-                        x: cx - w / 2.0,
-                        y: cy - h / 2.0,
-                        w,
-                        h,
-                        tex,
-                        alpha: 0.6 * chip.lift * lift,
-                    });
-                }
-            }
-            let face = match chip.seated {
-                Some(core) => self.core_chip_faces.get(core.index()).copied(),
-                None => self.core_blank_chip_face,
-            };
-            if let Some(tex) = face {
-                let (x, y) = on_board(board, u, CHIP_V - HOP_LIFT * chip.lift);
-                let body = Placed {
-                    x: x + chip.shake,
-                    y,
-                    w: CHIP_W as f32 * zoom,
-                    h: CHIP_H as f32 * zoom,
-                };
-                let at = grown(body, TURN_PAD as f32 * zoom);
-                out.push(Draw::Turned {
-                    x: at.x.round(),
-                    y: at.y.round(),
-                    w: at.w,
-                    h: at.h,
-                    tex,
-                    alpha: 1.0,
-                    turn: chip.tip,
-                });
-            }
-        }
-
-        if let Some(tex) = self.core_chip_shadow_face {
-            let (lid, _) = lid_from(self.canvas(), shelf, progress);
-            let k = lid.w / lid_at(self.canvas(), 1.0).0.w;
-            let (w, h) = (LID_SHADOW_W * k, LID_SHADOW_H * k);
-            out.push(Draw::Tex {
-                x: lid.x + (lid.w - w) / 2.0,
-                y: lid.y + lid.h + LID_SHADOW_DROP * k - h / 2.0,
-                w,
-                h,
-                tex,
-                alpha: LID_SHADOW_ALPHA * lift,
-            });
-        }
-
-        if ready {
-            if let Some(tex) = self.core_lid_face {
-                let (lid, turn) = lid_from(self.canvas(), shelf, progress);
-                let at = grown(lid, TURN_PAD as f32 * lid.w / CART_W as f32);
-                out.push(Draw::Turned {
-                    x: at.x,
-                    y: at.y,
-                    w: at.w,
-                    h: at.h,
-                    tex,
-                    alpha: 1.0,
-                    turn,
-                });
-            }
-        } else if let Some((_, Some(tex), _)) = self
-            .selected_stem()
-            .and_then(|stem| self.shelf().find(stem))
-        {
-            let (lid, turn) = lid_from(self.canvas(), shelf, progress);
-            out.push(Draw::Turned {
-                x: lid.x,
-                y: lid.y,
-                w: lid.w,
-                h: lid.h,
-                tex,
-                alpha: 1.0,
-                turn,
-            });
-        }
-
-        // The board comes out of the cart, which a square canvas centres.
-        shift_down(&mut out[start..], self.canvas().extra() / 2.0);
-        for (tex, w, x) in centred_hints(self.canvas(), &self.core_legend_faces, CORE_LEGEND_GAP) {
-            out.push(Draw::Tex {
-                x,
-                y: CORE_LEGEND_Y + self.canvas().extra(),
-                w: w as f32,
-                h: MOUTH_H,
-                tex,
-                alpha: lift,
-            });
-        }
     }
 
     fn draw_game_menu(&self, menu: GameMenu, out: &mut Vec<Draw>) {
@@ -6395,7 +6243,6 @@ impl App {
             self.end_link();
         }
         self.close_game_menu();
-        self.core_picker = None;
         if matches!(self.phase, Phase::Doze { .. }) {
             return;
         }
@@ -6483,23 +6330,14 @@ impl App {
         if cores.len() < 2 {
             return;
         }
-        // The GBA's board seats its own two cores; once another is downloaded it has a list.
-        if cart.platform != Platform::Gba || cores[2..].iter().any(|c| c.installed(&root)) {
-            let chosen = slot_store::core_for_platform(&root, &cart.stem, cart.platform);
-            self.phase = Phase::Cores {
-                cursor: cores.iter().position(|c| *c == chosen).unwrap_or(0),
-            };
-            self.shelf_mut().release_hold();
-            self.play_held = None;
-            return;
-        }
-        let seat = slot_store::core_for_platform(&root, &cart.stem, cart.platform);
-        let now = self.now();
-        let mut picker = CorePicker::open(seat, now);
-        if self.core_faces_ready() {
-            picker.start(now);
-        }
-        self.core_picker = Some(picker);
+        // One list, whichever machine it is. A GBA with nothing downloaded besides its own two
+        // used to be given a board with a socket each instead, and two ways to choose one core is
+        // one more than anyone can keep in their head - the list names what each one is, and what
+        // it is for, which chips in sockets never did.
+        let chosen = slot_store::core_for_platform(&root, &cart.stem, cart.platform);
+        self.phase = Phase::Cores {
+            cursor: cores.iter().position(|c| *c == chosen).unwrap_or(0),
+        };
         self.shelf_mut().release_hold();
         self.play_held = None;
     }
@@ -6601,44 +6439,66 @@ impl App {
     /// The picture and the plastic the cart on the shelf is drawn with: every picture the card
     /// brought for its platform, then every plastic it offers. One list rather than two pages,
     /// since both are the same thing asked of the same cart.
-    fn shell_page(&self, cursor: usize) -> Option<ListPage> {
-        let cart = self.shelf().carts.get(self.shelf().index)?;
-        let platform = cart.platform;
-        // Nothing to pick from until the card brings the pictures the plastics go beside.
-        let templates = slot_ui::template_count(platform);
-        if templates == 0 {
+    /// The picker as it stands: the row of carts drawn when it opened, with the cursor on `cursor`.
+    /// Nothing to pick from means nothing was drawn, and the page stays shut.
+    fn shell_page(&self, cursor: usize) -> Option<slot_ui::ShellPicker> {
+        if self.shell_options.is_empty() {
             return None;
         }
-        let pick = slot_ui::pick_of(cart);
-        let plastics = slot_ui::plastics(platform);
-        let used = |at: bool| {
-            match at {
-                true => t(MsgKey::ShellInUse).to_string(),
-                false => String::new(),
-            }
-        };
-        let rows = (0..templates)
-            .map(|at| ListRow {
-                label: filled(MsgKey::ShellTemplate, at + 1),
-                detail: used(at == pick.template),
-                bars: None,
-                icon: None,
-            })
-            .chain(plastics.iter().enumerate().map(|(at, plastic)| ListRow {
-                label: plastic_name(*plastic).into(),
-                detail: used(at == pick.plastic),
-                bars: None,
-                icon: None,
-            }))
-            .collect();
-        let n = templates + plastics.len();
-        Some(ListPage {
+        let n = self.shell_options.len();
+        Some(slot_ui::ShellPicker {
             title: t(MsgKey::PageShell).into(),
-            status: slot_ui::label_text(cart),
+            options: self.shell_options.clone(),
             cursor: cursor.min(n - 1),
-            rows,
             legends: with_action(Some(t(MsgKey::BtnChoose))),
         })
+    }
+
+    /// Every shell the picker can offer this cart: the cart drawn once per picture it has, then
+    /// once per plastic, **each as that choice makes it**. A name can tell you the plastic is
+    /// black; only the cart can tell you what black does to it.
+    fn shell_options_of(&self, cart: &Cart, templates: usize) -> Vec<slot_ui::ShellOption> {
+        let pick = slot_ui::pick_of(cart);
+        let slot = slot_ui::plastic_slot(cart);
+        let plastics = slot_ui::plastics(cart.platform);
+        // Every row names the whole choice, picture and plastic both: a row reading 粉色 alone
+        // does not say which of the pictures it is the pink of, and the two are chosen together.
+        let named = |template: usize, at: usize| {
+            let plastic = plastics.get(at).copied().unwrap_or(at);
+            format!(
+                "{} - {}",
+                filled(MsgKey::ShellTemplate, template + 1),
+                plastic_name(plastic)
+            )
+        };
+        let mut options = Vec::new();
+        for at in 0..templates {
+            options.push(slot_ui::ShellOption {
+                face: slot_ui::shell_preview(
+                    cart,
+                    slot_ui::Pick {
+                        template: at,
+                        plastic: pick.plastic,
+                    },
+                ),
+                name: named(at, slot),
+                used: at == pick.template,
+            });
+        }
+        for (at, &plastic) in plastics.iter().enumerate() {
+            options.push(slot_ui::ShellOption {
+                face: slot_ui::shell_preview(
+                    cart,
+                    slot_ui::Pick {
+                        template: pick.template,
+                        plastic,
+                    },
+                ),
+                name: named(pick.template, at),
+                used: at == slot,
+            });
+        }
+        options
     }
 
     fn shell_input(&mut self, cursor: usize, action: Action) {
@@ -6673,15 +6533,264 @@ impl App {
     /// plastic. A platform the card brought no pictures for has nothing to choose between, and
     /// the chord does nothing rather than open a page with no rows on it.
     fn open_shell(&mut self) {
-        let Some(cart) = self.shelf().carts.get(self.shelf().index) else {
+        let Some(cart) = self.shelf().carts.get(self.shelf().index).cloned() else {
             return;
         };
-        if slot_ui::template_count(cart.platform) == 0 {
+        let templates = slot_ui::template_count(cart.platform);
+        if templates == 0 {
             return;
         }
-        // Open on the picture it is drawn with, not on the first of them.
-        let cursor = slot_ui::pick_of(cart).template;
+        // Drawn once here and not again: the row is the same carts whichever one the cursor is
+        // on, and redrawing them on every step of it is a pause you can feel.
+        let options = self.shell_options_of(&cart, templates);
+        self.shell_options = options;
+        // Open on the plastic it is drawn in, not on the first of the pictures: a colour is what
+        // is changed most, and the one it is already wearing is where that change starts.
+        let cursor = templates + slot_ui::plastic_slot(&cart);
         self.phase = Phase::Shell { cursor };
+    }
+
+    /// Four colours, shown as each entry draws them.
+    ///
+    /// Four and not one: a grade that only moves a hue looks exactly like the one that does
+    /// nothing if all it is handed is a grey, and a picture is made of hues.
+    const SWATCHES: [[u8; 3]; 4] = [
+        [214, 68, 58],
+        [96, 186, 108],
+        [72, 112, 216],
+        [238, 206, 92],
+    ];
+
+    /// How many choices the browser holds: a Game Boy's whole palette table, or the grades a
+    /// colour machine walks. A greyscale machine has no hues to grade, so it walks the other.
+    fn palette_count(&self) -> usize {
+        match self.palette_for == Platform::Gb {
+            true => crate::palettes::GB_PALETTES.len(),
+            false => crate::display::GRADES.len(),
+        }
+    }
+
+    /// One cell: its name, and what the entry does to the four colours. A palette's own four
+    /// shades; a grade's answer to the same four.
+    fn palette_option(&self, at: usize) -> slot_ui::PaletteOption {
+        let used = self.state.palettes[self.palette_for.index()] as usize == at;
+        if self.palette_for == Platform::Gb {
+            let (name, shades) = crate::palettes::GB_PALETTES[at];
+            slot_ui::PaletteOption {
+                name: name.into(),
+                swatch: shades.to_vec(),
+                used,
+            }
+        } else {
+            let grade = &crate::display::GRADES[at];
+            slot_ui::PaletteOption {
+                name: grade.name.into(),
+                swatch: Self::SWATCHES
+                    .map(|c| crate::display::grade_rgb(grade, c))
+                    .to_vec(),
+                used,
+            }
+        }
+    }
+
+    /// The page: **one entry, looked at against a picture**. The picture is put through the entry
+    /// the cursor is on, so walking the list walks the looks.
+    fn palette_page(&self, cursor: usize) -> Option<slot_ui::PalettePicker> {
+        let n = self.palette_count();
+        if n == 0 {
+            return None;
+        }
+        let at = cursor.min(n - 1);
+        Some(slot_ui::PalettePicker {
+            title: t(MsgKey::PageColour).into(),
+            preview: self.palette_preview(at),
+            name: self.palette_option(at).name,
+            at,
+            total: n,
+            legends: with_action(Some(t(MsgKey::BtnChoose))),
+        })
+    }
+
+    /// The picture under the cursor's entry. What has already been drawn is handed back whole:
+    /// putting a picture through a look is a pixel at a time, and this is asked for every frame.
+    fn palette_preview(&self, at: usize) -> Vec<u8> {
+        match &self.palette_shown {
+            Some((was, rgba)) if *was == at => rgba.clone(),
+            _ => self.palette_tinted(at),
+        }
+    }
+
+    fn palette_input(&mut self, cursor: usize, action: Action) {
+        let n = self.palette_count();
+        if n == 0 {
+            self.phase = self.palette_back();
+            return;
+        }
+        let at = cursor.min(n - 1);
+        // One entry at a time: there is no board to walk across, only a picture and a name, so up
+        // and down walk the list the way left and right do.
+        let next = match action {
+            Action::GbaDown(Btn::Left | Btn::Up) => at.saturating_sub(1),
+            Action::GbaDown(Btn::Right | Btn::Down) => (at + 1).min(n - 1),
+            Action::GbaDown(Btn::A) => {
+                self.write_palette(at);
+                self.phase = self.palette_back();
+                return;
+            }
+            Action::GbaDown(Btn::B | Btn::Start) | Action::QuickMenu => {
+                self.phase = self.palette_back();
+                return;
+            }
+            _ => return,
+        };
+        // The picture has to wear the entry it has moved to, and that is worked out here — once —
+        // rather than on every frame the page is drawn.
+        self.palette_shown = Some((next, self.palette_tinted(next)));
+        self.phase = Phase::Palette { cursor: next };
+    }
+
+    /// Where the browser closes to: the row it was opened from, or the game that was running.
+    fn palette_back(&mut self) -> Phase {
+        match self.palette_back.take() {
+            Some(row) => Phase::QuickMenu { row },
+            None => match self.palette_cart.take() {
+                Some(cart) => Phase::Playing { cart },
+                None => Phase::QuickMenu {
+                    row: QuickRow::ColourCorrectionOf(self.palette_for),
+                },
+            },
+        }
+    }
+
+    /// Opens the board on the machine the row names — or, from a chord in a game, on the one that
+    /// is playing — with the cursor on what that machine is wearing today.
+    fn open_palette(&mut self, row: Option<QuickRow>) {
+        self.palette_for = match row {
+            Some(QuickRow::ColourCorrectionOf(p)) => p,
+            _ => self.playing_platform(),
+        };
+        self.palette_back = row;
+        self.palette_cart = match &self.phase {
+            Phase::Playing { cart } => Some(cart.clone()),
+            _ => None,
+        };
+        let cursor = self.worn_palette(self.palette_for) as usize;
+        // What the choices will be looked at against, taken once: over a game, the screen as it is
+        // showing it; otherwise some game of this machine's own art.
+        self.palette_art = self.take_palette_art();
+        self.palette_shown = Some((cursor, self.palette_tinted(cursor)));
+        self.phase = Phase::Palette { cursor };
+    }
+
+    /// What is worn today: what the game chose for itself when it chose, else what its machine
+    /// wears. Only a game that has chosen is asked, which is what makes the two levels.
+    fn worn_palette(&self, platform: Platform) -> u16 {
+        let machine = self.state.palettes[platform.index()];
+        let (Some(root), Some(stem)) = (self.root.as_deref(), self.palette_cart.as_deref()) else {
+            return machine;
+        };
+        crate::palette_store::palette_for(root, machine, stem)
+    }
+
+    /// The picture the page holds its choices against. Over a game it is the screen as it is
+    /// showing it — the same crop and stretch a state's own picture is taken with; otherwise any
+    /// game of this machine will do, since any picture shows what a look does to one.
+    fn take_palette_art(&self) -> Option<Vec<u8>> {
+        if self.palette_cart.is_some() {
+            let shot = crate::shot::Shot {
+                src: self.source_rect(),
+                stretch: self.video_mode == VideoMode::Stretch,
+            };
+            if let Some(png) = self.snapshot.as_ref().and_then(|s| s.shot(shot)) {
+                return Some(png);
+            }
+        }
+        self.shelves
+            .iter()
+            .filter(|(rack, _)| *rack == Rack::Of(self.palette_for))
+            .flat_map(|(_, shelf)| &shelf.carts)
+            .find_map(|cart| std::fs::read(slot_ui::render_of(cart)?).ok())
+    }
+
+    /// The picture put through one entry: the same arithmetic the screen runs, on every pixel of it,
+    /// so the page shows the look and not a guess at the look.
+    fn palette_tinted(&self, at: usize) -> Vec<u8> {
+        let (w, h) = (slot_ui::PREVIEW_W, slot_ui::PREVIEW_H);
+        let Some(src) = &self.palette_art else {
+            return self.palette_bands(at, w, h);
+        };
+        let Some(rgba) = slot_ui::cover_bytes(src, w, h) else {
+            return Vec::new();
+        };
+        match self.palette_for == Platform::Gb {
+            // A palette is four shades walked by brightness, so the one table is all it takes.
+            true => {
+                let lut = crate::display::gb_lut(crate::palettes::GB_PALETTES[at].1);
+                Self::tint(&rgba, |r, g, b| {
+                    let grey = (r as u32 * 299 + g as u32 * 587 + b as u32 * 114) / 1000;
+                    let at = (grey.min(255) as usize) * 4;
+                    [lut[at], lut[at + 1], lut[at + 2]]
+                })
+            }
+            false => {
+                let grade = &crate::display::GRADES[at];
+                Self::tint(&rgba, |r, g, b| crate::display::grade_rgb(grade, [r, g, b]))
+            }
+        }
+    }
+
+    /// Every pixel of a picture put through one entry.
+    fn tint(rgba: &[u8], by: impl Fn(u8, u8, u8) -> [u8; 3]) -> Vec<u8> {
+        let mut out = rgba.to_vec();
+        for px in out.chunks_exact_mut(4) {
+            let [r, g, b] = by(px[0], px[1], px[2]);
+            px[0] = r;
+            px[1] = g;
+            px[2] = b;
+        }
+        out
+    }
+
+    /// Nothing to hold a choice against: bands of the colours the entry makes, which is what it does
+    /// to a picture even when there is no picture to hand.
+    fn palette_bands(&self, at: usize, w: u32, h: u32) -> Vec<u8> {
+        let swatch = self.palette_option(at).swatch;
+        let n = swatch.len().max(1);
+        let mut out = Vec::with_capacity((w * h * 4) as usize);
+        for y in 0..h {
+            let band = swatch[(y as usize * n / h.max(1) as usize).min(n - 1)];
+            for _ in 0..w {
+                out.extend_from_slice(&[band[0], band[1], band[2], 255]);
+            }
+        }
+        out
+    }
+
+    /// Keeps the pick and hands it to the picture. 0 is the machine's own output, so the way back
+    /// to how it was is a pick like any other rather than a second switch.
+    fn write_palette(&mut self, at: usize) {
+        let platform = self.palette_for;
+        let machine = self.state.palettes[platform.index()];
+        match (self.root.clone(), self.palette_cart.clone()) {
+            // Opened over a game: the game keeps the pick, but only while it differs from its
+            // machine. One that comes back to the machine is crossed out, and follows it again.
+            (Some(root), Some(stem)) => {
+                let written = match at as u16 == machine {
+                    true => crate::palette_store::clear_palette(&root, &stem),
+                    false => crate::palette_store::write_palette(&root, &stem, at as u16),
+                };
+                if let Err(e) = written {
+                    eprintln!("slot: palette: {stem}: {e}");
+                }
+            }
+            // Opened off the shelf: there is no game over it, so the machine is what is dressed.
+            _ => {
+                self.state.palettes[platform.index()] = at as u16;
+                self.persist_soon();
+            }
+        }
+        self.look_pending = Some(at as u16);
+        self.palette_shown = None;
     }
 
     /// Keeps what this cart is drawn with beside its label, then reads the card again: the picks
@@ -6758,7 +6867,7 @@ impl App {
     /// Makes the pictures for the rows in view around `cursor` that do not have one yet: the
     /// game's cart, card or disc with its label, as the shelf shows it, shrunk.
     fn make_search_icons(&mut self, cursor: usize) {
-        let (Some(search), Some(root)) = (&self.search, &self.root) else {
+        let Some(search) = &self.search else {
             return;
         };
         let page = ListPage {
@@ -6775,12 +6884,11 @@ impl App {
             .filter(|key| !self.search_icons.contains_key(*key))
             .cloned()
             .collect();
-        let root = root.clone();
         for key in wanted {
             let Some(cart) = self.found_cart(&key) else {
                 continue;
             };
-            let face = crate::label_cache::face(&root, cart);
+            let face = crate::cart_faces::face(cart);
             self.search_icons.insert(key, ListIcon::of(&face));
         }
     }
@@ -6859,9 +6967,7 @@ impl App {
         let status = match rows.len() {
             0 => filled(MsgKey::SearchNoMatch, &search.query),
             1 => filled(MsgKey::SearchOneMatch, &search.query),
-            n if n == crate::search::MOST => {
-                saying(MsgKey::SearchFirstFew, &[&n, &search.query])
-            }
+            n if n == crate::search::MOST => saying(MsgKey::SearchFirstFew, &[&n, &search.query]),
             n => saying(MsgKey::SearchManyMatch, &[&n, &search.query]),
         };
         let mut legends = vec![
@@ -6877,32 +6983,6 @@ impl App {
             cursor: cursor.min(rows.len().saturating_sub(1)),
             rows,
             legends,
-        }
-    }
-
-    fn core_faces_ready(&self) -> bool {
-        self.core_faces_stem
-            .as_deref()
-            .is_some_and(|stem| self.selected_stem() == Some(stem))
-    }
-
-    fn core_picker_input(&mut self, action: Action) {
-        let press = match action {
-            Action::GbaDown(Btn::Left) | Action::ShelfLeft => Press::Left,
-            Action::GbaDown(Btn::Right) | Action::ShelfRight => Press::Right,
-            Action::GbaDown(Btn::A) => Press::Keep,
-            Action::GbaDown(Btn::Y) => Press::KeepAll,
-            Action::GbaDown(Btn::B) => Press::Back,
-            _ => return,
-        };
-        let now = self.now();
-        let Some(picker) = &mut self.core_picker else {
-            return;
-        };
-        match picker.press(press, now) {
-            Outcome::Write(core) => self.write_core(core, false),
-            Outcome::WriteAll(core) => self.write_core(core, true),
-            Outcome::Nothing | Outcome::Refused => {}
         }
     }
 
@@ -7466,7 +7546,14 @@ impl App {
             eprintln!("slot: save: the core gave up no state");
             return;
         };
-        let thumb = snapshot.thumb().unwrap_or_default();
+        // The picture the screen is showing, not the core's whole frame: the black either side of
+        // it was never on the screen, and a crop blown up to a polaroid is a blur.
+        let thumb = snapshot
+            .shot(crate::shot::Shot {
+                src: self.source_rect(),
+                stretch: self.video_mode == VideoMode::Stretch,
+            })
+            .unwrap_or_default();
         let stamp = free_stamp(&ring, self.wall_secs());
         let evicted = doomed(&ring);
         if let Err(e) = ring.push(&state, &thumb, &stamp) {

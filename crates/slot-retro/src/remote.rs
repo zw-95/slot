@@ -152,7 +152,11 @@ impl Shm {
             if grow && libc::ftruncate(fd, len as libc::off_t) != 0 {
                 return false;
             }
-            let prot = if grow { libc::PROT_WRITE } else { libc::PROT_READ };
+            let prot = if grow {
+                libc::PROT_WRITE
+            } else {
+                libc::PROT_READ
+            };
             let p = libc::mmap(std::ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0);
             if p == libc::MAP_FAILED {
                 return false;
@@ -301,7 +305,11 @@ fn receive(from: &mut UnixStream, buf: &mut Vec<u8>) -> io::Result<()> {
 }
 
 /// As `receive`, keeping any fds sent along with the message in `fds`.
-fn receive_with(from: &mut UnixStream, buf: &mut Vec<u8>, fds: &mut Vec<OwnedFd>) -> io::Result<()> {
+fn receive_with(
+    from: &mut UnixStream,
+    buf: &mut Vec<u8>,
+    fds: &mut Vec<OwnedFd>,
+) -> io::Result<()> {
     let mut len = [0u8; 4];
     let got = receive_fds(from, &mut len, fds)?;
     from.read_exact(&mut len[got..])?;
@@ -522,7 +530,11 @@ fn put_picture(core: &mut dyn RetroCore, out: &mut Out, video: bool, shm: Option
     let shared = shm.and_then(|s| video.then(|| s.put(picture).map(|at| (at, s.len)))?);
     match shared {
         _ if !video => out.u8(0),
-        Some((at, len)) => out.u8(2).u32(picture.len() as u32).u32(len as u32).u32(at as u32),
+        Some((at, len)) => out
+            .u8(2)
+            .u32(picture.len() as u32)
+            .u32(len as u32)
+            .u32(at as u32),
         None => out.u8(1).bytes(picture),
     };
 }
@@ -1038,7 +1050,10 @@ mod tests {
         }
         assert_eq!(remote.video_size(), local.video_size());
         assert_eq!(remote.video_xrgb8888(), local.video_xrgb8888());
-        assert!(remote.shm_video.is_some(), "the picture came through shared memory");
+        assert!(
+            remote.shm_video.is_some(),
+            "the picture came through shared memory"
+        );
         assert_eq!(remote.take_audio(), local.take_audio());
         assert_eq!(remote.av_info(), local.av_info());
         let state = remote.serialize().unwrap();
@@ -1061,12 +1076,20 @@ mod tests {
             local.run_frame(ButtonMask::default());
             remote.run_frame_overlapped(ButtonMask::default());
         }
-        assert_eq!(remote.video_xrgb8888(), shown[2], "the frame before's picture");
+        assert_eq!(
+            remote.video_xrgb8888(),
+            shown[2],
+            "the frame before's picture"
+        );
         assert_ne!(shown[1], shown[2]);
         // A call that can't take up the state reads the answer owed and keeps it for the next.
         assert_eq!(remote.save_ram(), local.save_ram());
         let state = remote.serialize().unwrap();
-        assert_eq!(state, local.serialize().unwrap(), "every frame ran before the call");
+        assert_eq!(
+            state,
+            local.serialize().unwrap(),
+            "every frame ran before the call"
+        );
         assert_eq!(remote.video_xrgb8888(), local.video_xrgb8888());
         assert_eq!(remote.take_audio(), local.take_audio());
     }

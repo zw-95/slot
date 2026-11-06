@@ -31,7 +31,11 @@ fn dims(path: &Path) -> Option<(u32, u32)> {
     }
     let (w, h) = path.file_stem()?.to_str()?.split_once('x')?;
     let (w, h) = (w.parse::<u32>().ok()?, h.parse::<u32>().ok()?);
-    if w > 0 && h > 0 { Some((w, h)) } else { None }
+    if w > 0 && h > 0 {
+        Some((w, h))
+    } else {
+        None
+    }
 }
 
 pub fn pick(root: &Path, panel: (u32, u32)) -> Option<PathBuf> {

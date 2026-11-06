@@ -473,10 +473,10 @@ fn the_menu_button_still_works_after_a_chord() {
 }
 
 #[test]
-fn select_and_y_toggles_colour_correction_and_costs_the_game_nothing() {
+fn select_and_y_opens_the_colour_browser_and_costs_the_game_nothing() {
     let mut g = Gestures::new();
     assert!(g.feed(Down(Select), 0).is_empty());
-    assert_eq!(g.feed(Down(Y), 10), vec![ColourCorrectionToggle]);
+    assert_eq!(g.feed(Down(Y), 10), vec![PaletteBrowser]);
     assert!(g.feed(Up(Y), 40).is_empty());
     assert!(g.feed(Up(Select), 200).is_empty());
 }

@@ -9,21 +9,18 @@ use slot_input::{InputSource, Millis};
 use slot_power::{Platform, Power};
 use slot_store::{format_stamp, BezelPick, Platform as Console};
 use slot_ui::{
-    badge_face, bezel_face, chip_face, chip_shadow_face, core_button_legends, date_time,
-    default_game_bezel_face, footer_ink, game_bezel_face, hint_face, icon_face,
-    link_button_legends, menu_face, photo_face, quick_caret_face, quick_label_face,
-    quick_legend_faces, quick_pointer_face, set_clock_hint_face, shape_shadow, shapes, slot_back,
-    slot_back_light, slot_front, slot_front_light, socket_face, sticker_face, time_text, title_face,
-    toast_face, value_face, wallpaper_face, word_ink, CartFace, GbShell, Icon, LinkBadge, Mould,
-    PowerChoice, QuickMenuFaces, QuickRow, QuickValue, StickerFields, Toast, UndoFace, ALERT_PX,
-    BOLT_PX, HUD_ICON_PX, HUD_INK,
+    badge_face, bezel_face, date_time, default_game_bezel_face, footer_ink, game_bezel_face,
+    hint_face, icon_face, link_button_legends, menu_face, photo_face, quick_caret_face,
+    quick_label_face, quick_legend_faces, quick_pointer_face, set_clock_hint_face, shape_shadow,
+    shapes, slot_back, slot_back_light, slot_front, slot_front_light, sticker_face, time_text,
+    title_face, toast_face, value_face, wallpaper_face, word_ink, CartFace, GbShell, Icon,
+    LinkBadge, Mould, PowerChoice, QuickMenuFaces, QuickRow, QuickValue, StickerFields, Toast,
+    UndoFace, ALERT_PX, BOLT_PX, HUD_ICON_PX, HUD_INK,
 };
 
 use crate::app::{App, LinkRow, Phase};
 use crate::build_info::Build;
 use crate::cart_faces::CartFaces;
-use crate::face_builder::FaceBuilder;
-use crate::label_cache;
 use crate::link_art_builder::LinkArtBuilder;
 use crate::link_screen::{LinkSprites, Sprite};
 use crate::link_start::{LinkFail, LinkStep};
@@ -77,9 +74,7 @@ pub struct Frontend {
     draws: Vec<Draw>,
     polaroid_texes: Vec<TexId>,
     title_tex: Option<TexId>,
-    faces: FaceBuilder,
     cart_faces: CartFaces,
-    stale_check: Option<std::sync::mpsc::Receiver<Vec<slot_store::Cart>>>,
     ui_faces: Option<std::sync::mpsc::Receiver<UiFaces>>,
     /// The textures the interface's type was baked into, in the order it was baked. A new
     /// tongue walks the same order and writes over them instead of piling up new ones.
@@ -91,9 +86,6 @@ pub struct Frontend {
     lang: slot_i18n::Lang,
     link_art: LinkArtBuilder,
     link_art_done: bool,
-    core_asked: Option<String>,
-    core_tex: CoreTextures,
-    core_built: Option<String>,
     undo_tex: Option<TexId>,
     switcher: Switcher,
     fps: FpsCounter,
@@ -281,11 +273,9 @@ impl Frontend {
 
     pub fn boot_with(platform: Box<dyn Platform>, sink: Box<dyn crate::audio::AudioSink>) -> Self {
         let now = Instant::now();
-        let cart_faces = CartFaces::spawn(platform.root().to_path_buf());
+        let cart_faces = CartFaces::spawn();
         let mut session = Session::boot_with(platform.root().to_path_buf(), sink);
         crate::boot_time::mark("session");
-        let stale_check =
-            Self::check_labels(platform.root(), session.app().carts().cloned().collect());
         session
             .app_mut()
             .set_power(Power::new(platform, DOZE_TIMEOUT));
@@ -297,18 +287,13 @@ impl Frontend {
             draws: Vec::new(),
             polaroid_texes: Vec::new(),
             title_tex: None,
-            faces: FaceBuilder::spawn(),
             cart_faces,
-            stale_check,
             ui_faces: None,
             ui_tex: Vec::new(),
             ui_baked: 0,
             lang,
             link_art: LinkArtBuilder::spawn(),
             link_art_done: false,
-            core_asked: None,
-            core_tex: CoreTextures::default(),
-            core_built: None,
             undo_tex: None,
             switcher: Switcher::default(),
             fps: FpsCounter::new(now),
@@ -612,10 +597,6 @@ impl Frontend {
         let mut cart = |f: CartFace| self.bake(compositor, f.w, f.h, &f.rgba);
         let link_badges = faces.link_badges.into_iter().map(&mut cart).collect();
         let toasts = faces.toasts.into_iter().map(&mut cart).collect();
-        let sockets = faces.sockets.into_iter().map(&mut cart).collect();
-        let chips = faces.chips.into_iter().map(&mut cart).collect();
-        let blank = cart(faces.blank_chip);
-        let shadow = cart(faces.chip_shadow);
         let mut up = |f: UndoFace| (self.bake(compositor, f.w, f.h, &f.rgba), f.w, f.h);
         let lines = faces.shutdown.into_iter().map(&mut up).collect();
         let shared: Vec<_> = faces
@@ -639,14 +620,6 @@ impl Frontend {
         };
         let legend = pack_legend(faces.quick_legend);
         let legend_light = pack_legend(faces.quick_legend_light);
-        let core_legend = faces
-            .core_legend
-            .into_iter()
-            .map(|f| {
-                let (tex, w, _) = up(f);
-                (tex, w)
-            })
-            .collect();
         let roles = faces.link_roles.into_iter().map(&mut up).collect();
         let linked = up(faces.linked);
         let mut pack = |faces: Vec<UndoFace>| -> Vec<(TexId, u32)> {
@@ -677,14 +650,45 @@ impl Frontend {
             legend,
             legend_light,
         });
-        app.set_core_part_faces(sockets, chips, blank, shadow);
-        app.set_core_legend_faces(core_legend);
         app.set_link_menu_faces(roles);
         app.set_link_linked_face(linked);
         app.set_link_legend_faces(link_legend);
         app.set_link_step_faces(steps);
         app.set_link_fail_faces(fails);
         app.set_toast_faces(toasts);
+    }
+
+    /// Hands the screen's colour to the renderer, every frame: a pick is a fact about the card
+    /// rather than an event, so there is nothing to miss and nothing to clear.
+    ///
+    /// A Game Boy walks its own palette table and the colours go over as a lookup; every other
+    /// machine walks the grades, which are a matrix or a cube.
+    fn apply_colour(&self, compositor: &mut Compositor) {
+        let platform = self.session.app().playing_platform();
+        let at = self.session.app().palette_pick() as usize;
+        if at == 0 {
+            // The machine's own output: the identity, which is where the pass starts.
+            compositor.set_colour(
+                [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+                [0.0; 3],
+                1.0,
+            );
+            return;
+        }
+        if platform == slot_store::Platform::Gb {
+            if let Some((_, shades)) = crate::palettes::GB_PALETTES.get(at) {
+                compositor.set_palette_lut(&crate::display::gb_lut(*shades));
+            }
+            return;
+        }
+        if let Some(grade) = crate::display::GRADES.get(at) {
+            match crate::display::grade_look(grade) {
+                crate::display::Look::Plain(cc, bias, gamma) => {
+                    compositor.set_colour(cc, bias, gamma)
+                }
+                crate::display::Look::Cube(cube) => compositor.set_pix_lut(cube),
+            }
+        }
     }
 
     pub fn upload_bezel(&mut self, compositor: &mut Compositor, panel: (u32, u32)) {
@@ -762,7 +766,6 @@ impl Frontend {
         // A batch baked off the frame — at boot, or a moment ago for a new tongue. At boot it
         // is waited for; here it is only collected when it happens to have landed.
         self.poll_ui_faces(compositor);
-        self.poll_label_check();
         self.roll_letters();
         compositor.set_blue_light(self.session.app().blue_light());
         compositor.set_picture(self.session.app().picture_rect());
@@ -773,6 +776,7 @@ impl Frontend {
             slot_store::Shader::Dot => ScreenEffect::Dot,
             slot_store::Shader::Simpletex => ScreenEffect::Simpletex,
         });
+        self.apply_colour(compositor);
         compositor.set_shake(self.session.app().screen_shake());
         compositor.set_screen_power(self.session.app().screen_power());
         compositor.set_screen_footer(self.session.app().screen_footer());
@@ -797,12 +801,16 @@ impl Frontend {
             compositor.set_picture(slot_gfx::WHOLE_TEXTURE);
             compositor.set_game_source_rect(slot_gfx::WHOLE_TEXTURE);
         }
-        let stretched = self.session.app().video_mode() == crate::video_mode::VideoMode::Stretch;
+        let mode = self.session.app().video_mode();
         // A picture turned on its side shows the other way round.
         let turned = self.game_rotation % 2 == 1;
         let aspect = self.game_aspect.map(|a| if turned { 1.0 / a } else { a });
         compositor.set_game_rotation(self.game_rotation);
-        compositor.set_game_aspect(aspect.filter(|_| !stretched));
+        // A stretched picture is the screen and keeps no shape of its own; the other two keep
+        // theirs, and one of them asks for a whole number of times the picture's own size.
+        compositor
+            .set_game_aspect(aspect.filter(|_| mode != crate::video_mode::VideoMode::Stretch));
+        compositor.set_game_integer(mode.integer());
         let synced = ft::span(ev::RENDER_SYNC, 0);
         self.cart_faces.sync(self.session.app_mut(), compositor);
         sync_clock(self.session.app_mut(), compositor, &mut self.clocks);
@@ -814,14 +822,6 @@ impl Frontend {
         sync_game_bezel(self.session.app_mut(), compositor, &mut self.game_bezel);
         compositor.set_game_bezel(self.session.app().shown_game_bezel());
         compositor.set_sp_frame(self.session.app().sp_frame());
-        sync_core_picker(
-            self.session.app_mut(),
-            compositor,
-            &self.faces,
-            &mut self.core_asked,
-            &mut self.core_tex,
-            &mut self.core_built,
-        );
         if !self.link_art_done {
             if let Some(art) = self.link_art.take() {
                 let mut up = |f: &slot_ui::CartFace| Sprite {
@@ -898,42 +898,6 @@ impl Frontend {
         self.session.step_emulator(present, timeout)
     }
 
-    fn check_labels(
-        root: &std::path::Path,
-        carts: Vec<slot_store::Cart>,
-    ) -> Option<std::sync::mpsc::Receiver<Vec<slot_store::Cart>>> {
-        let (tx, rx) = std::sync::mpsc::channel();
-        let root = root.to_path_buf();
-        std::thread::Builder::new()
-            .name("slot-label-check".into())
-            .spawn(move || {
-                let _ = tx.send(label_cache::stale(&root, carts.iter()));
-            })
-            .ok()
-            .map(|_| rx)
-    }
-
-    /// How much label art is not baked yet, for the log and nothing else. A cart's art is baked
-    /// the first time its face is drawn and kept from then on, so a cart that is never looked
-    /// at never costs a byte on the card — and no amount of unbaked art can hold up the shelf.
-    fn poll_label_check(&mut self) {
-        let Some(rx) = &self.stale_check else {
-            return;
-        };
-        let stale = match rx.try_recv() {
-            Ok(stale) => stale,
-            Err(std::sync::mpsc::TryRecvError::Empty) => return,
-            Err(std::sync::mpsc::TryRecvError::Disconnected) => Vec::new(),
-        };
-        self.stale_check = None;
-        if !stale.is_empty() {
-            eprintln!(
-                "slot: label cache: {} labels unbaked, baked when looked at",
-                stale.len()
-            );
-        }
-    }
-
     pub fn advance(&mut self, input: &mut dyn InputSource) {
         let now = self.now();
         let polled = ft::span(ev::INPUT_POLL, 0);
@@ -948,23 +912,6 @@ impl Frontend {
         let dt = self.last.elapsed().as_secs_f32();
         self.last = Instant::now();
         let _update = ft::span(ev::SESSION_UPDATE, 0);
-        self.session.update(dt);
-    }
-
-    pub fn app(&self) -> &crate::app::App {
-        self.session.app()
-    }
-
-    pub fn core_settling(&self) -> bool {
-        self.session.core_settling()
-    }
-
-    pub fn advance_at(&mut self, input: &mut dyn InputSource, now: Millis, dt: f32) {
-        let events = input.poll(now);
-        self.session
-            .set_menu_dpad_display(input.menu_dpad_display());
-        self.session.set_sticks(input.sticks());
-        self.session.feed(events, now);
         self.session.update(dt);
     }
 
@@ -1031,11 +978,6 @@ struct UiFaces {
     quick_carets: [UndoFace; 2],
     quick_legend: [UndoFace; 5],
     quick_legend_light: [UndoFace; 5],
-    sockets: Vec<CartFace>,
-    chips: Vec<CartFace>,
-    blank_chip: CartFace,
-    chip_shadow: CartFace,
-    core_legend: Vec<UndoFace>,
     link_roles: Vec<UndoFace>,
     linked: UndoFace,
     link_legend: Vec<UndoFace>,
@@ -1053,16 +995,12 @@ impl UiFaces {
     fn count(&self) -> usize {
         self.link_badges.len()
             + self.toasts.len()
-            + self.sockets.len()
-            + self.chips.len()
-            + 2 // the blank chip, and the shadow under it
             + self.shutdown.len()
             + self.quick_labels.len() * 2
             + 1 // the pointer
             + self.quick_values.len() * 2
             + 2 // the carets
             + self.quick_legend.len() * 2
-            + self.core_legend.len()
             + self.link_roles.len()
             + 1 // "linked"
             + self.link_legend.len() * 2
@@ -1106,19 +1044,6 @@ impl UiFaces {
             quick_carets: [false, true].map(quick_caret_face),
             quick_legend: quick_legend_faces(footer_ink(false)),
             quick_legend_light: quick_legend_faces(footer_ink(true)),
-            // The picker's board has a socket for each of the GBA cores unslot comes with; the
-            // rest are downloaded, and chosen from a list.
-            sockets: slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
-                .iter()
-                .map(|c| socket_face(*c))
-                .collect(),
-            chips: slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
-                .iter()
-                .map(|c| chip_face(Some(*c)))
-                .collect(),
-            blank_chip: chip_face(None),
-            chip_shadow: chip_shadow_face(),
-            core_legend: core_button_legends(),
             link_roles: LinkRow::ALL.iter().map(|r| menu_face(r.text())).collect(),
             linked: menu_face(t(MsgKey::LinkLinked)),
             link_legend: link_legend_faces(footer_ink(false)),
@@ -1311,10 +1236,7 @@ fn sync_game_bezel(app: &mut App, compositor: &mut Compositor, state: &mut Bezel
         if state.labels[at] == label {
             continue;
         }
-        let (dim, lit) = (
-            value_face(&label, false),
-            value_face(&label, true),
-        );
+        let (dim, lit) = (value_face(&label, false), value_face(&label, true));
         let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
         let dim = upload(compositor, &mut state.faces[at].0, dim);
         let lit = upload(compositor, &mut state.faces[at].1, lit);
@@ -1359,10 +1281,7 @@ fn sync_wallpaper(app: &mut App, compositor: &mut Compositor, state: &mut Wallpa
     if state.label == label {
         return;
     }
-    let (dim, lit) = (
-        value_face(&label, false),
-        value_face(&label, true),
-    );
+    let (dim, lit) = (value_face(&label, false), value_face(&label, true));
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
     let lit = upload(compositor, &mut state.lit, lit);
@@ -1378,10 +1297,7 @@ fn sync_quick_clock(app: &mut App, compositor: &mut Compositor, state: &mut Quic
     if text == state.shown {
         return;
     }
-    let (dim, lit) = (
-        value_face(&text, false),
-        value_face(&text, true),
-    );
+    let (dim, lit) = (value_face(&text, false), value_face(&text, true));
     let (dim_size, lit_size) = ((dim.w, dim.h), (lit.w, lit.h));
     let dim = upload(compositor, &mut state.dim, dim);
     let lit = upload(compositor, &mut state.lit, lit);
@@ -1424,64 +1340,6 @@ fn sync_about(app: &mut App, compositor: &mut Compositor, state: &mut AboutFace)
     app.set_sticker_face(id);
 }
 
-/// The textures the core picker reuses from one cart to the next.
-#[derive(Default)]
-struct CoreTextures {
-    interior: Option<TexId>,
-    board: Option<TexId>,
-    lid: Option<TexId>,
-}
-
-fn sync_core_picker(
-    app: &mut App,
-    compositor: &mut Compositor,
-    builder: &FaceBuilder,
-    asked: &mut Option<String>,
-    tex: &mut CoreTextures,
-    built: &mut Option<String>,
-) {
-    let highlighted = app.selected_stem().map(str::to_string);
-    if highlighted.is_some() && *asked != highlighted {
-        if let Some(cart) = app
-            .carts()
-            .find(|c| highlighted.as_deref() == Some(c.stem.as_str()))
-        {
-            builder.request(cart.clone());
-        }
-        *asked = highlighted.clone();
-    }
-    let Some(faces) = builder.take() else {
-        return;
-    };
-    if highlighted.as_deref() != Some(faces.stem.as_str()) || *built == highlighted {
-        return;
-    }
-    let interior_id = upload_rgba(
-        compositor,
-        &mut tex.interior,
-        faces.interior.w,
-        faces.interior.h,
-        &faces.interior.rgba,
-    );
-    app.set_core_interior_face(interior_id);
-    let board_id = upload_rgba(
-        compositor,
-        &mut tex.board,
-        faces.board.w,
-        faces.board.h,
-        &faces.board.rgba,
-    );
-    let lid_id = upload_rgba(
-        compositor,
-        &mut tex.lid,
-        faces.lid.w,
-        faces.lid.h,
-        &faces.lid.rgba,
-    );
-    app.set_core_board_faces(board_id, lid_id);
-    *built = Some(faces.stem);
-}
-
 #[derive(Default)]
 struct PageSync {
     shown: Option<crate::app::PageModel>,
@@ -1497,6 +1355,8 @@ fn sync_page(app: &mut App, compositor: &mut Compositor, state: &mut PageSync) {
     if let Some(page) = &model {
         let face = match page {
             crate::app::PageModel::List(list) => list.face(),
+            crate::app::PageModel::Shell(pick) => pick.face(),
+            crate::app::PageModel::Palette(board) => board.face(),
             crate::app::PageModel::Keys(keys) => keys.face(),
             crate::app::PageModel::Qr(qr) => qr.face(),
         };

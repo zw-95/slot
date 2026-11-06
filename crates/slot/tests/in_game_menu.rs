@@ -94,7 +94,12 @@ fn screen_shows_the_palette_only_when_palettes_are_live() {
     let (_d, mut a) = playing();
     assert_eq!(
         a.in_game_hidden(),
-        &[QuickRow::Palette, QuickRow::Bezel, QuickRow::Disc, QuickRow::PlayCast]
+        &[
+            QuickRow::Palette,
+            QuickRow::Bezel,
+            QuickRow::Disc,
+            QuickRow::PlayCast
+        ]
     );
     a.set_palette_live(true);
     assert_eq!(

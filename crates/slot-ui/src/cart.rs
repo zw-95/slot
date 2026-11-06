@@ -8,6 +8,7 @@ use crate::bitmaps::{self, Mould};
 use crate::board::{BOARD_H, BOARD_W};
 use crate::card_art::Pick;
 use crate::media::{Media, SEATED_MAX_H};
+use crate::scraped::rgb_to_hsv;
 use crate::shell::{shell_for, Finish, Shell};
 use crate::silhouette::{cart_mask, gb_cart_mask, GbShell};
 use crate::text;
@@ -71,6 +72,9 @@ const PAD: u32 = 10;
 const MAX_LINES: usize = 3;
 const MIN_PX: f32 = 10.0;
 
+/// Cloned by the picker, which holds one of these per choice and hands them out again each time
+/// the cursor moves. Not compared: see `ShellPicker`.
+#[derive(Clone, Debug)]
 pub struct CartFace {
     pub rgba: Vec<u8>,
     pub w: u32,
@@ -86,6 +90,9 @@ struct Spec {
     mask: &'static [u8],
     mould: Mould,
     paint: &'static [u8],
+    /// Whether the console's name is stamped above the label well. A card's own art carries
+    /// whatever printing it was drawn with, and a second name over it is no name at all.
+    stamped: bool,
 }
 
 /// Every Game Boy pak is drawn notched: whichever class the ROM is, and whichever outline the
@@ -131,6 +138,7 @@ fn spec(mould: Mould) -> Spec {
             mask: cart_mask(),
             mould,
             paint: bitmaps::gba_cart(),
+            stamped: true,
         },
         Mould::Notched => Spec {
             w: GB_CART_W,
@@ -140,6 +148,7 @@ fn spec(mould: Mould) -> Spec {
             mask: gb_cart_mask(GbShell::Notched),
             mould,
             paint: bitmaps::gb_cart(),
+            stamped: true,
         },
         Mould::Rounded => Spec {
             w: GB_CART_W,
@@ -149,6 +158,7 @@ fn spec(mould: Mould) -> Spec {
             mask: gb_cart_mask(GbShell::Rounded),
             mould,
             paint: bitmaps::gbc_cart(),
+            stamped: true,
         },
         Mould::Media(m) => {
             let (w, h) = m.size();
@@ -160,6 +170,7 @@ fn spec(mould: Mould) -> Spec {
                 mask: m.mask(),
                 mould,
                 paint: m.neutral(),
+                stamped: true,
             }
         }
     }
@@ -170,10 +181,16 @@ fn spec(mould: Mould) -> Spec {
 /// place, so a card's art that was turned down leaves the built-in shape whole rather than
 /// half of it in place.
 fn spec_for(cart: &Cart) -> Spec {
+    spec_for_pick(cart, crate::card_art::pick_of(cart))
+}
+
+/// As `spec_for`, but for a pick that is not the cart's yet: the picker draws the shell it is
+/// offering, which may be a picture or a plastic this cart is not wearing.
+fn spec_for_pick(cart: &Cart, pick: crate::card_art::Pick) -> Spec {
     let mut s = spec(mould_of(cart));
-    let pick = crate::card_art::pick_of(cart);
     if let Some(paint) = crate::card_art::neutral(cart.platform, pick) {
         s.paint = paint;
+        s.stamped = false;
         if let Some(mask) = crate::card_art::mask(cart.platform, pick) {
             s.mask = mask;
         }
@@ -268,7 +285,10 @@ pub fn shape_shadow(shape: Shape) -> CartFace {
     match shape {
         Shape::Mould(mould) => mould_shadow(mould),
         Shape::Own(platform, template) => {
-            let pick = Pick { template, plastic: 0 };
+            let pick = Pick {
+                template,
+                plastic: 0,
+            };
             match (
                 crate::card_art::size(platform, pick),
                 crate::card_art::mask(platform, pick),
@@ -386,7 +406,8 @@ pub fn has_real_media(platform: Platform) -> bool {
             | Platform::Pc98
             | Platform::X68000
             | Platform::ScummVm
-            | Platform::Pico8
+            // PICO-8 没出过实体卡，可它有现成的卡面素材：放进 `Renders/` 就该整张当卡面画，
+            // 不该再给它套一层塑料边框。
             | Platform::Tic80
     )
 }
@@ -412,12 +433,23 @@ pub fn render_of(cart: &Cart) -> Option<PathBuf> {
         let path = label.parent()?.join(RENDERS).join(label.file_name()?);
         path.is_file().then_some(path)
     });
-    beside_label.or_else(|| {
-        let path = labels_dir_of(cart)?
-            .join(RENDERS)
-            .join(format!("{}.png", cart.stem));
-        path.is_file().then_some(path)
-    })
+    beside_label
+        .or_else(|| {
+            let path = labels_dir_of(cart)?
+                .join(RENDERS)
+                .join(format!("{}.png", cart.stem));
+            path.is_file().then_some(path)
+        })
+        .or_else(|| own_picture(cart))
+}
+
+/// A PICO-8 game nobody has drawn art for is shown by its own file, which is its cartridge: the
+/// console keeps the game and a picture of it in one png, whatever the file is called - a `.p8` on
+/// the card is that png under another name. A cart written out as text is no picture at all and
+/// is left to the modelled cart; which is which is told by the bytes and not by the name.
+fn own_picture(cart: &Cart) -> Option<PathBuf> {
+    (cart.platform == Platform::Pico8 && crate::art::png_size(&cart.rom).is_some())
+        .then(|| cart.rom.clone())
 }
 
 /// The size of a cart's face: its mould's, or for a picture of the real cart, the picture fitted
@@ -456,7 +488,11 @@ pub fn label_size(cart: &Cart) -> (u32, u32) {
 pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
     let s = spec_for(cart);
     let pick = crate::card_art::pick_of(cart);
-    let mut face = shell_face(&s, &shell_for(cart), crate::card_art::neutral(cart.platform, pick));
+    let mut face = shell_face(
+        &s,
+        &shell_for(cart),
+        crate::card_art::neutral(cart.platform, pick),
+    );
     let label = match art {
         Some(rgba) => rgba,
         None => generated_label(&s, &label_text(cart)),
@@ -464,6 +500,31 @@ pub fn cart_face_with(cart: &Cart, art: Option<Vec<u8>>) -> CartFace {
     paste_label(&s, &mut face, &label);
     clip_to_silhouette(&s, &mut face);
     face
+}
+
+/// The cart drawn as `choice` makes it, whether or not the card says it is wearing that today:
+/// the shell the picker is holding up, seen before it is chosen. A list can name a plastic and
+/// leave you to guess what it does to this cart; this is the cart itself.
+pub fn shell_preview(cart: &Cart, choice: crate::card_art::Pick) -> CartFace {
+    let s = spec_for_pick(cart, choice);
+    let plastic = choice.plastic.min(crate::card_art::PLASTICS.len() - 1);
+    let shell = crate::shell::Shell {
+        colour: crate::card_art::PLASTICS[plastic],
+        finish: crate::shell::Finish::Solid,
+    };
+    let mut face = shell_face(&s, &shell, crate::card_art::neutral(cart.platform, choice));
+    let label = cover_art(cart, &s).unwrap_or_else(|| generated_label(&s, &label_text(cart)));
+    paste_label(&s, &mut face, &label);
+    clip_to_silhouette(&s, &mut face);
+    face
+}
+
+/// The game's own cover, drawn the size the label box is. The shelf puts it on the cart, so the
+/// row the picker holds up has to put it on too: a cart lettered with the game's name instead
+/// says nothing about the picture, or the plastic, being chosen between.
+fn cover_art(cart: &Cart, s: &Spec) -> Option<Vec<u8>> {
+    let src = cart.label.as_deref()?;
+    crate::art::cover(src, s.label.2, s.label.3)
 }
 
 fn clip_to_silhouette(s: &Spec, face: &mut CartFace) {
@@ -504,7 +565,11 @@ pub fn clean_label(stem: &str) -> String {
         }
         out.push_str(word);
     }
-    if out.is_empty() { stem.to_string() } else { out }
+    if out.is_empty() {
+        stem.to_string()
+    } else {
+        out
+    }
 }
 
 pub fn label_tags(stem: &str) -> Vec<String> {
@@ -630,6 +695,9 @@ fn dress(s: &Spec, rgba: &mut [u8]) {
             rgba[i..i + 3].copy_from_slice(&LABEL_WELL);
         }
     }
+    if !s.stamped {
+        return;
+    }
     let title = match s.mould {
         Mould::Gba => "GAME BOY ADVANCE",
         Mould::Notched => "GAME BOY",
@@ -712,6 +780,108 @@ fn overlay(base: u8, colour: u8) -> u8 {
     out.clamp(0, 255) as u8
 }
 
+/// How much of a picture's own light and shade the plastic it is dyed carries. `1.0` is the
+/// picture's range exactly; **0.8** is what is in use, because a shell recoloured at full range
+/// stops looking like plastic and starts looking like a photograph of a different object.
+const DYE_CONTRAST: f32 = 0.8;
+
+/// How much light a pixel carries: whichever of red, green and blue is the tallest, which is what
+/// makes it the one number a grey drawing can be recoloured by without losing anything.
+fn value_of(px: [u8; 3]) -> u8 {
+    px[0].max(px[1]).max(px[2])
+}
+
+/// Where `p` percent of the plastic's light sits, read off a histogram of it.
+fn percentile(hist: &[u32; 256], total: u32, p: f32) -> u32 {
+    let want = (total as f32 * p / 100.0).ceil().max(1.0) as u32;
+    let mut acc = 0u32;
+    for (light, count) in hist.iter().enumerate() {
+        acc += *count;
+        if acc >= want {
+            return light as u32;
+        }
+    }
+    255
+}
+
+/// A card's own grey picture dyed the colour of the plastic the cart is drawn in, in place.
+///
+/// **The light is what survives, not the colour.** Hue and saturation come from `target` and every
+/// pixel takes them; what is left of the picture afterwards is its relief and nothing else. That
+/// is the whole of what being made of coloured plastic means, and it is what `overlay` could not
+/// do: it blended the colour into the level the pixel was already at, so a pale plastic had no
+/// room above it for a highlight and a dark one none below it for a shadow.
+///
+/// The relief is therefore carried over as the picture's *difference from its own middle* - a seam,
+/// a screw boss and a highlight stay a seam, a screw boss and a highlight - and then **fitted into
+/// the room the picture has rather than clipped**: White sits at 236 to begin with, and the
+/// picture's bright half added to that walks past 255, where every highlight becomes the same 255
+/// and the moulding vanishes into a flat plateau. So the relief is scaled to what fits (`k`) and
+/// the window slid down to meet the ceiling (`shift`): the shape of the light arrives whole and
+/// only its level moves.
+///
+/// Neither a transparent pixel nor the label box is plastic. A cut-out shell is most of its frame
+/// empty, and counting that would drag the middle of the light down until every pixel read as a
+/// highlight and was pushed towards white; the slot is the brightest thing on the page and there
+/// is more of it than there is of most of the shell, which would do the same in the other
+/// direction.
+fn dye(rgba: &mut [u8], w: u32, h: u32, label: (u32, u32, u32, u32), target: [u8; 3]) {
+    let (hue, sat, light) = rgb_to_hsv(target[0], target[1], target[2]);
+    let base = light * 255.0;
+    let (lx, ly, lw, lh) = label;
+    let slot = |x: u32, y: u32| (lx..lx + lw).contains(&x) && (ly..ly + lh).contains(&y);
+    let mut hist = [0u32; 256];
+    for y in 0..h {
+        for x in 0..w {
+            if slot(x, y) {
+                continue;
+            }
+            let i = ((y * w + x) * 4) as usize;
+            if rgba[i + 3] != 0 {
+                hist[value_of([rgba[i], rgba[i + 1], rgba[i + 2]]) as usize] += 1;
+            }
+        }
+    }
+    hist[0] = 0;
+    let total: u32 = hist.iter().sum();
+    if total == 0 {
+        return;
+    }
+    let (mid, lo, hi) = (
+        percentile(&hist, total, 50.0),
+        percentile(&hist, total, 1.0),
+        percentile(&hist, total, 99.0),
+    );
+    let up = (hi as f32 - mid as f32) * DYE_CONTRAST;
+    let dn = (mid as f32 - lo as f32) * DYE_CONTRAST;
+    let span = up + dn;
+    let k = if span > 255.0 { 255.0 / span } else { 1.0 };
+    let mut shift = 0.0;
+    if base + up * k > 255.0 {
+        shift = 255.0 - (base + up * k);
+    }
+    if base - dn * k + shift < 0.0 {
+        shift = dn * k - base;
+    }
+    for y in 0..h {
+        for x in 0..w {
+            if slot(x, y) {
+                continue;
+            }
+            let i = ((y * w + x) * 4) as usize;
+            if rgba[i + 3] == 0 {
+                continue;
+            }
+            let at = value_of([rgba[i], rgba[i + 1], rgba[i + 2]]) as f32;
+            let v = (base + (at - mid as f32) * DYE_CONTRAST * k + shift) / 255.0;
+            let [r, g, b] = hsv_to_rgb(hue, sat, v.clamp(0.0, 1.0));
+            rgba[i] = r;
+            rgba[i + 1] = g;
+            rgba[i + 2] = b;
+        }
+    }
+}
+
 fn shell_face(s: &Spec, shell: &Shell, own: Option<&'static [u8]>) -> CartFace {
     let clear = shell.finish != Finish::Solid;
     let src = own.unwrap_or_else(|| bitmaps::shell_asset(s.mould, clear));
@@ -723,6 +893,14 @@ fn shell_face(s: &Spec, shell: &Shell, own: Option<&'static [u8]>) -> CartFace {
         s.h
     );
     let mut rgba = src.to_vec();
+    // A card's own picture is a grey drawing of a shell, and it is dyed rather than blended: `dye`
+    // carries its relief over into the new colour, where `overlay` crushed the highlights of a
+    // pale plastic and the shadows of a dark one. The built-in asset was drawn for `overlay`
+    // against a flat 50% grey and is still blended that way.
+    let dyed = own.is_some();
+    if dyed {
+        dye(&mut rgba, s.w, s.h, s.label, shell.colour);
+    }
     // The neutral asset is blended with the game's colour everywhere but the label box, which
     // stays the grey of the asset. A clear shell is its own asset with real transparency: what the
     // compositor drew underneath (the board) shows through and stays put while the shell moves.
@@ -732,7 +910,7 @@ fn shell_face(s: &Spec, shell: &Shell, own: Option<&'static [u8]>) -> CartFace {
         for x in 0..s.w {
             let on_label = (lx..lx + lw).contains(&x) && (ly..ly + lh).contains(&y);
             let i = ((y * s.w + x) * 4) as usize;
-            if !on_label {
+            if !on_label && !dyed {
                 for c in 0..3 {
                     rgba[i + c] = overlay(rgba[i + c], shell.colour[c]);
                 }
@@ -827,7 +1005,11 @@ fn generated_label(s: &Spec, title: &str) -> Vec<u8> {
 
 fn ink(bg: [u8; 3]) -> [u8; 3] {
     let luma = 0.2126 * bg[0] as f32 + 0.7152 * bg[1] as f32 + 0.0722 * bg[2] as f32;
-    if luma > 140.0 { [0x1a, 0x18, 0x16] } else { [0xf4, 0xf1, 0xea] }
+    if luma > 140.0 {
+        [0x1a, 0x18, 0x16]
+    } else {
+        [0xf4, 0xf1, 0xea]
+    }
 }
 
 fn paste_label(s: &Spec, face: &mut CartFace, label: &[u8]) {

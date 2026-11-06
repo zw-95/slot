@@ -74,11 +74,7 @@ pub fn date_time_text(secs: i64) -> String {
 /// The date and the time, the time on a 12-hour clock when `twelve`.
 pub fn date_time(secs: i64, twelve: bool) -> String {
     let (_, month, day) = civil_from_days(secs.div_euclid(DAY));
-    format!(
-        "{} {day} {}",
-        month_name(month),
-        time_text(secs, twelve)
-    )
+    format!("{} {day} {}", month_name(month), time_text(secs, twelve))
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]

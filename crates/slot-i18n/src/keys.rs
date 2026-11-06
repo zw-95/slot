@@ -115,7 +115,6 @@ pub enum MsgKey {
     BtnCancel,
     BtnSwap,
     BtnChoose,
-    BtnAllGba,
     BtnMode,
     BtnLink,
     BtnOk,
@@ -175,6 +174,10 @@ pub enum MsgKey {
 
     // The rebuild screen's one line of type.
     RebuildCaching,
+    RowDisplay,
+    ValueDisplayInteger,
+    ValueDisplayFit,
+    ValueDisplayStretch,
 
     // What the radio says when it will not do what it was asked.
     WifiWrongPassword,
@@ -205,6 +208,8 @@ pub enum MsgKey {
 
     // Choosing a shell, and the words on the page that does it.
     PageShell,
+    /// The board of grades and palettes: what a screen's colour is made to look like.
+    PageColour,
     /// "Template 2": which of a platform's pictures a cart is drawn with. `{}` is its number.
     ShellTemplate,
     ShellInUse,
@@ -393,7 +398,7 @@ impl MsgKey {
         MsgKey::MonthDec,
     ];
 
-    pub const ALL: [MsgKey; 287] = [
+    pub const ALL: [MsgKey; 291] = [
         MsgKey::RowFastForward,
         MsgKey::RowFastForwardSound,
         MsgKey::RowScreen,
@@ -492,7 +497,6 @@ impl MsgKey {
         MsgKey::BtnCancel,
         MsgKey::BtnSwap,
         MsgKey::BtnChoose,
-        MsgKey::BtnAllGba,
         MsgKey::BtnMode,
         MsgKey::BtnLink,
         MsgKey::BtnOk,
@@ -537,6 +541,10 @@ impl MsgKey {
         MsgKey::UndoSave,
         MsgKey::UndoLoad,
         MsgKey::RebuildCaching,
+        MsgKey::RowDisplay,
+        MsgKey::ValueDisplayInteger,
+        MsgKey::ValueDisplayFit,
+        MsgKey::ValueDisplayStretch,
         MsgKey::WifiWrongPassword,
         MsgKey::WifiNotInRange,
         MsgKey::WifiCouldNotConnect,
@@ -555,6 +563,7 @@ impl MsgKey {
         MsgKey::CoreThisGame,
         MsgKey::CoreAllOf,
         MsgKey::PageShell,
+        MsgKey::PageColour,
         MsgKey::ShellTemplate,
         MsgKey::ShellInUse,
         MsgKey::PlasticGrey,

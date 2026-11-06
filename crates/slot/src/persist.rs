@@ -6,6 +6,13 @@ pub trait Snapshot {
     fn state(&self) -> Option<Vec<u8>>;
     fn save_ram(&self) -> Option<Vec<u8>>;
     fn thumb(&self) -> Option<Vec<u8>>;
+
+    /// The picture the screen is showing, for a state to keep: the part of the core's frame that
+    /// reaches the screen, stretched when the screen is being filled. The core's whole frame is
+    /// what `thumb` is for, and is what anything that does not know about the screen gets.
+    fn shot(&self, _shot: crate::shot::Shot) -> Option<Vec<u8>> {
+        self.thumb()
+    }
     fn load(&self, state: Vec<u8>);
 
     fn resume_trusted(&self) -> bool {

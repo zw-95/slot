@@ -68,16 +68,26 @@ fn card_with(dir: &str, at: (u32, u32), txt: Option<&str>, pics: &[&str]) -> Tem
 /// The one cart in the card: a ROM of `dir` with a red label beside it.
 fn cart(d: &TempDir, dir: &str, name: &str) -> Cart {
     std::fs::create_dir_all(d.path().join("Games").join(dir)).expect("create games dir");
-    std::fs::write(d.path().join("Games").join(dir).join(name), vec![0u8; 0x200])
-        .expect("write rom");
+    std::fs::write(
+        d.path().join("Games").join(dir).join(name),
+        vec![0u8; 0x200],
+    )
+    .expect("write rom");
     let stem = name.rsplit_once('.').map(|(s, _)| s).unwrap_or(name);
     write_png(
-        &d.path().join("Labels").join(dir).join(format!("{stem}.png")),
+        &d.path()
+            .join("Labels")
+            .join(dir)
+            .join(format!("{stem}.png")),
         64,
         64,
         [220, 30, 30, 255],
     );
-    scan(d.path()).expect("scan").into_iter().next().expect("a cart")
+    scan(d.path())
+        .expect("scan")
+        .into_iter()
+        .next()
+        .expect("a cart")
 }
 
 fn nes(d: &TempDir) -> Cart {
@@ -127,14 +137,26 @@ fn a_medium_may_be_drawn_at_a_size_of_its_own() {
     );
 }
 
+/// A pak is stacked from three bitmaps at one size, so a picture standing in for its shell is
+/// scaled to that size rather than turned away - and its label box goes with it, or the cover
+/// would land somewhere else.
 #[test]
-fn a_game_boy_picture_of_the_wrong_size_is_ignored() {
+fn a_game_boy_picture_of_another_size_is_scaled_to_the_shape() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
-    let d = root();
-    load_card_art(d.path());
-    let want = built_in(Platform::Gb);
     let d = card_with("GB", (GB_CART_W + 8, GB_CART_H), Some(LABEL), &["cart.png"]);
-    assert_eq!(label_size(&gb(&d)), want);
+    let cart = gb(&d);
+    assert_eq!(
+        cart_box(&cart),
+        (GB_CART_W, GB_CART_H),
+        "it is drawn at the shape's size, not its own"
+    );
+    let across = GB_CART_W as f32 / (GB_CART_W + 8) as f32;
+    let (w, h) = LABEL_PX;
+    assert_eq!(
+        label_size(&cart),
+        ((w as f32 * across).round() as u32, h),
+        "the box narrowed by the same scale the picture did"
+    );
 }
 
 #[test]
@@ -170,7 +192,12 @@ fn a_configuration_with_no_label_is_ignored() {
     let d = root();
     load_card_art(d.path());
     let want = built_in(Platform::Nes);
-    let d = card_with("NES", box_of(Platform::Nes), Some("corner = 6"), &["cart.png"]);
+    let d = card_with(
+        "NES",
+        box_of(Platform::Nes),
+        Some("corner = 6"),
+        &["cart.png"],
+    );
     assert_eq!(label_size(&nes(&d)), want);
 }
 
@@ -229,7 +256,11 @@ fn a_template_that_does_not_hold_up_is_dropped_and_the_rest_are_kept() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let txt = "template = 1.png 2.png\nlabel = 5 5 30 30\nlabel.2.png = 9999 5 30 30";
     let d = card_with("NES", box_of(Platform::Nes), Some(txt), &["1.png", "2.png"]);
-    assert_eq!(label_size(&nes(&d)), LABEL_PX, "the good one is still there");
+    assert_eq!(
+        label_size(&nes(&d)),
+        LABEL_PX,
+        "the good one is still there"
+    );
     pick(&d, "NES", "Game = 1 0\n");
     load_card_art(d.path());
     assert_eq!(
@@ -269,8 +300,14 @@ fn a_rounded_corner_keeps_the_label_out_of_it() {
         &["cart.png"],
     );
     let face = cart_face(&nes(&d));
-    assert!(red(&face, 20, 20), "the middle of the label box lost its label");
-    assert!(!red(&face, 5, 5), "the label printed into the rounded corner");
+    assert!(
+        red(&face, 20, 20),
+        "the middle of the label box lost its label"
+    );
+    assert!(
+        !red(&face, 5, 5),
+        "the label printed into the rounded corner"
+    );
 }
 
 #[test]
@@ -278,7 +315,10 @@ fn without_a_corner_the_label_reaches_the_corner() {
     let _turn = TURN.lock().unwrap_or_else(|e| e.into_inner());
     let d = card_with("NES", box_of(Platform::Nes), Some(LABEL), &["cart.png"]);
     let face = cart_face(&nes(&d));
-    assert!(red(&face, 5, 5), "the corner was rounded without being asked");
+    assert!(
+        red(&face, 5, 5),
+        "the corner was rounded without being asked"
+    );
 }
 
 /// The card's own picture is the outline: its alpha is what the face is clipped to.
@@ -294,5 +334,8 @@ fn the_cards_picture_clips_the_face() {
     // Our picture is opaque all over, where the built-in shell is not at its corners.
     let corner = |f: &slot_ui::CartFace| f.rgba[3] as u32;
     assert_eq!(corner(&own), 255);
-    assert!(corner(&plain) < 255, "the built-in shell is cut at a corner");
+    assert!(
+        corner(&plain) < 255,
+        "the built-in shell is cut at a corner"
+    );
 }

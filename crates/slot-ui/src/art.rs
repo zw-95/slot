@@ -174,7 +174,11 @@ fn decode_jpeg_bytes(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {
             })
             .collect(),
     };
-    if rgba.len() == (w * h * 4) as usize { Some((rgba, w, h)) } else { None }
+    if rgba.len() == (w * h * 4) as usize {
+        Some((rgba, w, h))
+    } else {
+        None
+    }
 }
 
 pub(crate) fn decode_png(bytes: &[u8]) -> Option<(Vec<u8>, u32, u32)> {

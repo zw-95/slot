@@ -430,7 +430,11 @@ impl SimBt {
             ("AA:00:00:00:00:01", "8BitDo Pro 2", Kind::Controller),
             ("AA:00:00:00:00:02", "WH-1000XM4", Kind::Audio),
             ("AA:00:00:00:00:03", "Stubborn", Kind::Audio),
-            ("AA:00:00:00:00:04", "Xbox Wireless Controller", Kind::Controller),
+            (
+                "AA:00:00:00:00:04",
+                "Xbox Wireless Controller",
+                Kind::Controller,
+            ),
         ]
     }
 }
@@ -525,7 +529,10 @@ mod tests {
             connected,
         };
         let order = |devices| -> Vec<String> {
-            sorted(devices).into_iter().map(|d: Device| d.name).collect()
+            sorted(devices)
+                .into_iter()
+                .map(|d: Device| d.name)
+                .collect()
         };
         assert_eq!(
             order(vec![
@@ -573,7 +580,10 @@ mod tests {
         bt.pair("AA:00:00:00:00:02");
         let view = settled(&bt, |v| v.audio().is_some());
         assert_eq!(view.audio().map(|d| d.name.as_str()), Some("WH-1000XM4"));
-        assert_eq!(view.devices[0].name, "WH-1000XM4", "the paired one is not first");
+        assert_eq!(
+            view.devices[0].name, "WH-1000XM4",
+            "the paired one is not first"
+        );
 
         bt.pair("AA:00:00:00:00:03");
         let view = settled(&bt, |v| v.error.is_some());
@@ -581,10 +591,15 @@ mod tests {
         assert_eq!(view.error.as_deref(), Some(wanted.as_str()));
 
         bt.pair("AA:00:00:00:00:04");
-        let view = settled(&bt, |v| v.error.as_deref().is_some_and(|e| e.contains("Xbox")));
+        let view = settled(&bt, |v| {
+            v.error.as_deref().is_some_and(|e| e.contains("Xbox"))
+        });
         let wanted = filled(MsgKey::BtWouldNotPair, "Xbox Wireless Controller");
         assert_eq!(view.error.as_deref(), Some(wanted.as_str()));
-        assert!(!view.devices.iter().any(|d| d.name.starts_with("Xbox") && d.connected));
+        assert!(!view
+            .devices
+            .iter()
+            .any(|d| d.name.starts_with("Xbox") && d.connected));
 
         bt.forget("AA:00:00:00:00:02");
         let view = settled(&bt, |v| v.audio().is_none());

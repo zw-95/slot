@@ -42,6 +42,10 @@ pub enum Action {
     CartShell,
     MuteToggle,
     ColourCorrectionToggle,
+    /// Select with Y. The board of grades and palettes: what this screen's colour is made to look
+    /// like. It **opens** a page rather than stepping, because there are too many to step through
+    /// blind — a Game Boy's table alone is 343 long.
+    PaletteBrowser,
     PaletteNext,
     PalettePrev,
     ShaderNext,
@@ -481,7 +485,7 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::Up | Btn::Down | Btn::Left | Btn::Right => display_chord(b)?,
         Btn::L1 => (16, Action::LoadState),
         Btn::R1 => (32, Action::SaveState),
-        Btn::Y => (64, Action::ColourCorrectionToggle),
+        Btn::Y => (64, Action::PaletteBrowser),
         Btn::L2 => (128, Action::PalettePrev),
         Btn::R2 => (256, Action::PaletteNext),
         Btn::A => (512, Action::ShaderNext),

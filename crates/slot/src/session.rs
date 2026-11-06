@@ -540,8 +540,9 @@ impl Session {
         launch(&format!("opening {stem} on {}", core.as_str()));
         self.app.set_core(core);
         self.app.set_platform(platform);
-        self.app
-            .set_video_mode(crate::video_mode::video_mode_for(&self.root, stem));
+        self.app.set_video_mode(crate::video_mode::video_mode_for(
+            &self.root, platform, stem,
+        ));
         self.app.set_link_loaded(serial);
         // An eject's state may still be on its way to the card.
         self.app.settle_saves();

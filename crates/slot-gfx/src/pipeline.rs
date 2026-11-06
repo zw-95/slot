@@ -22,6 +22,24 @@ pub struct GamePass {
     /// Quarter turns counter-clockwise the picture is drawn at.
     rotation: u32,
     u_rot: gl::types::GLint,
+    /// The colour correction: a 3x3, a black point, and the gamma it runs under. Identity, zero
+    /// and 1.0 until something asks for a look, which leaves the picture as the core drew it.
+    u_cc: gl::types::GLint,
+    u_cc_bias: gl::types::GLint,
+    u_cc_gamma: gl::types::GLint,
+    u_pal_on: gl::types::GLint,
+    u_pix_on: gl::types::GLint,
+    /// Two lookup tables: the machine's palette (256x1, read by the picture's own grey) and the
+    /// pixel-art cube (1024x32). Both start as one clear texel, which is what keeps them off.
+    pal: gl::types::GLuint,
+    pix: gl::types::GLuint,
+    /// What the shader is to do to the picture's colour: the 3x3, the black point, the gamma it
+    /// runs under, and which of the two tables it is to read (never both). Defaults to nothing.
+    cc: [[f32; 3]; 3],
+    bias: [f32; 3],
+    gamma: f32,
+    pal_on: bool,
+    pix_on: bool,
     u_rect: gl::types::GLint,
     u_bright: gl::types::GLint,
     u_uv: gl::types::GLint,
@@ -38,6 +56,12 @@ pub struct GamePass {
     effect: ScreenEffect,
     power: f32,
     fills: bool,
+    /// Whether the picture is drawn a whole number of times its own size, and so is never
+    /// resampled: smaller than the room it was given by whatever is left over, and sharp.
+    integer: bool,
+    /// The size of a still being drawn instead of the running picture (`Draw::Shot`), for as long
+    /// as it is being drawn: a photograph is scaled by its own size, not by the core's frame.
+    still: Option<(u32, u32)>,
     /// Pixels kept for the carousel footer. The picture scales in the space above them.
     bottom: f32,
     src: [f32; 4],
@@ -55,12 +79,51 @@ impl GamePass {
             crate::gl::gray_format(),
             Some(&[255]),
         );
-        let (u_rect, u_bright, u_uv, u_mode, u_paper_size, u_pic, u_fbo, u_origin, u_src, u_rot);
+        let pal = crate::gl::texture(
+            1,
+            1,
+            gl::NEAREST,
+            gl::CLAMP_TO_EDGE,
+            gl::RGBA,
+            Some(&[0u8, 0, 0, 0]),
+        );
+        let pix = crate::gl::texture(
+            1,
+            1,
+            gl::NEAREST,
+            gl::CLAMP_TO_EDGE,
+            gl::RGBA,
+            Some(&[0u8, 0, 0, 0]),
+        );
+        let (
+            u_rect,
+            u_bright,
+            u_uv,
+            u_mode,
+            u_paper_size,
+            u_pic,
+            u_fbo,
+            u_origin,
+            u_src,
+            u_rot,
+            u_cc,
+            u_cc_bias,
+            u_cc_gamma,
+            u_pal_on,
+            u_pix_on,
+        );
         unsafe {
             gl::UseProgram(prog);
             gl::Uniform1i(crate::gl::uniform_location(prog, "u_game"), 0);
+            gl::Uniform1i(crate::gl::uniform_location(prog, "u_pal"), 2);
+            gl::Uniform1i(crate::gl::uniform_location(prog, "u_pix"), 3);
             u_src = crate::gl::uniform_location(prog, "u_src");
             u_rot = crate::gl::uniform_location(prog, "u_rot");
+            u_cc = crate::gl::uniform_location(prog, "u_cc");
+            u_cc_bias = crate::gl::uniform_location(prog, "u_cc_bias");
+            u_cc_gamma = crate::gl::uniform_location(prog, "u_cc_gamma");
+            u_pal_on = crate::gl::uniform_location(prog, "u_pal_on");
+            u_pix_on = crate::gl::uniform_location(prog, "u_pix_on");
             gl::Uniform2f(
                 crate::gl::uniform_location(prog, "u_target"),
                 OUT_W as f32,
@@ -84,6 +147,18 @@ impl GamePass {
             aspect: None,
             rotation: 0,
             u_rot,
+            u_cc,
+            u_cc_bias,
+            u_cc_gamma,
+            u_pal_on,
+            u_pix_on,
+            pal,
+            pix,
+            cc: [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            bias: [0.0; 3],
+            gamma: 1.0,
+            pal_on: false,
+            pix_on: false,
             u_rect,
             u_bright,
             u_uv,
@@ -100,6 +175,8 @@ impl GamePass {
             effect: ScreenEffect::Lcd3x,
             power: 1.0,
             fills: false,
+            integer: false,
+            still: None,
             bottom: 0.0,
             src: WHOLE_TEXTURE,
         })
@@ -123,9 +200,25 @@ impl GamePass {
             true => (0.0, 0.0, OUT_W as f32, OUT_H as f32 - foot),
             false => screen_rect_above(self.power, foot),
         };
-        match self.aspect {
+        let rect = match self.aspect {
             Some(aspect) => fit_aspect(rect, aspect),
             None => rect,
+        };
+        match self.integer {
+            true => whole_fit(rect, self.picture_size()),
+            false => rect,
+        }
+    }
+
+    /// How big the drawn part of the frame is in the screen's own pixels at one times: the part
+    /// `src` names, not all the core handed us.
+    fn picture_size(&self) -> (f32, f32) {
+        match self.still {
+            Some((w, h)) => (w as f32, h as f32),
+            None => (
+                self.src[2] * self.texels.0 as f32,
+                self.src[3] * self.texels.1 as f32,
+            ),
         }
     }
 
@@ -139,6 +232,27 @@ impl GamePass {
 
     pub fn set_fills_frame(&mut self, on: bool) {
         self.fills = on;
+    }
+
+    /// Whether the picture is drawn a whole number of times its own size: sharp, and smaller than
+    /// the room it was given by whatever is left over.
+    pub fn set_integer(&mut self, on: bool) {
+        self.integer = on;
+    }
+
+    /// What the picture is being scaled by, for the moment a still stands in for it.
+    pub fn set_still(&mut self, at: Option<(u32, u32)>) {
+        self.still = at;
+    }
+
+    /// What the picture is being held to, and whether it is held to a whole number of times its
+    /// own size: both are read so that a still can put them back when it has been drawn.
+    pub fn aspect(&self) -> Option<f32> {
+        self.aspect
+    }
+
+    pub fn integer(&self) -> bool {
+        self.integer
     }
 
     pub fn set_picture(&mut self, rect: [f32; 4]) {
@@ -249,12 +363,76 @@ impl GamePass {
                 self.pic[2],
                 self.pic[3],
             );
+            // Row-major in, and the driver transposes it: what the shader then multiplies with is
+            // the matrix as written above.
+            gl::UniformMatrix3fv(self.u_cc, 1, gl::TRUE, self.cc.as_ptr() as *const f32);
+            gl::Uniform3f(self.u_cc_bias, self.bias[0], self.bias[1], self.bias[2]);
+            gl::Uniform1f(self.u_cc_gamma, self.gamma);
+            gl::Uniform1f(self.u_pal_on, if self.pal_on { 1.0 } else { 0.0 });
+            gl::Uniform1f(self.u_pix_on, if self.pix_on { 1.0 } else { 0.0 });
             gl::ActiveTexture(gl::TEXTURE1);
             gl::BindTexture(gl::TEXTURE_2D, self.paper);
+            gl::ActiveTexture(gl::TEXTURE2);
+            gl::BindTexture(gl::TEXTURE_2D, self.pal);
+            gl::ActiveTexture(gl::TEXTURE3);
+            gl::BindTexture(gl::TEXTURE_2D, self.pix);
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, tex);
         }
         quad.draw();
+    }
+
+    /// What the picture's colour goes through: a 3x3 in `gamma` space with a black point added
+    /// after it, and neither table. Identity, zero and 1.0 is the default and changes nothing.
+    pub fn set_colour(&mut self, cc: [[f32; 3]; 3], bias: [f32; 3], gamma: f32) {
+        self.cc = cc;
+        self.bias = bias;
+        self.gamma = gamma.max(0.01);
+        self.pal_on = false;
+        self.pix_on = false;
+    }
+
+    /// A greyscale machine's palette, as 256 RGBA texels read by the picture's own grey. One row
+    /// is all it takes: the four shades are interpolated across it on the CPU, so the shader is
+    /// left with a single lookup and nothing to work out.
+    pub fn set_palette_lut(&mut self, rgba: &[u8]) {
+        if rgba.len() < 256 * 4 {
+            return;
+        }
+        unsafe {
+            gl::DeleteTextures(1, &self.pal);
+            self.pal = crate::gl::texture(
+                256,
+                1,
+                gl::NEAREST,
+                gl::CLAMP_TO_EDGE,
+                gl::RGBA,
+                Some(&rgba[..256 * 4]),
+            );
+        }
+        self.pal_on = true;
+        self.pix_on = false;
+    }
+
+    /// The pixel-art cube: 1024x32 RGBA, `x = r + 32*g`, `y = b` — five bits a channel, which is
+    /// every colour the machine can make.
+    pub fn set_pix_lut(&mut self, rgba: &[u8]) {
+        if rgba.len() < 1024 * 32 * 4 {
+            return;
+        }
+        unsafe {
+            gl::DeleteTextures(1, &self.pix);
+            self.pix = crate::gl::texture(
+                1024,
+                32,
+                gl::NEAREST,
+                gl::CLAMP_TO_EDGE,
+                gl::RGBA,
+                Some(&rgba[..1024 * 32 * 4]),
+            );
+        }
+        self.pix_on = true;
+        self.pal_on = false;
     }
 }
 
@@ -278,6 +456,18 @@ pub fn fit_aspect((x, y, w, h): (f32, f32, f32, f32), aspect: f32) -> (f32, f32,
     }
 }
 
+/// The picture at a whole number of times its own size, centred in the room it was given. No pixel
+/// is drawn half a pixel wide, so nothing is resampled: what the picture loses is the odd pixel
+/// or two of room that would have made it blurry.
+fn whole_fit((x, y, w, h): (f32, f32, f32, f32), (pw, ph): (f32, f32)) -> (f32, f32, f32, f32) {
+    if pw <= 0.0 || ph <= 0.0 {
+        return (x, y, w, h);
+    }
+    let scale = (w / pw).min(h / ph).floor().max(1.0);
+    let (nw, nh) = (pw * scale, ph * scale);
+    (x + (w - nw) / 2.0, y + (h - nh) / 2.0, nw, nh)
+}
+
 fn whole_scale(at: f32, len: f32, texels: f32, out: f32) -> (f32, f32) {
     let shown = len * texels;
     let scale = (out / shown).ceil();
@@ -294,6 +484,8 @@ impl Drop for GamePass {
         unsafe {
             gl::DeleteTextures(1, &self.game);
             gl::DeleteTextures(1, &self.paper);
+            gl::DeleteTextures(1, &self.pal);
+            gl::DeleteTextures(1, &self.pix);
             gl::DeleteProgram(self.prog);
         }
     }

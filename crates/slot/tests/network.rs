@@ -819,7 +819,11 @@ fn the_cores_page_downloads_a_core_and_removes_it() {
 fn cast_is_offered_with_the_wifi_on_and_casts_to_the_tv_picked() {
     let (_d, mut a) = on_network_list();
     let cast = slot_ui::TexId::from_raw(903);
-    a.set_net_faces([slot_ui::TexId::from_raw(901), slot_ui::TexId::from_raw(902), cast]);
+    a.set_net_faces([
+        slot_ui::TexId::from_raw(901),
+        slot_ui::TexId::from_raw(902),
+        cast,
+    ]);
     press(&mut a, Btn::B);
     assert_eq!(a.quick_menu(), Some(QuickRow::WifiNetworks));
     for _ in 0..QuickRow::NETWORK.len() {
@@ -830,7 +834,11 @@ fn cast_is_offered_with_the_wifi_on_and_casts_to_the_tv_picked() {
     }
     assert_eq!(a.quick_menu(), Some(QuickRow::Cast), "no Cast row");
     press(&mut a, Btn::A);
-    assert!(matches!(a.phase(), Phase::Casting { .. }), "{:?}", a.phase());
+    assert!(
+        matches!(a.phase(), Phase::Casting { .. }),
+        "{:?}",
+        a.phase()
+    );
     until(&mut a, |a| !list(a).rows.is_empty());
     assert_eq!(list(&a).rows[0].label, "Living Room TV");
     assert_eq!(action(&a).as_deref(), Some("Cast"));
@@ -838,10 +846,18 @@ fn cast_is_offered_with_the_wifi_on_and_casts_to_the_tv_picked() {
     until(&mut a, |a| list(a).status == "Casting to Living Room TV");
     assert_eq!(list(&a).rows[0].detail, "Casting");
     assert_eq!(action(&a).as_deref(), Some("Stop"));
-    assert!(a.net_icons().contains(&cast), "no cast icon in the footer while casting");
+    assert!(
+        a.net_icons().contains(&cast),
+        "no cast icon in the footer while casting"
+    );
     press(&mut a, Btn::A);
-    until(&mut a, |a| list(a).status == "Pick a TV to cast the screen to");
-    assert!(!a.net_icons().contains(&cast), "the cast icon outlived the cast");
+    until(&mut a, |a| {
+        list(a).status == "Pick a TV to cast the screen to"
+    });
+    assert!(
+        !a.net_icons().contains(&cast),
+        "the cast icon outlived the cast"
+    );
 }
 
 #[test]
@@ -854,7 +870,11 @@ fn cast_is_in_the_menu_over_a_game_and_b_goes_back_to_it() {
         ..SlotState::default()
     };
     let mut a = app_playing_with_state(d.path(), set);
-    assert!(matches!(a.phase(), Phase::Playing { .. }), "{:?}", a.phase());
+    assert!(
+        matches!(a.phase(), Phase::Playing { .. }),
+        "{:?}",
+        a.phase()
+    );
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::PLAY.len() {
         if a.in_game_menu() == Some(QuickRow::PlayCast) {
@@ -862,7 +882,11 @@ fn cast_is_in_the_menu_over_a_game_and_b_goes_back_to_it() {
         }
         press(&mut a, Btn::Down);
     }
-    assert_eq!(a.in_game_menu(), Some(QuickRow::PlayCast), "no Cast row over the game");
+    assert_eq!(
+        a.in_game_menu(),
+        Some(QuickRow::PlayCast),
+        "no Cast row over the game"
+    );
     press(&mut a, Btn::A);
     assert_eq!(a.in_game_menu(), None);
     until(&mut a, |a| !list(a).rows.is_empty());
@@ -871,7 +895,11 @@ fn cast_is_in_the_menu_over_a_game_and_b_goes_back_to_it() {
     until(&mut a, |a| list(a).status == "Casting to Living Room TV");
     press(&mut a, Btn::B);
     assert_eq!(a.in_game_menu(), Some(QuickRow::PlayCast));
-    assert!(matches!(a.phase(), Phase::Playing { .. }), "{:?}", a.phase());
+    assert!(
+        matches!(a.phase(), Phase::Playing { .. }),
+        "{:?}",
+        a.phase()
+    );
 }
 
 #[test]

@@ -47,7 +47,17 @@ pub fn open_core(
     rom: &Path,
 ) -> Opened {
     let paths = candidates(root, core);
-    match open_named(root, core, platform, serial, colour, palette, link, &paths, Some(rom)) {
+    match open_named(
+        root,
+        core,
+        platform,
+        serial,
+        colour,
+        palette,
+        link,
+        &paths,
+        Some(rom),
+    ) {
         Some(core) => Opened { core, named: true },
         None => {
             report_missing(core, &paths);
@@ -105,8 +115,7 @@ fn open_named(
     if matches!(
         core,
         Core::Nodosumi | Core::Flycast | Core::ParallelN64 | Core::Ppsspp
-    )
-        && palette.is_none()
+    ) && palette.is_none()
         && link.is_none()
     {
         match open_remote(root, core, platform, serial, colour, paths) {
@@ -117,7 +126,9 @@ fn open_named(
             ),
         }
     }
-    open_here(root, core, platform, serial, colour, palette, link, paths, rom)
+    open_here(
+        root, core, platform, serial, colour, palette, link, paths, rom,
+    )
 }
 
 /// Opens a core that draws with the GPU in a process of its own, `slot --core-host`, which has

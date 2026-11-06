@@ -6,10 +6,12 @@ use std::thread;
 
 use slot_gfx::{Compositor, TexId};
 use slot_store::Cart;
-use slot_ui::{cart_interior, shows_interior, CartFace};
+use slot_ui::{
+    cart_face_with, cart_interior, contain, cover, face_size, label_size, render_of,
+    shows_interior, CartFace,
+};
 
 use crate::app::{App, FaceWant};
-use crate::label_cache::face;
 
 const WORKERS: usize = 2;
 
@@ -36,14 +38,14 @@ pub struct CartFaces {
 }
 
 impl CartFaces {
-    pub fn spawn(root: PathBuf) -> Self {
+    pub fn spawn() -> Self {
         let queue: Shared = Arc::default();
         let (outbox, built) = mpsc::channel();
         for n in 0..WORKERS {
-            let (queue, outbox, root) = (queue.clone(), outbox.clone(), root.clone());
+            let (queue, outbox) = (queue.clone(), outbox.clone());
             let spawned = thread::Builder::new()
                 .name(format!("slot-carts-{n}"))
-                .spawn(move || work(&queue, &outbox, &root));
+                .spawn(move || work(&queue, &outbox));
             if let Err(e) = spawned {
                 eprintln!("slot: cart faces: worker thread failed to start: {e}");
             }
@@ -166,7 +168,26 @@ impl Drop for CartFaces {
     }
 }
 
-fn work(queue: &Shared, outbox: &Sender<Built>, root: &Path) {
+/// A cart's face: the picture of the real cart when the scraper found one, else the modelled cart
+/// with its label on. Drawn from the png whenever a face is needed and kept in memory, nothing
+/// written to the card - a shelf scrolled past used to cost a file a cart, and it is the writing
+/// that wears a card out.
+pub fn face(cart: &Cart) -> CartFace {
+    let (w, h) = face_size(cart);
+    match render_of(cart).and_then(|src| contain(&src, w, h)) {
+        Some(rgba) => CartFace { rgba, w, h },
+        None => cart_face_with(cart, label_art(cart)),
+    }
+}
+
+/// The label's own picture, drawn the size it goes on the cart.
+fn label_art(cart: &Cart) -> Option<Vec<u8>> {
+    let src = cart.label.as_deref()?;
+    let (w, h) = label_size(cart);
+    cover(src, w, h)
+}
+
+fn work(queue: &Shared, outbox: &Sender<Built>) {
     let (lock, wake) = &**queue;
     loop {
         let (key, cart) = {
@@ -181,7 +202,7 @@ fn work(queue: &Shared, outbox: &Sender<Built>, root: &Path) {
                 q = wake.wait(q).unwrap_or_else(|e| e.into_inner());
             }
         };
-        let face = face(root, &cart);
+        let face = face(&cart);
         let interior = shows_interior(&cart).then(|| cart_interior(&cart));
         if outbox.send((key, cart.rom, face, interior)).is_err() {
             return;

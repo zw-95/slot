@@ -85,6 +85,9 @@ enum Cmd {
     Save(Sender<Vec<u8>>),
     Sav(Sender<Option<Vec<u8>>>),
     Thumb(Sender<Option<Vec<u8>>>),
+    /// The picture the screen is showing, for a state to keep: `Thumb` is the core's frame as the
+    /// core gave it out, black bars and all, and this is the part of it that was on the screen.
+    Shot(Sender<Option<Vec<u8>>>, crate::shot::Shot),
     BeginLink(u16, Box<dyn LinkChannel>),
     EndLink,
     BeginCable(u8, Box<dyn LinkChannel>),
@@ -111,6 +114,7 @@ impl Cmd {
             Cmd::SetDisk(_) => 9,
             Cmd::Refresh => 10,
             Cmd::Cheevos(_) => 11,
+            Cmd::Shot(..) => 12,
         }
     }
 }
@@ -289,7 +293,13 @@ impl EmuHandle {
 
     /// What the game's achievements have said since last asked.
     pub fn take_cheevos(&self) -> Vec<slot_cheevos::Notice> {
-        std::mem::take(&mut *self.shared.cheevos.lock().unwrap_or_else(|e| e.into_inner()))
+        std::mem::take(
+            &mut *self
+                .shared
+                .cheevos
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()),
+        )
     }
 
     pub fn end_link(&self) {
@@ -506,6 +516,12 @@ impl Snapshot for EmuSnapshot {
     fn thumb(&self) -> Option<Vec<u8>> {
         let (tx, rx) = channel();
         request(&self.cmds, &self.shared, Cmd::Thumb(tx)).then_some(())?;
+        rx.recv().ok().flatten()
+    }
+
+    fn shot(&self, shot: crate::shot::Shot) -> Option<Vec<u8>> {
+        let (tx, rx) = channel();
+        request(&self.cmds, &self.shared, Cmd::Shot(tx, shot)).then_some(())?;
         rx.recv().ok().flatten()
     }
 
@@ -1180,6 +1196,13 @@ impl Worker {
             }
             Cmd::Thumb(reply) => {
                 let _ = reply.send(crate::thumb::png(core.video_xrgb8888(), core.video_size()));
+            }
+            Cmd::Shot(reply, shot) => {
+                let _ = reply.send(crate::shot::png(
+                    core.video_xrgb8888(),
+                    core.video_size(),
+                    &shot,
+                ));
             }
             Cmd::BeginLink(client_id, t) => {
                 self.shared.link_lost.store(false, Ordering::Relaxed);

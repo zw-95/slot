@@ -155,7 +155,11 @@ impl Polaroids {
     fn draw_photo(&self, out: &mut Vec<Draw>) {
         let (w, h) = (OUT_W as f32, OUT_H as f32);
         out.push(match self.faces.get(self.index) {
-            Some(tex) => Draw::Shot { tex: *tex },
+            Some(tex) => Draw::Shot {
+                tex: *tex,
+                w: PHOTO_W,
+                h: PHOTO_H,
+            },
             None => Draw::Rect {
                 x: 0.0,
                 y: 0.0,

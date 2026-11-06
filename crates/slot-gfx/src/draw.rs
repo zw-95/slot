@@ -48,8 +48,12 @@ pub enum Draw {
         turn: f32,
     },
     Game,
+    /// A state's picture. Its own size comes with it: a photograph is drawn at the size it was
+    /// taken at, a whole number of times over, and not pulled into the shape of the game behind it.
     Shot {
         tex: TexId,
+        w: u32,
+        h: u32,
     },
 }
 

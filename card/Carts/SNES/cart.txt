@@ -1,0 +1,7 @@
+# 模版、封面填充区、四角圆角。
+# corner 写一个数 = 四角同半径；写四个 = 左上 右上 右下 左下（顺时针）。
+template = sfc_base_01.png sfc_base_02.png
+label.sfc_base_01.png = 47 29 376 132
+label.sfc_base_02.png = 113 31 285 130
+corner.sfc_base_01.png = 14
+corner.sfc_base_02.png = 8

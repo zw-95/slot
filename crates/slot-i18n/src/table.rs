@@ -304,9 +304,6 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::En, MsgKey::BtnChoose) => "Choose",
         (Lang::ZhCn, MsgKey::BtnChoose) => "选择",
 
-        (Lang::En, MsgKey::BtnAllGba) => "All GBA",
-        (Lang::ZhCn, MsgKey::BtnAllGba) => "全部 GBA",
-
         (Lang::En, MsgKey::BtnMode) => "Mode",
         (Lang::ZhCn, MsgKey::BtnMode) => "模式",
 
@@ -474,6 +471,14 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         // The rebuild screen's one line of type.
         (Lang::En, MsgKey::RebuildCaching) => "Caching New Labels",
         (Lang::ZhCn, MsgKey::RebuildCaching) => "正在缓存新封面",
+        (Lang::En, MsgKey::RowDisplay) => "Display",
+        (Lang::ZhCn, MsgKey::RowDisplay) => "显示",
+        (Lang::En, MsgKey::ValueDisplayInteger) => "Whole",
+        (Lang::ZhCn, MsgKey::ValueDisplayInteger) => "整数倍",
+        (Lang::En, MsgKey::ValueDisplayFit) => "Fit",
+        (Lang::ZhCn, MsgKey::ValueDisplayFit) => "非整数倍",
+        (Lang::En, MsgKey::ValueDisplayStretch) => "Full",
+        (Lang::ZhCn, MsgKey::ValueDisplayStretch) => "全屏",
 
         // The two racks that are not a system.
         (Lang::En, MsgKey::RackRecents) => "Recents",
@@ -498,6 +503,10 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         // Choosing a shell, and the page that does it.
         (Lang::En, MsgKey::PageShell) => "Shell",
         (Lang::ZhCn, MsgKey::PageShell) => "外壳",
+
+        // The board of colours a screen can be made to wear.
+        (Lang::En, MsgKey::PageColour) => "Colour",
+        (Lang::ZhCn, MsgKey::PageColour) => "配色",
 
         (Lang::En, MsgKey::ShellTemplate) => "Template {}",
         (Lang::ZhCn, MsgKey::ShellTemplate) => "模版 {}",
@@ -663,7 +672,9 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::En, MsgKey::ArtFromBoth) => "Art from ScreenScraper and libretro",
         (Lang::ZhCn, MsgKey::ArtFromBoth) => "封面来自 ScreenScraper 与 libretro",
 
-        (Lang::En, MsgKey::ArtNeedsDevId) => "Signed in, but ScreenScraper needs unslot's developer ID",
+        (Lang::En, MsgKey::ArtNeedsDevId) => {
+            "Signed in, but ScreenScraper needs unslot's developer ID"
+        }
         (Lang::ZhCn, MsgKey::ArtNeedsDevId) => "已登录，但 ScreenScraper 需要 unslot 的开发者 ID",
 
         (Lang::En, MsgKey::ArtFromLibretro) => "Art from libretro-thumbnails",
@@ -675,7 +686,9 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::En, MsgKey::BtnFindMissingArt) => "Find Missing Art",
         (Lang::ZhCn, MsgKey::BtnFindMissingArt) => "补齐缺失封面",
 
-        (Lang::En, MsgKey::ScreenScraperUserPrompt) => "ScreenScraper username, or none to sign out",
+        (Lang::En, MsgKey::ScreenScraperUserPrompt) => {
+            "ScreenScraper username, or none to sign out"
+        }
         (Lang::ZhCn, MsgKey::ScreenScraperUserPrompt) => "ScreenScraper 用户名，留空则退出登录",
 
         (Lang::En, MsgKey::ScreenScraperPasswordPrompt) => "ScreenScraper password for {}",
@@ -703,7 +716,9 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::En, MsgKey::UpdateDownloading) => "Downloading {} {}...",
         (Lang::ZhCn, MsgKey::UpdateDownloading) => "正在下载 {} {}...",
 
-        (Lang::En, MsgKey::UpdateKeepPower) => "Installs when the device restarts. Keep the power connected",
+        (Lang::En, MsgKey::UpdateKeepPower) => {
+            "Installs when the device restarts. Keep the power connected"
+        }
         (Lang::ZhCn, MsgKey::UpdateKeepPower) => "重启后安装，请保持供电",
 
         (Lang::En, MsgKey::UpdateChecking2) => "Checking for updates...",
@@ -811,7 +826,9 @@ pub fn text(lang: Lang, key: MsgKey) -> &'static str {
         (Lang::En, MsgKey::WifiAlreadyOn) => "Already connected to {}",
         (Lang::ZhCn, MsgKey::WifiAlreadyOn) => "已经连接到 {}",
 
-        (Lang::En, MsgKey::WifiEnterpriseUnsupported) => "Enterprise and WEP networks are not supported",
+        (Lang::En, MsgKey::WifiEnterpriseUnsupported) => {
+            "Enterprise and WEP networks are not supported"
+        }
         (Lang::ZhCn, MsgKey::WifiEnterpriseUnsupported) => "不支持企业网络与 WEP",
 
         (Lang::En, MsgKey::WifiPasswordPrompt) => "Password for {}",

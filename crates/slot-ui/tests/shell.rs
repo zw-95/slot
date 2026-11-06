@@ -211,9 +211,7 @@ fn a_shell_without_a_label_image_is_one_plastic() {
     for y in 0..LABEL_Y {
         for x in 0..f.w {
             let i = ((y * f.w + x) * 4) as usize;
-            if f.rgba[i + 3] > 200
-                && [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]] != flat
-            {
+            if f.rgba[i + 3] > 200 && [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2]] != flat {
                 letters += 1;
             }
         }

@@ -17,6 +17,16 @@ pub const GET_VARIABLE_UPDATE: c_uint = 17;
 pub const GET_RUMBLE_INTERFACE: c_uint = 23;
 pub const GET_LOG_INTERFACE: c_uint = 27;
 pub const GET_PERF_INTERFACE: c_uint = 28;
+/// Three even a card-thin host can answer honestly: where the art that ships beside a core lives,
+/// who is playing, and which language the machine speaks. EasyRPG asks all three and reads the
+/// answers without checking, which is how it came to strcmp a null.
+pub const GET_CORE_ASSETS_DIRECTORY: c_uint = 30;
+pub const GET_USERNAME: c_uint = 38;
+pub const GET_LANGUAGE: c_uint = 39;
+/// Asked before a core uses the newer options tables. False is the true answer here, and the one
+/// that sends such a core back to SET_VARIABLES, which is answered.
+pub const GET_CORE_OPTIONS_VERSION: c_uint = 52;
+pub const GET_INPUT_MAX_USERS: c_uint = 61;
 pub const GET_SAVE_DIRECTORY: c_uint = 31;
 pub const SET_SYSTEM_AV_INFO: c_uint = 32;
 pub const SET_MEMORY_MAPS: c_uint = 36 | 0x10000;

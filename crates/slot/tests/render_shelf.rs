@@ -4,14 +4,11 @@ mod common;
 
 use std::sync::{Mutex, MutexGuard, PoisonError};
 
-use slot::app::App;
+use slot::app::{App, Phase};
 use slot_gfx::{Compositor, HeadlessSurface, TexId, OUT_H, OUT_W};
 use slot_input::{Action, Btn};
-use slot_store::{write_slot_state, Core, Platform, SlotState};
-use slot_ui::{
-    arrows_hint_face, board_face, cart_face, chip_face, chip_shadow_face, edge, hint_face, housing,
-    mould_shadow, opening, padded, recess, socket_face, Mould, TURN_PAD,
-};
+use slot_store::{write_slot_state, Platform, SlotState};
+use slot_ui::{cart_face, edge, housing, mould_shadow, opening, recess, Mould};
 use tempfile::TempDir;
 
 static GL: Mutex<()> = Mutex::new(());
@@ -41,51 +38,6 @@ fn upload_faces(app: &mut App, c: &mut Compositor) {
         let shadow = tex(c, shadow.w, shadow.h, &shadow.rgba);
         app.set_cart_shadow(mould, shadow);
     }
-
-    let sockets = slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
-        .iter()
-        .map(|k| {
-            let f = socket_face(*k);
-            tex(c, f.w, f.h, &f.rgba)
-        })
-        .collect();
-    let chips = slot_store::Platform::Gba.spec().cores[..slot_ui::SOCKET_U.len()]
-        .iter()
-        .map(|k| {
-            let f = chip_face(Some(*k));
-            tex(c, f.w, f.h, &f.rgba)
-        })
-        .collect();
-    let blank = chip_face(None);
-    let blank = tex(c, blank.w, blank.h, &blank.rgba);
-    let chip_shadow = chip_shadow_face();
-    let chip_shadow = tex(c, chip_shadow.w, chip_shadow.h, &chip_shadow.rgba);
-    app.set_core_part_faces(sockets, chips, blank, chip_shadow);
-
-    let legend = [
-        hint_face("B", "Cancel"),
-        arrows_hint_face("Swap"),
-        hint_face("A", "Choose"),
-        hint_face("Y", "All GBA"),
-    ]
-    .into_iter()
-    .map(|f| (tex(c, f.w, f.h, &f.rgba), f.w))
-    .collect();
-    app.set_core_legend_faces(legend);
-
-    let highlighted = app.selected_stem().map(str::to_string);
-    let Some(cart) = app
-        .carts()
-        .find(|c| highlighted.as_deref() == Some(c.stem.as_str()))
-        .cloned()
-    else {
-        return;
-    };
-    let board = board_face(&cart);
-    let board = tex(c, board.w, board.h, &board.rgba);
-    let lid = padded(&cart_face(&cart), TURN_PAD);
-    let lid = tex(c, lid.w, lid.h, &lid.rgba);
-    app.set_core_board_faces(board, lid);
 }
 
 fn shelf(d: &TempDir, c: &mut Compositor) -> App {
@@ -143,10 +95,9 @@ fn start_draws_the_plain_shelf_on_a_system_with_one_core() {
     let_it_hop(&mut untouched);
     let plain = shot(&untouched, &mut c, "ws-plain");
     let after = shot(&pressed, &mut c, "ws-after-start");
-    assert_eq!(
-        pressed.core_picker(),
-        None,
-        "a WonderSwan cart opened the GBA picker"
+    assert!(
+        !matches!(pressed.phase(), Phase::Cores { .. }),
+        "a WonderSwan cart opened a core list"
     );
     assert!(
         after == plain,
@@ -162,10 +113,9 @@ fn start_draws_the_plain_shelf_on_a_system_with_one_core() {
     let_it_hop(&mut untouched);
     let plain = shot(&untouched, &mut c, "gba-plain");
     let after = shot(&pressed, &mut c, "gba-after-start");
-    assert_eq!(
-        pressed.core_picker(),
-        Some(Core::Mgba),
-        "START stopped opening the picker"
+    assert!(
+        matches!(pressed.phase(), Phase::Cores { .. }),
+        "START stopped opening the core list"
     );
     assert!(
         after != plain,

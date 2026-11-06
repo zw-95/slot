@@ -28,7 +28,10 @@ fn deduped(lang: Lang) -> (usize, Vec<&'static str>) {
 
 #[test]
 fn the_menu_bakes_as_many_labels_in_one_tongue_as_in_the_other() {
-    let said: Vec<_> = Lang::ALL.iter().map(|&lang| (lang, deduped(lang))).collect();
+    let said: Vec<_> = Lang::ALL
+        .iter()
+        .map(|&lang| (lang, deduped(lang)))
+        .collect();
     set_lang(Lang::En);
     let counts: Vec<_> = said.iter().map(|(lang, (n, _))| (*lang, *n)).collect();
     assert!(

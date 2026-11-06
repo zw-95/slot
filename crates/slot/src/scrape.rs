@@ -1115,8 +1115,7 @@ game (
                         let mut img = vec![0u8; 24 * 24 * 4];
                         for y in 4..20 {
                             for x in 4..20 {
-                                img[(y * 24 + x) * 4..][..4]
-                                    .copy_from_slice(&[0, 200, 0, 255]);
+                                img[(y * 24 + x) * 4..][..4].copy_from_slice(&[0, 200, 0, 255]);
                             }
                         }
                         Ok(Some(encode_rgba(&img, 24, 24)))
@@ -1150,7 +1149,11 @@ game (
         let cart = &slot_store::scan(d.path()).unwrap()[0];
         let (w, h) = slot_ui::label_size(cart);
         let label = slot_ui::cover(cart.label.as_deref().unwrap(), w, h).unwrap();
-        assert_eq!(label[..4], [10, 20, 240, 255], "the label is not the scan of the real one");
+        assert_eq!(
+            label[..4],
+            [10, 20, 240, 255],
+            "the label is not the scan of the real one"
+        );
         let render = slot_ui::render_of(cart).expect("the render was not kept");
         assert!(slot_ui::is_cutout(&std::fs::read(render).unwrap()));
     }

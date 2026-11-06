@@ -206,6 +206,14 @@ pub struct SlotState {
     pub ff_sound: bool,
     /// One a platform, in `Platform::ALL` order.
     pub screens: [Screen; Platform::COUNT],
+    /// The look the browser picked, one a platform and in the same order: an index into `GRADES`
+    /// for a colour machine, into `GB_PALETTES` for a Game Boy. **0 is the machine's own output**
+    /// on either table, so a card that never opened the browser is untouched.
+    ///
+    /// Kept beside `screens` rather than inside `Screen` because that is the one place a card's
+    /// own screen settings are written out field by field, and this is a pick of a different
+    /// kind: not on/off, but which of hundreds.
+    pub palettes: [u16; Platform::COUNT],
     pub eject_save: bool,
     pub turbo: bool,
     pub rewind: bool,
@@ -364,6 +372,7 @@ impl Default for SlotState {
             ff_speed: FF_SPEED_DEFAULT,
             ff_sound: false,
             screens: Platform::ALL.map(Screen::default_for),
+            palettes: [0; Platform::COUNT],
             eject_save: true,
             turbo: true,
             rewind: true,
@@ -472,6 +481,7 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
             "colour_correction_{key}={}\n",
             screen.colour_correction as u8
         ));
+        text.push_str(&format!("palette_{key}={}\n", s.palettes[p.index()]));
         text.push_str(&format!("shader_{key}={}\n", screen.shader.name()));
         text.push_str(&format!("bezel_{key}={}\n", screen.bezel.key()));
     }
@@ -523,6 +533,8 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut ff_sound = None;
     let mut colour_correction = None;
     let mut colour_corrections: [Option<bool>; Platform::COUNT] = [None; Platform::COUNT];
+    let mut palette_picks: [Option<u16>; Platform::COUNT] = [None; Platform::COUNT];
+    let mut palette = None;
     let mut shaders: [Option<Shader>; Platform::COUNT] = [None; Platform::COUNT];
     let mut bezels: [Option<BezelPick>; Platform::COUNT] = std::array::from_fn(|_| None);
     let mut eject_save = None;
@@ -558,6 +570,7 @@ fn parse(text: &str) -> Option<SlotState> {
         if let Some((setting, p)) = per_platform(key) {
             match setting {
                 "colour_correction" => colour_corrections[p.index()] = flag(value),
+                "palette" => palette_picks[p.index()] = value.trim().parse().ok(),
                 "shader" => {
                     shaders[p.index()] =
                         Shader::parse(value).filter(|s| p.spec().shaders.contains(s))
@@ -581,6 +594,7 @@ fn parse(text: &str) -> Option<SlotState> {
             "ff_speed" => ff_speed = ff_speed_value(value),
             "ff_sound" => ff_sound = flag(value),
             "colour_correction" => colour_correction = flag(value),
+            "palette" => palette = value.trim().parse().ok(),
             "eject_save" => eject_save = flag(value),
             "turbo" => turbo = flag(value),
             "rewind" => rewind = flag(value),
@@ -627,6 +641,16 @@ fn parse(text: &str) -> Option<SlotState> {
             bezel: bezels[at].clone().unwrap_or(own.bezel),
         }
     });
+    // A pick walks the same three steps the screen settings do: this machine's own line, then the
+    // machine it inherits from, then the one line that speaks for every machine at once.
+    let palettes = Platform::ALL.map(|p| {
+        let at = p.index();
+        let parent = settings_parent(p).map(Platform::index);
+        palette_picks[at]
+            .or_else(|| parent.and_then(|q| palette_picks[q]))
+            .or(palette)
+            .unwrap_or(0)
+    });
     Some(SlotState {
         cart: if cart.is_empty() { None } else { Some(cart) },
         cart_platform,
@@ -642,6 +666,7 @@ fn parse(text: &str) -> Option<SlotState> {
         ff_speed: ff_speed.unwrap_or(fallback.ff_speed),
         ff_sound: ff_sound.unwrap_or(fallback.ff_sound),
         screens,
+        palettes,
         eject_save: eject_save.unwrap_or(fallback.eject_save),
         turbo: turbo.unwrap_or(fallback.turbo),
         rewind: rewind.unwrap_or(fallback.rewind),

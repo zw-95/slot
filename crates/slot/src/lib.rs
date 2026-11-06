@@ -8,27 +8,25 @@ pub mod bootlogo;
 pub mod build_info;
 pub mod cable;
 pub mod card_log;
-pub mod cheevos;
 pub mod cart_faces;
 pub mod cast;
+pub mod cheevos;
 pub mod core;
 pub mod core_downloads;
-pub mod core_picker;
 #[cfg(unix)]
 pub mod crash;
 #[cfg(not(unix))]
 pub mod crash {
     pub fn install() {}
 }
+pub mod display;
 pub mod drc;
 pub mod emu;
-pub mod face_builder;
 pub mod frames;
 pub mod frontend;
 pub mod gpu;
 pub mod input;
 pub mod json;
-pub mod label_cache;
 pub mod latency;
 pub mod link_art_builder;
 pub mod link_kind;
@@ -38,6 +36,8 @@ pub mod link_screen;
 pub mod link_start;
 pub mod link_state;
 pub mod pak;
+pub mod palette_store;
+pub mod palettes;
 pub mod panel_turn;
 pub mod persist;
 pub mod prefetch;
@@ -48,6 +48,7 @@ pub mod scrape;
 pub mod search;
 pub mod services;
 pub mod session;
+pub mod shot;
 pub mod state_writer;
 pub mod thumb;
 pub mod update;

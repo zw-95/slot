@@ -4,7 +4,7 @@ use std::marker::PhantomData;
 use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Condvar, Mutex};
+use std::sync::{Condvar, Mutex, OnceLock};
 
 use libloading::Library;
 use slot_ftrace::{self as ft, ev};
@@ -40,6 +40,20 @@ pub enum Canvas {
     Native,
 }
 
+/// The answer of last resort for a variable nobody set or declared: a core that reads the value
+/// without looking at whether its question was answered is handed the empty string, never null.
+static EMPTY: &[std::os::raw::c_char] = &[0];
+
+/// Who is playing, for cores that write a name into their own file or onto their own screen. A core
+/// that reads this one unasked gets an answer too, rather than nothing to read.
+static WHO: &[std::os::raw::c_char] = &[
+    b's' as std::os::raw::c_char,
+    b'l' as std::os::raw::c_char,
+    b'o' as std::os::raw::c_char,
+    b't' as std::os::raw::c_char,
+    0,
+];
+
 struct Host {
     video: Vec<u8>,
     size: (u32, u32),
@@ -63,6 +77,9 @@ struct Host {
     options: std::collections::HashMap<String, std::ffi::CString>,
     options_dirty: bool,
     declared: std::collections::HashMap<String, Vec<String>>,
+    /// Each declared option's default, the first of the values the core offered, kept ready to
+    /// hand to one that asks for a value the card has no setting for.
+    defaults: std::collections::HashMap<String, std::ffi::CString>,
     /// Each declared option's key and what the core calls it, in the order it gave them.
     labels: Vec<(String, String)>,
     /// The context of a core that draws with the GPU.
@@ -165,7 +182,10 @@ extern "C" fn slot_retro_log_line(level: c_uint, line: *const c_char) {
 /// Microseconds on a steady clock, which Flycast reads unasked around its save states.
 extern "C" fn perf_time_usec() -> i64 {
     static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-    START.get_or_init(std::time::Instant::now).elapsed().as_micros() as i64
+    START
+        .get_or_init(std::time::Instant::now)
+        .elapsed()
+        .as_micros() as i64
 }
 
 extern "C" fn perf_cpu_features() -> u64 {
@@ -227,6 +247,34 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             })
             .unwrap_or(false)
         }
+        // Art and tables that ship beside a core rather than in System: EasyRPG keeps its fonts and
+        // its translations there, and asked where they were.
+        GET_CORE_ASSETS_DIRECTORY => {
+            if data.is_null() {
+                return false;
+            }
+            with_host(|h| {
+                *(data as *mut *const c_char) = h.system_dir.as_ptr();
+                true
+            })
+            .unwrap_or(false)
+        }
+        GET_USERNAME => {
+            if data.is_null() {
+                return false;
+            }
+            *(data as *mut *const c_char) = WHO.as_ptr();
+            true
+        }
+        // English, which is the one language this machine speaks. EasyRPG picks which translation
+        // of a game to load by it.
+        GET_LANGUAGE => {
+            if data.is_null() {
+                return false;
+            }
+            *(data as *mut c_uint) = 0;
+            true
+        }
         GET_VARIABLE => {
             if data.is_null() {
                 return false;
@@ -238,15 +286,18 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             let Ok(key) = std::ffi::CStr::from_ptr(var.key).to_str() else {
                 return false;
             };
-            with_host(|h| match h.options.get(key) {
-                Some(value) => {
-                    var.value = value.as_ptr();
-                    true
-                }
-                None => {
-                    var.value = ptr::null();
-                    false
-                }
+            with_host(|h| {
+                // What the card holds for it; else the default the core declared, which is the
+                // first of the values it offered; else the empty string. A core that takes the
+                // value it asked for at its word and strcmps it without a glance — EasyRPG's
+                // does — must never be handed a null one.
+                var.value = h
+                    .options
+                    .get(key)
+                    .map(|v| v.as_ptr())
+                    .or_else(|| h.defaults.get(key).map(|v| v.as_ptr()))
+                    .unwrap_or(EMPTY.as_ptr());
+                true
             })
             .unwrap_or(false)
         }
@@ -265,6 +316,7 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             if data.is_null() {
                 return with_host(|h| {
                     h.declared.clear();
+                    h.defaults.clear();
                     h.labels.clear();
                 })
                 .is_some();
@@ -298,6 +350,13 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
                 p = p.add(1);
             }
             with_host(|h| {
+                h.defaults = list
+                    .iter()
+                    .filter_map(|(k, values)| {
+                        let first = CString::new(values.first()?.as_str()).ok()?;
+                        Some((k.clone(), first))
+                    })
+                    .collect();
                 h.declared = list;
                 h.labels = labels;
             })
@@ -485,8 +544,54 @@ unsafe extern "C" fn environment(cmd: c_uint, data: *mut c_void) -> bool {
             let maps = MemoryMaps::copy(&*(data as *const MemoryMap));
             with_host(|h| h.memory_maps = maps).is_some()
         }
-        _ => false,
+        _ => {
+            unanswered(cmd);
+            false
+        }
     }
+}
+
+/// What an unanswered call is called, read off `libretro.h`. The number comes along, so a name that
+/// has drifted can still be counted out by hand.
+fn env_name(cmd: c_uint) -> &'static str {
+    const GET_VFS_INTERFACE: c_uint = 45 | 0x10000;
+    const GET_AUDIO_VIDEO_ENABLE: c_uint = 47 | 0x10000;
+    const GET_MIDI_INTERFACE: c_uint = 48 | 0x10000;
+    const GET_TARGET_REFRESH_RATE: c_uint = 50 | 0x10000;
+    match cmd {
+        GET_CORE_OPTIONS_VERSION => "GET_CORE_OPTIONS_VERSION",
+        GET_INPUT_MAX_USERS => "GET_INPUT_MAX_USERS",
+        SET_ROTATION => "SET_ROTATION",
+        GET_VFS_INTERFACE => "GET_VFS_INTERFACE",
+        GET_AUDIO_VIDEO_ENABLE => "GET_AUDIO_VIDEO_ENABLE",
+        GET_MIDI_INTERFACE => "GET_MIDI_INTERFACE",
+        GET_TARGET_REFRESH_RATE => "GET_TARGET_REFRESH_RATE",
+        53 => "SET_CORE_OPTIONS_UPDATE_CALLBACK",
+        59 => "SET_CORE_OPTIONS_INTL",
+        60 => "SET_CORE_OPTIONS_DISPLAY",
+        64 => "SET_KEYBOARD_CALLBACK",
+        _ => "unknown",
+    }
+}
+
+/// **What this is for**: a core that comes up blank and says nothing gives no other way to learn
+/// what it wanted. EasyRPG crashed in a strcmp on a value nobody had answered, and the way it was
+/// found was guesswork; this prints the question instead. Once each, because the ones a core asks
+/// about its own business are asked every frame.
+fn unanswered(cmd: c_uint) {
+    static SEEN: OnceLock<Mutex<Vec<c_uint>>> = OnceLock::new();
+    let Ok(mut seen) = SEEN.get_or_init(Default::default).lock() else {
+        return;
+    };
+    if seen.contains(&cmd) {
+        return;
+    }
+    seen.push(cmd);
+    eprintln!(
+        "slot: retro: the core asked {} ({}) and nobody answered",
+        env_name(cmd),
+        cmd
+    );
 }
 
 /// Opens the tray, changes the disc and closes it again, the order cores expect. None when the
@@ -928,6 +1033,7 @@ impl LibretroCore {
             options: std::collections::HashMap::new(),
             options_dirty: false,
             declared: std::collections::HashMap::new(),
+            defaults: std::collections::HashMap::new(),
             labels: Vec::new(),
             hw: None,
             memory_maps: MemoryMaps::default(),
@@ -1321,6 +1427,7 @@ mod tests {
             options,
             options_dirty,
             declared: HashMap::new(),
+            defaults: HashMap::new(),
             labels: Vec::new(),
             hw: None,
             memory_maps: MemoryMaps::default(),
@@ -1413,7 +1520,27 @@ mod tests {
     }
 
     #[test]
-    fn get_variable_reports_false_for_an_unknown_key() {
+    fn get_variable_hands_the_core_the_default_it_declared() {
+        let mut host = host_with(HashMap::new(), false);
+        let (a, _ak, _av) = declaration("easyrpg_option", "Debug; enabled|disabled");
+        let list = [a, end_of_list()];
+        let _active = Active::bind(&mut host);
+        unsafe { environment(SET_VARIABLES, list.as_ptr() as *mut c_void) };
+
+        let key = CString::new("easyrpg_option").unwrap();
+        let mut var = Variable {
+            key: key.as_ptr(),
+            value: ptr::null(),
+        };
+        let ok = unsafe { environment(GET_VARIABLE, &mut var as *mut Variable as *mut c_void) };
+
+        assert!(ok);
+        let value = unsafe { CStr::from_ptr(var.value) };
+        assert_eq!(value.to_str().unwrap(), "enabled");
+    }
+
+    #[test]
+    fn get_variable_hands_a_key_nobody_set_the_empty_string_not_a_null_one() {
         let mut host = host_with(HashMap::new(), false);
         let _active = Active::bind(&mut host);
 
@@ -1424,8 +1551,11 @@ mod tests {
         };
         let ok = unsafe { environment(GET_VARIABLE, &mut var as *mut Variable as *mut c_void) };
 
-        assert!(!ok);
-        assert!(var.value.is_null());
+        // A core that strcmps the value without looking at whether its question was answered —
+        // EasyRPG's does — would be reading through null otherwise.
+        assert!(ok);
+        let value = unsafe { CStr::from_ptr(var.value) };
+        assert_eq!(value.to_str().unwrap(), "");
     }
 
     #[test]
@@ -2174,14 +2304,21 @@ mod tests {
             .join()
             .unwrap();
         *PADS.lock().unwrap() = ([0; 2], [[0; 4]; 2]);
-        assert_eq!(mask as u16, ButtonMask::A, "the pads last handed over, not none held");
+        assert_eq!(
+            mask as u16,
+            ButtonMask::A,
+            "the pads last handed over, not none held"
+        );
     }
 
     #[test]
     fn flycast_finds_the_callbacks_it_calls_unasked() {
         let mut clear: Option<EnvironmentFn> = None;
         let ok = unsafe {
-            environment(GET_CLEAR_ALL_THREAD_WAITS_CB, &mut clear as *mut _ as *mut c_void)
+            environment(
+                GET_CLEAR_ALL_THREAD_WAITS_CB,
+                &mut clear as *mut _ as *mut c_void,
+            )
         };
         assert!(ok && clear.is_some(), "unloading calls it without a check");
 
@@ -2195,11 +2332,17 @@ mod tests {
             perf_log: ptr::null(),
         };
         let ok = unsafe { environment(GET_PERF_INTERFACE, &mut perf as *mut _ as *mut c_void) };
-        assert!(ok && !perf.get_time_usec.is_null(), "save states time themselves with it");
+        assert!(
+            ok && !perf.get_time_usec.is_null(),
+            "save states time themselves with it"
+        );
 
         let mut ff = true;
         let ok = unsafe { environment(GET_FASTFORWARDING, &mut ff as *mut bool as *mut c_void) };
-        assert!(ok && !ff, "it sends no sound while it thinks it is fast-forwarding");
+        assert!(
+            ok && !ff,
+            "it sends no sound while it thinks it is fast-forwarding"
+        );
     }
 
     /// The tests that fill THREAD_AUDIO, one at a time.

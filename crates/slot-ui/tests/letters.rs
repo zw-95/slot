@@ -171,7 +171,10 @@ fn up_and_down_step_through_the_letters_a_chinese_name_sounds_like() {
     s.jump_next_letter();
     assert_eq!(s.carts[s.index].stem, "Zelda");
     s.jump_prev_letter();
-    assert_eq!(s.carts[s.index].stem, "腾讯翻译", "back from Z is T, not 腾");
+    assert_eq!(
+        s.carts[s.index].stem, "腾讯翻译",
+        "back from Z is T, not 腾"
+    );
 }
 
 #[test]

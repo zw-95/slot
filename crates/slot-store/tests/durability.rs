@@ -228,6 +228,7 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
                     bezel: BezelPick::Ags102,
                 },
             ]),
+            palettes: std::array::from_fn(|_| 0),
             eject_save: true,
             turbo: true,
             rewind: true,
