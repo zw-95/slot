@@ -8,11 +8,11 @@ use slot::app::{App, Phase};
 use slot_input::{Action, Btn};
 use slot_store::{
     read_slot_state, write_slot_state, Appearance, BezelPick, Platform, Shader, SlotState,
-    WallpaperPick,
+    SpColour, WallpaperPick,
 };
 use slot_ui::{
     Draw, Icon, QuickMenuFaces, QuickRow, QuickValue, TexId, HINT_EDGE, MENU_PAD, MOUTH_H, OUT_H,
-    OUT_W, QUICK_EDGE, QUICK_LABEL_X,
+    OUT_W, QUICK_EDGE, QUICK_LABEL_X, QUICK_ROWS_MAX,
 };
 use tempfile::TempDir;
 
@@ -207,15 +207,74 @@ fn theme_switches_between_dark_and_light_and_saves() {
     let (d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Theme);
     assert_eq!(a.quick_menu(), Some(QuickRow::Theme));
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Dark));
+    assert_eq!(a.resolved_appearance(), Appearance::Dark);
+    assert!(!a.light());
     press(&mut a, Btn::Right);
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Light));
+    assert_eq!(a.resolved_appearance(), Appearance::Light);
+    assert!(a.light());
     assert_eq!(read_slot_state(d.path()).appearance, Appearance::Light);
     press(&mut a, Btn::A);
     assert_eq!(a.quick_menu(), Some(QuickRow::Theme), "theme opened a page");
     press(&mut a, Btn::Left);
-    assert_eq!(a.quick_value(QuickRow::Theme), Some(QuickValue::Dark));
+    assert_eq!(a.resolved_appearance(), Appearance::Dark);
     assert_eq!(read_slot_state(d.path()).appearance, Appearance::Dark);
+}
+
+#[test]
+fn theme_goes_on_through_the_sp_colours_and_wraps() {
+    let (d, mut a, _) = on_carousel();
+    open_at(&mut a, QuickRow::Theme);
+    press(&mut a, Btn::Right);
+    press(&mut a, Btn::Right);
+    assert_eq!(a.resolved_appearance(), Appearance::Sp(SpColour::Graphite));
+    assert!(!a.light(), "graphite is printed on in white");
+    press(&mut a, Btn::Right);
+    assert_eq!(a.resolved_appearance(), Appearance::Sp(SpColour::Platinum));
+    assert!(a.light(), "platinum is printed on in black");
+    assert_eq!(
+        read_slot_state(d.path()).appearance,
+        Appearance::Sp(SpColour::Platinum)
+    );
+    for _ in 0..3 {
+        press(&mut a, Btn::Right);
+    }
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Sp(SpColour::PearlBlueDark)
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Dark,
+        "no sets of your own, so it wraps"
+    );
+}
+
+#[test]
+fn a_slot_of_your_own_on_the_card_comes_after_the_sp_colours() {
+    let (d, mut a, _) = on_carousel();
+    let mine = d.path().join(slot::slot_skin::OWN).join("Atomic Purple");
+    std::fs::create_dir_all(&mine).unwrap();
+    std::fs::write(mine.join("slot_back.png"), b"png").unwrap();
+    std::fs::write(mine.join("slot_front.png"), b"png").unwrap();
+    // Without a front it is not a slot.
+    std::fs::create_dir_all(d.path().join(slot::slot_skin::OWN).join("Half")).unwrap();
+    open_at(&mut a, QuickRow::Theme);
+    press(&mut a, Btn::Left);
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Own("Atomic Purple".into())
+    );
+    assert_eq!(
+        read_slot_state(d.path()).appearance,
+        Appearance::Own("Atomic Purple".into())
+    );
+    std::fs::remove_dir_all(&mine).unwrap();
+    assert_eq!(
+        a.resolved_appearance(),
+        Appearance::Dark,
+        "a set taken off the card"
+    );
 }
 
 #[test]
@@ -233,6 +292,7 @@ fn up_and_down_move_the_bar_and_wrap_at_the_ends() {
         QuickRow::Screen,
         QuickRow::Game,
         QuickRow::Network,
+        QuickRow::Online,
         QuickRow::Power,
         QuickRow::About,
         QuickRow::General,
@@ -353,6 +413,74 @@ fn each_systems_colour_correction_flips_on_either_arrow_and_saves_alone() {
 }
 
 #[test]
+fn a_hardcore_game_has_no_rewind_or_loaded_state_until_hardcore_is_turned_off() {
+    let (d, mut a, _) = on_carousel();
+    assert!(a.may_rewind() && a.may_load_state());
+    open_at(&mut a, QuickRow::Hardcore);
+    press(&mut a, Btn::Right);
+    assert!(read_slot_state(d.path()).hardcore);
+    assert!(a.wants_hardcore());
+    assert!(
+        a.may_rewind(),
+        "turning hardcore on waits for the next game"
+    );
+    // As the session does when a game starts with it on.
+    a.set_hardcore_game(true);
+    assert!(!a.may_rewind(), "rewind in a hardcore game");
+    assert!(!a.records_rewind(), "rewind recorded in a hardcore game");
+    assert!(!a.may_load_state(), "a state loaded in a hardcore game");
+    assert!(!a.take_softcore());
+    press(&mut a, Btn::Left);
+    assert!(!read_slot_state(d.path()).hardcore);
+    assert!(a.may_rewind() && a.may_load_state());
+    assert!(a.take_softcore(), "the tracker was not told");
+    assert!(!a.take_softcore());
+    press(&mut a, Btn::Right);
+    assert!(
+        a.may_rewind(),
+        "hardcore back on mid-game, for a game now softcore"
+    );
+}
+
+/// A game hardcore wants played for `wait` more frames before it pauses.
+struct Waiting(std::sync::Arc<std::sync::atomic::AtomicU32>);
+
+impl slot::persist::Snapshot for Waiting {
+    fn state(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn save_ram(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn thumb(&self) -> Option<Vec<u8>> {
+        None
+    }
+    fn load(&self, _: Vec<u8>) {}
+    fn pause_wait(&self) -> u32 {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[test]
+fn a_hardcore_game_pauses_only_when_it_has_been_played_long_enough() {
+    let d = tmp_root_with_carts(&["Emerald"]);
+    let wait = std::sync::Arc::new(std::sync::atomic::AtomicU32::new(90));
+    let mut a = common::app_playing_with(d.path(), "Emerald", Box::new(Waiting(wait.clone())));
+    a.set_hardcore_game(true);
+    a.apply(Action::QuickMenu);
+    a.update(1.0);
+    assert_eq!(a.in_game_menu(), None, "paused while hardcore wanted play");
+    assert_eq!(
+        a.cheevo_text().as_deref(),
+        Some("Hardcore: play 2 more seconds before pausing")
+    );
+    wait.store(0, std::sync::atomic::Ordering::Relaxed);
+    a.apply(Action::QuickMenu);
+    a.update(1.0);
+    assert!(a.in_game_menu().is_some());
+}
+
+#[test]
 fn the_game_page_flips_eject_save_turbo_and_rewind_and_saves_each() {
     let (d, mut a, _) = on_carousel();
     open_at(&mut a, QuickRow::Rewind);
@@ -369,6 +497,8 @@ fn the_game_page_flips_eject_save_turbo_and_rewind_and_saves_each() {
     press(&mut a, Btn::Left);
     assert_eq!(card(&d), (true, false, false));
     assert!(!a.turbo());
+    press(&mut a, Btn::Down);
+    press(&mut a, Btn::Down);
     press(&mut a, Btn::Down);
     press(&mut a, Btn::Down);
     press(&mut a, Btn::Right);
@@ -972,6 +1102,7 @@ fn labels_leave_room_for_the_pointer_and_values_end_thirty_two_pixels_in() {
     for row in QuickRow::GAME
         .into_iter()
         .filter(|r| !a.hidden_rows().contains(r))
+        .take(QUICK_ROWS_MAX)
     {
         let lit = row == QuickRow::FastForward;
         let [x, ..] = placed(&out, label(row, lit)).expect("a label was not drawn");
@@ -1040,7 +1171,7 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             .enumerate()
             .map(|(i, r)| {
                 let w = slot_ui::quick_label_face(*r, true).w;
-                [(id(100 + i), w, 40), (id(130 + i), w, 40)]
+                [(id(1000 + i), w, 40), (id(2000 + i), w, 40)]
             })
             .collect(),
         pointer: (id(700), 32, 48),
@@ -1084,7 +1215,7 @@ fn no_row_in_hand_runs_its_arrows_into_its_label() {
             }
             open_at(&mut a, row);
             let out = frame(&a);
-            let [lx, _, lw, _] = placed(&out, 130 + row.index()).expect("the lit label");
+            let [lx, _, lw, _] = placed(&out, 2000 + row.index()).expect("the lit label");
             let label_ends = lx + lw - MENU_PAD as f32;
             if let Some([cx, ..]) = placed(&out, 300) {
                 assert!(
@@ -1280,6 +1411,42 @@ fn a_wide_panel_offers_gb_and_gbc_frames_from_none_through_the_card() {
     press(&mut a, Btn::Down);
     assert_eq!(a.quick_menu(), Some(QuickRow::ShaderOf(Platform::Gbc)));
     assert!(!a.sp_frame());
+}
+
+#[test]
+fn the_shader_row_steps_past_the_built_in_shaders_to_the_cards_shader_files() {
+    let (d, mut a, _) = on_carousel();
+    std::fs::create_dir_all(d.path().join("Shaders")).unwrap();
+    std::fs::write(d.path().join("Shaders/crt.glsl"), b"glsl").unwrap();
+    std::fs::write(d.path().join("Shaders/notes.txt"), b"no").unwrap();
+    assert_eq!(
+        a.quick_value(QuickRow::ShaderOf(Platform::Gbc)),
+        Some(QuickValue::Simpletex)
+    );
+    open_at(&mut a, QuickRow::ShaderOf(Platform::Gbc));
+    press(&mut a, Btn::Right);
+    assert_eq!(a.custom_shader(Platform::Gbc), Some("crt.glsl"));
+    assert_eq!(
+        read_slot_state(d.path())
+            .screen(Platform::Gbc)
+            .custom_shader
+            .as_deref(),
+        Some("crt.glsl")
+    );
+    press(&mut a, Btn::Right);
+    assert_eq!(a.custom_shader(Platform::Gbc), None);
+    assert_eq!(
+        a.quick_value(QuickRow::ShaderOf(Platform::Gbc)),
+        Some(QuickValue::Off)
+    );
+    press(&mut a, Btn::Left);
+    press(&mut a, Btn::Left);
+    assert_eq!(a.custom_shader(Platform::Gbc), None);
+    assert_eq!(
+        a.quick_value(QuickRow::ShaderOf(Platform::Gbc)),
+        Some(QuickValue::Simpletex)
+    );
+    assert_eq!(a.custom_shader(Platform::Gb), None);
 }
 
 #[test]

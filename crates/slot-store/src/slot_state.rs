@@ -25,22 +25,88 @@ pub struct Recent {
     pub stem: String,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Debug, Default)]
+/// The slot's look: the plain dark or light one, a Game Boy Advance SP's shell colour, or a set
+/// of your own from a folder under `Slots` on the card.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
 pub enum Appearance {
     #[default]
     Dark,
     Light,
+    Sp(SpColour),
+    Own(String),
 }
 
-impl Appearance {
-    pub fn light(self) -> bool {
-        self == Appearance::Light
-    }
+/// The SP shell colours unslot draws its slot in.
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum SpColour {
+    Graphite,
+    Platinum,
+    PearlPink,
+    PearlBlue,
+    PearlBlueDark,
+}
+
+impl SpColour {
+    pub const ALL: [SpColour; 5] = [
+        SpColour::Graphite,
+        SpColour::Platinum,
+        SpColour::PearlPink,
+        SpColour::PearlBlue,
+        SpColour::PearlBlueDark,
+    ];
 
     pub fn name(self) -> &'static str {
         match self {
-            Appearance::Dark => "dark",
-            Appearance::Light => "light",
+            SpColour::Graphite => "graphite",
+            SpColour::Platinum => "platinum",
+            SpColour::PearlPink => "pearl-pink",
+            SpColour::PearlBlue => "pearl-blue",
+            SpColour::PearlBlueDark => "pearl-blue-dark",
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            SpColour::Graphite => "Graphite",
+            SpColour::Platinum => "Platinum",
+            SpColour::PearlPink => "Pearl Pink",
+            SpColour::PearlBlue => "Pearl Blue",
+            SpColour::PearlBlueDark => "Pearl Blue Dark",
+        }
+    }
+
+    /// Whether the shell is pale enough that the footer is printed on it in black.
+    pub fn light(self) -> bool {
+        !matches!(self, SpColour::Graphite | SpColour::PearlBlueDark)
+    }
+}
+
+impl Appearance {
+    /// Whether the footer is printed in black. A set of your own is judged from its picture,
+    /// which the store never sees, so it is taken as dark here.
+    pub fn light(&self) -> bool {
+        match self {
+            Appearance::Dark | Appearance::Own(_) => false,
+            Appearance::Light => true,
+            Appearance::Sp(c) => c.light(),
+        }
+    }
+
+    pub fn name(&self) -> String {
+        match self {
+            Appearance::Dark => "dark".into(),
+            Appearance::Light => "light".into(),
+            Appearance::Sp(c) => c.name().into(),
+            Appearance::Own(name) => format!("own:{name}"),
+        }
+    }
+
+    pub fn label(&self) -> String {
+        match self {
+            Appearance::Dark => "Dark".into(),
+            Appearance::Light => "Light".into(),
+            Appearance::Sp(c) => c.label().into(),
+            Appearance::Own(name) => name.clone(),
         }
     }
 
@@ -48,15 +114,35 @@ impl Appearance {
         match name {
             "dark" => Some(Appearance::Dark),
             "light" => Some(Appearance::Light),
-            _ => None,
+            _ => match name.strip_prefix("own:") {
+                Some(own) if !own.is_empty() => Some(Appearance::Own(own.into())),
+                Some(_) => None,
+                None => SpColour::ALL
+                    .into_iter()
+                    .find(|c| c.name() == name)
+                    .map(Appearance::Sp),
+            },
         }
     }
 
-    pub fn toggle(self) -> Appearance {
-        match self {
-            Appearance::Dark => Appearance::Light,
-            Appearance::Light => Appearance::Dark,
-        }
+    /// Every look there is to pick, in the Theme row's order, with `own` the sets on the card.
+    pub fn choices(own: &[String]) -> Vec<Appearance> {
+        let mut all = vec![Appearance::Dark, Appearance::Light];
+        all.extend(SpColour::ALL.map(Appearance::Sp));
+        all.extend(own.iter().cloned().map(Appearance::Own));
+        all
+    }
+
+    /// The look beside this one among `choices`, wrapping at the ends.
+    pub fn step(&self, choices: &[Appearance], right: bool) -> Appearance {
+        let n = choices.len();
+        let at = choices.iter().position(|c| c == self).unwrap_or(0);
+        choices[if right {
+            (at + 1) % n
+        } else {
+            (at + n - 1) % n
+        }]
+        .clone()
     }
 }
 
@@ -202,6 +288,15 @@ pub struct SlotState {
     pub clock_set: bool,
     pub utc_offset_min: i16,
     pub rumble: bool,
+    /// Whether the D-pad moves the left stick in a game, for the models without one.
+    pub dpad_stick: bool,
+    /// Whether the downloaded cores update themselves once the Wi-Fi is up.
+    pub auto_cores: bool,
+    /// Whether missing labels are looked for while the lid is shut and the Wi-Fi is up.
+    pub art_asleep: bool,
+    /// Whether RetroAchievements runs in hardcore: no rewind and no states loaded, a game
+    /// always starting from power on.
+    pub hardcore: bool,
     pub ff_speed: u8,
     pub ff_sound: bool,
     /// One a platform, in `Platform::ALL` order.
@@ -261,6 +356,8 @@ pub struct Screen {
     pub shader: Shader,
     pub colour_correction: bool,
     pub bezel: BezelPick,
+    /// A RetroArch shader in `Shaders` the picture is drawn with instead of `shader`, by name.
+    pub custom_shader: Option<String>,
 }
 
 impl Screen {
@@ -269,6 +366,7 @@ impl Screen {
             shader: platform.spec().shader,
             colour_correction: false,
             bezel: BezelPick::Ags102,
+            custom_shader: None,
         }
     }
 }
@@ -369,6 +467,10 @@ impl Default for SlotState {
             clock_set: false,
             utc_offset_min: 0,
             rumble: true,
+            dpad_stick: false,
+            auto_cores: false,
+            art_asleep: false,
+            hardcore: false,
             ff_speed: FF_SPEED_DEFAULT,
             ff_sound: false,
             screens: Platform::ALL.map(Screen::default_for),
@@ -484,6 +586,9 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
         text.push_str(&format!("palette_{key}={}\n", s.palettes[p.index()]));
         text.push_str(&format!("shader_{key}={}\n", screen.shader.name()));
         text.push_str(&format!("bezel_{key}={}\n", screen.bezel.key()));
+        if let Some(file) = &screen.custom_shader {
+            text.push_str(&format!("shader_file_{key}={file}\n"));
+        }
     }
     text.push_str(&format!("wallpaper_tint={}\n", s.wallpaper_tint.key()));
     text.push_str(&format!("show_recents={}\n", s.show_recents as u8));
@@ -491,6 +596,10 @@ pub fn write_slot_state(root: &Path, s: &SlotState) -> std::io::Result<()> {
     text.push_str(&format!("clock_12h={}\n", s.clock_12h as u8));
     text.push_str(&format!("menu_sounds={}\n", s.menu_sounds as u8));
     text.push_str(&format!("haptics={}\n", s.haptics as u8));
+    text.push_str(&format!("dpad_stick={}\n", s.dpad_stick as u8));
+    text.push_str(&format!("auto_cores={}\n", s.auto_cores as u8));
+    text.push_str(&format!("art_asleep={}\n", s.art_asleep as u8));
+    text.push_str(&format!("hardcore={}\n", s.hardcore as u8));
     text.push_str(&format!("tv_sound={}\n", s.tv_sound as u8));
     text.push_str(&format!("wifi={}\n", s.wifi as u8));
     text.push_str(&format!("bluetooth={}\n", s.bluetooth as u8));
@@ -537,6 +646,7 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut palette = None;
     let mut shaders: [Option<Shader>; Platform::COUNT] = [None; Platform::COUNT];
     let mut bezels: [Option<BezelPick>; Platform::COUNT] = std::array::from_fn(|_| None);
+    let mut custom_shaders: [Option<String>; Platform::COUNT] = std::array::from_fn(|_| None);
     let mut eject_save = None;
     let mut turbo = None;
     let mut rewind = None;
@@ -550,6 +660,10 @@ fn parse(text: &str) -> Option<SlotState> {
     let mut clock_12h = None;
     let mut menu_sounds = None;
     let mut haptics = None;
+    let mut dpad_stick = None;
+    let mut auto_cores = None;
+    let mut art_asleep = None;
+    let mut hardcore = None;
     let mut tv_sound = None;
     let mut show_titles = None;
     let mut wifi = None;
@@ -574,6 +688,9 @@ fn parse(text: &str) -> Option<SlotState> {
                 "shader" => {
                     shaders[p.index()] =
                         Shader::parse(value).filter(|s| p.spec().shaders.contains(s))
+                }
+                "shader_file" => {
+                    custom_shaders[p.index()] = Some(value.to_string()).filter(|v| !v.is_empty())
                 }
                 _ => bezels[p.index()] = Some(BezelPick::parse(value)),
             }
@@ -608,6 +725,10 @@ fn parse(text: &str) -> Option<SlotState> {
             "clock_12h" => clock_12h = flag(value),
             "menu_sounds" => menu_sounds = flag(value),
             "haptics" => haptics = flag(value),
+            "dpad_stick" => dpad_stick = flag(value),
+            "auto_cores" => auto_cores = flag(value),
+            "art_asleep" => art_asleep = flag(value),
+            "hardcore" => hardcore = flag(value),
             "tv_sound" => tv_sound = flag(value),
             "show_titles" => show_titles = flag(value),
             "wifi" => wifi = flag(value),
@@ -639,6 +760,7 @@ fn parse(text: &str) -> Option<SlotState> {
                 .filter(|s| p.spec().shaders.contains(s))
                 .unwrap_or(own.shader),
             bezel: bezels[at].clone().unwrap_or(own.bezel),
+            custom_shader: custom_shaders[at].take(),
         }
     });
     // A pick walks the same three steps the screen settings do: this machine's own line, then the
@@ -663,6 +785,10 @@ fn parse(text: &str) -> Option<SlotState> {
         clock_set: clock_set?,
         utc_offset_min: utc_offset_min?,
         rumble: rumble.unwrap_or(fallback.rumble),
+        dpad_stick: dpad_stick.unwrap_or(fallback.dpad_stick),
+        auto_cores: auto_cores.unwrap_or(fallback.auto_cores),
+        art_asleep: art_asleep.unwrap_or(fallback.art_asleep),
+        hardcore: hardcore.unwrap_or(fallback.hardcore),
         ff_speed: ff_speed.unwrap_or(fallback.ff_speed),
         ff_sound: ff_sound.unwrap_or(fallback.ff_sound),
         screens,
@@ -699,7 +825,7 @@ fn parse(text: &str) -> Option<SlotState> {
 
 /// Splits a key like `shader_gbc` into the setting and the platform it is for.
 fn per_platform(key: &str) -> Option<(&str, Platform)> {
-    ["colour_correction", "shader", "bezel"]
+    ["colour_correction", "shader_file", "shader", "bezel"]
         .into_iter()
         .find_map(|setting| {
             let rest = key.strip_prefix(setting)?.strip_prefix('_')?;

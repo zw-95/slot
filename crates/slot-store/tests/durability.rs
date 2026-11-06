@@ -209,6 +209,10 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
             clock_set: true,
             utc_offset_min: -300,
             rumble: true,
+            dpad_stick: false,
+            auto_cores: false,
+            art_asleep: false,
+            hardcore: false,
             ff_speed: FF_SPEED_DEFAULT,
             ff_sound: false,
             screens: game_boy_first([
@@ -216,16 +220,19 @@ fn a_card_from_before_the_settings_keeps_all_its_values() {
                     shader: Shader::Grid,
                     colour_correction: false,
                     bezel: BezelPick::Ags102,
+                    custom_shader: None,
                 },
                 Screen {
                     shader: Shader::Simpletex,
                     colour_correction: false,
                     bezel: BezelPick::Ags102,
+                    custom_shader: None,
                 },
                 Screen {
                     shader: Shader::Simpletex,
                     colour_correction: false,
                     bezel: BezelPick::Ags102,
+                    custom_shader: None,
                 },
             ]),
             palettes: std::array::from_fn(|_| 0),
@@ -266,6 +273,10 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
     let s = SlotState {
         clock_set: true,
         rumble: false,
+        dpad_stick: true,
+        auto_cores: true,
+        art_asleep: true,
+        hardcore: true,
         ff_speed: 2,
         ff_sound: true,
         screens: game_boy_first([
@@ -273,16 +284,19 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
                 shader: Shader::Dot,
                 colour_correction: true,
                 bezel: BezelPick::None,
+                custom_shader: None,
             },
             Screen {
                 shader: Shader::Off,
                 colour_correction: false,
                 bezel: BezelPick::Default,
+                custom_shader: None,
             },
             Screen {
                 shader: Shader::Grid,
                 colour_correction: true,
                 bezel: BezelPick::File("Pocket.png".into()),
+                custom_shader: Some("crt-easymode.glsl".into()),
             },
         ]),
         eject_save: false,
@@ -316,6 +330,10 @@ fn the_quick_menu_settings_round_trip_as_their_own_lines() {
     let text = std::fs::read_to_string(d.path().join("Config/slot.state")).unwrap();
     for line in [
         "rumble=0",
+        "dpad_stick=1",
+        "auto_cores=1",
+        "art_asleep=1",
+        "hardcore=1",
         "menu_sounds=0",
         "haptics=0",
         "tv_sound=0",
@@ -687,4 +705,26 @@ shader_gb=dot
     let s = read_slot_state(d.path());
     assert_eq!(s.screen(Platform::Gba).shader, Shader::Grid);
     assert_eq!(s.screen(Platform::Gb).shader, Shader::Simpletex);
+}
+
+#[test]
+fn every_look_survives_a_save_and_a_read() {
+    let d = tmp_root();
+    let mut looks = slot_store::Appearance::choices(&["My Slot".into()]);
+    looks.push(slot_store::Appearance::Own("own:odd".into()));
+    for look in looks {
+        let s = SlotState {
+            appearance: look.clone(),
+            clock_set: true,
+            ..SlotState::default()
+        };
+        slot_store::write_slot_state(d.path(), &s).unwrap();
+        assert_eq!(slot_store::read_slot_state(d.path()).appearance, look);
+    }
+}
+
+#[test]
+fn an_unknown_look_falls_back_to_dark() {
+    assert_eq!(slot_store::Appearance::parse("tangerine"), None);
+    assert_eq!(slot_store::Appearance::parse("own:"), None);
 }

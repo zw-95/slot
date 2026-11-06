@@ -506,13 +506,13 @@ fn on_updates(d: &tempfile::TempDir) -> App {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::Updates) {
             break;
         }
@@ -571,13 +571,13 @@ fn game_art_labels_what_it_finds_and_shows_it_without_a_restart() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::GameArt) {
             break;
         }
@@ -620,6 +620,28 @@ fn game_art_labels_what_it_finds_and_shows_it_without_a_restart() {
         !a.restarting(),
         "START restarted, which labels no longer need"
     );
+
+    // Clear All Art takes it all off again, on a second press only.
+    std::fs::create_dir_all(d.path().join("System/Cache/Scraper")).unwrap();
+    while list(&a).rows[list(&a).cursor].label != "Clear All Art" {
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(action(&a), Some("Clear".to_string()));
+    press(&mut a, Btn::A);
+    assert!(
+        d.path().join("Labels/GBA/Zero.png").exists(),
+        "one press cleared"
+    );
+    press(&mut a, Btn::A);
+    assert!(!d.path().join("Labels/GBA/Zero.png").exists());
+    assert!(!d.path().join("System/Cache/Scraper").exists());
+    assert_eq!(list(&a).status, "Took 1 label off the card");
+    assert_eq!(detail(&a, "All systems"), "0 of 3");
+    assert_eq!(
+        a.face_cart(zero.0, zero.1).and_then(|c| c.label.clone()),
+        None
+    );
+    assert_eq!(a.take_relabelled(), [zero], "the face kept its label");
 }
 
 #[test]
@@ -646,13 +668,13 @@ fn a_screenscraper_login_is_typed_in_on_game_art_and_saved_to_the_card() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::GameArt) {
             break;
         }
@@ -776,13 +798,13 @@ fn the_cores_page_downloads_a_core_and_removes_it() {
     let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     a.apply(Action::QuickMenu);
     for _ in 0..QuickRow::MAIN.len() {
-        if a.quick_menu() == Some(QuickRow::Network) {
+        if a.quick_menu() == Some(QuickRow::Online) {
             break;
         }
         press(&mut a, Btn::Down);
     }
     press(&mut a, Btn::A);
-    for _ in 0..QuickRow::NETWORK.len() {
+    for _ in 0..QuickRow::ONLINE.len() {
         if a.quick_menu() == Some(QuickRow::Cores) {
             break;
         }
@@ -908,4 +930,259 @@ fn cast_is_hidden_with_the_wifi_off() {
     let (a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
     assert!(a.hidden_rows().contains(&QuickRow::Cast));
     assert!(a.in_game_hidden().contains(&QuickRow::PlayCast));
+}
+
+/// Joins Cafe Guest from the network list.
+fn join_cafe(a: &mut App) {
+    let at = row_of(a, "Cafe Guest");
+    go_to_row(a, at);
+    press(a, Btn::A);
+    until(a, |a| a.wifi_view().connected.is_some());
+}
+
+/// Backs out of the pages to the shelf.
+fn back_to_shelf(a: &mut App) {
+    for _ in 0..6 {
+        if matches!(a.phase(), Phase::Shelf) {
+            return;
+        }
+        press(a, Btn::B);
+    }
+    assert!(matches!(a.phase(), Phase::Shelf), "{:?}", a.phase());
+}
+
+#[test]
+fn a_new_unslot_found_once_online_is_offered_on_the_shelf_and_select_opens_updates() {
+    use slot::update::{SimUpdates, Stage};
+    let (d, mut a) = on_network_list();
+    std::fs::write(d.path().join("System/version"), "v2.0.0\n").unwrap();
+    assert_eq!(a.sync_text(), None);
+    join_cafe(&mut a);
+    until(&mut a, |a| {
+        a.updates_view().unslot.stage == Stage::Available(SimUpdates::UNSLOT.into())
+    });
+    assert_eq!(
+        a.sync_text(),
+        Some(format!(
+            "unslot {} is out · SELECT to update",
+            SimUpdates::UNSLOT
+        ))
+    );
+    back_to_shelf(&mut a);
+    press(&mut a, Btn::Select);
+    assert!(
+        matches!(a.phase(), Phase::Updates { .. }),
+        "{:?}",
+        a.phase()
+    );
+    assert_eq!(a.sync_text(), None, "the offer stayed up once seen");
+}
+
+/// Boots with a stale VBA Next on the card and Auto-Update Cores as given, then joins Wi-Fi.
+fn online_with_a_stale_core(auto_cores: bool) -> (tempfile::TempDir, std::path::PathBuf, App) {
+    use slot_store::Core;
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    let file = slot::core_downloads::path(d.path(), Core::VbaNext);
+    std::fs::create_dir_all(file.parent().unwrap()).unwrap();
+    std::fs::write(&file, b"old build").unwrap();
+    let set = SlotState {
+        clock_set: true,
+        wifi: true,
+        auto_cores,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for row in [QuickRow::Network, QuickRow::WifiNetworks] {
+        for _ in 0..QuickRow::MAIN.len() {
+            if a.quick_menu() == Some(row) {
+                break;
+            }
+            press(&mut a, Btn::Down);
+        }
+        press(&mut a, Btn::A);
+    }
+    until(&mut a, |a| !a.wifi_view().networks.is_empty());
+    join_cafe(&mut a);
+    (d, file, a)
+}
+
+#[test]
+fn with_auto_update_cores_on_a_stale_core_is_fetched_once_online() {
+    use slot::core_downloads::SimCores;
+    let (_d, file, mut a) = online_with_a_stale_core(true);
+    until(&mut a, |_| {
+        std::fs::read(&file).ok().as_deref() == Some(SimCores::CORE)
+    });
+}
+
+#[test]
+fn with_auto_update_cores_off_a_stale_core_is_left_alone() {
+    let (_d, file, mut a) = online_with_a_stale_core(false);
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut now = 0;
+    while Instant::now() < deadline {
+        now += 16;
+        a.tick_ms(now);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(std::fs::read(&file).unwrap(), b"old build");
+}
+
+/// Sends `body` to the upload page at `url` as a phone's browser does, and gives back the reply.
+fn send(url: &str, query: &str, body: &[u8]) -> String {
+    use std::io::{Read, Write};
+    let port = url.trim_end_matches('/').rsplit(':').next().unwrap();
+    let mut s = std::net::TcpStream::connect(("127.0.0.1", port.parse::<u16>().unwrap())).unwrap();
+    write!(
+        s,
+        "PUT /upload?{query} HTTP/1.1\r\nHost: x\r\nContent-Length: {}\r\n\r\n",
+        body.len()
+    )
+    .unwrap();
+    s.write_all(body).unwrap();
+    let mut reply = String::new();
+    s.read_to_string(&mut reply).unwrap();
+    reply
+}
+
+#[test]
+fn upload_from_phone_sets_a_wallpaper_and_shelves_a_game() {
+    use slot_store::WallpaperPick;
+    let (d, mut a) = on_network_list();
+    join_cafe(&mut a);
+    press(&mut a, Btn::B);
+    press(&mut a, Btn::B);
+    for _ in 0..QuickRow::MAIN.len() {
+        if a.quick_menu() == Some(QuickRow::Online) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    press(&mut a, Btn::A);
+    for _ in 0..QuickRow::ONLINE.len() {
+        if a.quick_menu() == Some(QuickRow::Upload) {
+            break;
+        }
+        press(&mut a, Btn::Down);
+    }
+    assert_eq!(a.quick_menu(), Some(QuickRow::Upload), "no Upload row");
+    press(&mut a, Btn::A);
+    let url = match a.page_model() {
+        Some(PageModel::Qr(qr)) => qr.url,
+        other => panic!("no code to scan: {other:?}"),
+    };
+    assert!(url.starts_with("http://192.168.1.42:"), "{url}");
+
+    let page = {
+        use std::io::{Read, Write};
+        let port: u16 = url
+            .trim_end_matches('/')
+            .rsplit(':')
+            .next()
+            .unwrap()
+            .parse()
+            .unwrap();
+        let mut s = std::net::TcpStream::connect(("127.0.0.1", port)).unwrap();
+        s.write_all(b"GET / HTTP/1.1\r\nHost: x\r\n\r\n").unwrap();
+        let mut page = String::new();
+        s.read_to_string(&mut page).unwrap();
+        page
+    };
+    assert!(
+        page.contains("Wallpaper") && page.contains("value=\"GBA\""),
+        "{page}"
+    );
+
+    assert!(send(&url, "to=wallpaper&name=..%2Fevil.png", b"x").contains("400"));
+    assert!(send(&url, "to=wallpaper&name=notes.txt", b"x").contains("400"));
+    assert!(send(&url, "to=GBA&name=Wrong.nes", b"x").contains("400"));
+
+    let png = b"\x89PNG pretend picture".to_vec();
+    let reply = send(&url, "to=wallpaper&name=My%20Beach.png", &png);
+    assert!(reply.contains("200 OK"), "{reply}");
+    until(&mut a, |a| {
+        a.wallpaper() == WallpaperPick::File("My Beach.png".into())
+    });
+    assert_eq!(
+        std::fs::read(d.path().join("Wallpapers/My Beach.png")).unwrap(),
+        png
+    );
+    assert_eq!(
+        read_slot_state(d.path()).wallpaper,
+        WallpaperPick::File("My Beach.png".into())
+    );
+    match a.page_model() {
+        Some(PageModel::Qr(qr)) => assert_eq!(qr.status, "My Beach.png is the wallpaper now"),
+        other => panic!("{other:?}"),
+    }
+
+    let reply = send(&url, "to=GBA&name=Advance+Wars.gba", &[0u8; 8]);
+    assert!(reply.contains("200 OK"), "{reply}");
+    until(
+        &mut a,
+        |a| matches!(a.page_model(), Some(PageModel::Qr(qr)) if qr.status.contains("Advance Wars")),
+    );
+
+    press(&mut a, Btn::B);
+    assert_eq!(a.quick_menu(), Some(QuickRow::Upload));
+    back_to_shelf(&mut a);
+    until(&mut a, |a| a.carts().any(|c| c.stem == "Advance Wars"));
+    assert!(d.path().join("Games/GBA/Advance Wars.gba").is_file());
+}
+
+/// Boots with a game only the pretend database knows and Art While Asleep as given, joins
+/// Wi-Fi, then shuts the lid.
+fn asleep_online(art_asleep: bool) -> (tempfile::TempDir, App) {
+    let d = tmp_root_with_carts(&["Emerald", "Fusion"]);
+    // Eight zero bytes: the game the pretend database knows by its CRC.
+    std::fs::write(d.path().join("Games/GBA/Zero.gba"), [0u8; 8]).unwrap();
+    let set = SlotState {
+        clock_set: true,
+        wifi: true,
+        art_asleep,
+        ..SlotState::default()
+    };
+    write_slot_state(d.path(), &set).expect("write slot.state");
+    let (mut a, _clock) = app_booting_at(d.path(), CLOCK_IS_SET);
+    a.apply(Action::QuickMenu);
+    for row in [QuickRow::Network, QuickRow::WifiNetworks] {
+        for _ in 0..QuickRow::MAIN.len() {
+            if a.quick_menu() == Some(row) {
+                break;
+            }
+            press(&mut a, Btn::Down);
+        }
+        press(&mut a, Btn::A);
+    }
+    until(&mut a, |a| !a.wifi_view().networks.is_empty());
+    join_cafe(&mut a);
+    a.apply(Action::LidClose);
+    assert!(matches!(a.phase(), Phase::Doze { .. }), "{:?}", a.phase());
+    (d, a)
+}
+
+#[test]
+fn with_art_while_asleep_on_missing_art_is_found_with_the_lid_shut() {
+    let (d, mut a) = asleep_online(true);
+    until(&mut a, |a| {
+        !a.scrape_view().running && a.scrape_view().done == 3
+    });
+    assert!(d.path().join("Labels/GBA/Zero.png").exists());
+    assert!(matches!(a.phase(), Phase::Doze { .. }), "{:?}", a.phase());
+}
+
+#[test]
+fn with_art_while_asleep_off_the_lid_shut_finds_nothing() {
+    let (d, mut a) = asleep_online(false);
+    let deadline = Instant::now() + Duration::from_millis(500);
+    let mut now = 0;
+    while Instant::now() < deadline {
+        now += 16;
+        a.tick_ms(now);
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert!(!a.scrape_view().running);
+    assert!(!d.path().join("Labels/GBA/Zero.png").exists());
 }

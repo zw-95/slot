@@ -6,8 +6,8 @@ pub use card_art::{
 };
 mod bitmaps;
 pub use bitmaps::{
-    link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light, Mould,
-    SLOT_H, SLOT_W,
+    link_port, link_port_light, slot_back, slot_back_light, slot_front, slot_front_light,
+    slot_skin, sp_slot, strip_is_light, Mould, SlotSkin, SLOT_H, SLOT_W,
 };
 mod backdrop;
 mod barcode;
@@ -27,6 +27,7 @@ mod list_page;
 mod media;
 mod page;
 mod palette_picker;
+mod picture_page;
 mod plate;
 mod polaroids;
 mod power_menu;
@@ -42,11 +43,12 @@ mod silhouette;
 mod slot_chrome;
 mod sticker;
 pub mod text;
+mod text_page;
 mod toast;
 
 pub use backdrop::{
     bezel_face, blur_background, default_background, default_game_bezel_face, draw_backdrop,
-    draw_ground, game_bezel_face, wallpaper_face,
+    draw_ground, wallpaper_face,
 };
 pub use barcode::{code39, CODE39_NARROW, CODE39_WIDE};
 pub use battery::{draw_gauge, BOLT_PX, GAUGE_H, GAUGE_W, WALL};
@@ -85,10 +87,11 @@ pub use link_art::{
     ARROW_LEFT_X, ARROW_RIGHT_X, ARROW_W, ARROW_Y, CLICKS_H, CLICKS_W, CLICKS_X, CLICKS_Y, PLUG_H,
     PLUG_TIP_X, PLUG_W, PORT_H, PORT_W, PORT_Y,
 };
-pub use list_page::{ListIcon, ListPage, ListRow, LIST_ROWS};
+pub use list_page::{ListIcon, ListPage, ListRow, LIST_H, LIST_ROWS, LIST_W};
 pub use media::Media;
 pub use page::Legend;
 pub use palette_picker::{PaletteOption, PalettePicker, PREVIEW_H, PREVIEW_W};
+pub use picture_page::{PicturePage, PICTURE_H, PICTURE_W};
 pub use plate::{
     arrows_hint_coloured, arrows_hint_face, arrows_hint_width, cap_width, centred_hints,
     hint_coloured, hint_face, hint_quad, hint_row, hint_width, title_face, title_line_face,
@@ -125,4 +128,5 @@ pub use sticker::{
     draw_sticker, head_rows, sticker_face, sticker_lines, sticker_rect, StickerFields, COPYRIGHT,
     CREDITS, DC, FORK, HOME, ORIGIN, STICKER_H, STICKER_W,
 };
+pub use text_page::{wrap as wrap_text, TextPage, TEXT_LINES, TEXT_PX, TEXT_W};
 pub use toast::{line_toast_face, toast_box, toast_face, toast_rect, Toast};

@@ -29,8 +29,8 @@ pub use scan::{folder_of, initial, is_hidden, listing, scan, sort_key, Cart, Sto
 pub use slot_i18n::Lang;
 pub use slot_state::{
     read_slot_state, write_slot_state, Appearance, BezelPick, Recent, Screen, Shader, SlotState,
-    WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS, FF_SPEED_DEFAULT,
-    RECENTS_MAX, RUN_AHEAD_MAX, UTC_OFFSET_MAX, UTC_OFFSET_MIN, VOLUME_MAX,
+    SpColour, WallpaperPick, WallpaperTint, BLUE_LIGHT_MAX, BRIGHTNESS_MAX, FF_SPEEDS,
+    FF_SPEED_DEFAULT, RECENTS_MAX, RUN_AHEAD_MAX, UTC_OFFSET_MAX, UTC_OFFSET_MIN, VOLUME_MAX,
 };
 pub use stamp::{
     civil_from_days, days_from_civil, days_in_month, format_stamp, parse_stamp, stamp_now,

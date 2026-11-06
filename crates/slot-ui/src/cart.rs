@@ -409,6 +409,7 @@ pub fn has_real_media(platform: Platform) -> bool {
             // PICO-8 没出过实体卡，可它有现成的卡面素材：放进 `Renders/` 就该整张当卡面画，
             // 不该再给它套一层塑料边框。
             | Platform::Tic80
+            | Platform::Apps
     )
 }
 

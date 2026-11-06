@@ -14,7 +14,7 @@ use crate::audio::{opened_sink, AudioSink, Ring, Sfx};
 use crate::core::open_core;
 use crate::emu::{CoreState, EmuHandle, Speed};
 use crate::frames::FrameRef;
-use crate::input::Pad;
+use crate::input::{dpad_as_stick, Pad};
 use crate::persist;
 use crate::prefetch::Prefetch;
 
@@ -25,6 +25,8 @@ pub struct Session {
     sink: Box<dyn AudioSink>,
     gestures: Gestures,
     pad: Pad,
+    /// The sticks as the input last read them.
+    sticks: [i16; 4],
     rewinding: bool,
     fast: bool,
     motor: u16,
@@ -49,6 +51,7 @@ impl Session {
             sink,
             gestures: Gestures::new(),
             pad: Pad::default(),
+            sticks: [0; 4],
             rewinding: false,
             fast: false,
             motor: 0,
@@ -183,14 +186,9 @@ impl Session {
         self.sync_pad();
     }
 
-    /// Hands the sticks to the running game, or rest while a menu is over it.
+    /// Takes the sticks as they stand, for `sync_pad` to hand to the game.
     pub fn set_sticks(&mut self, sticks: [i16; 4]) {
-        let Some(emu) = &self.emu else {
-            return;
-        };
-        let to_game = self.playing() && self.app.in_game_menu().is_none();
-        let to_game = to_game && !self.app.game_page_open();
-        emu.set_sticks(if to_game { sticks } else { [0; 4] });
+        self.sticks = sticks;
     }
 
     pub fn set_menu_dpad_display(&mut self, enabled: bool) {
@@ -201,9 +199,22 @@ impl Session {
         for btn in self.app.taken_buttons() {
             self.pad.apply(Action::GbaUp(*btn));
         }
-        if let Some(emu) = &self.emu {
-            emu.set_input(self.pad.mask());
+        if self.emu.is_none() {
+            return;
         }
+        let held = self.app.remap().apply(self.pad.mask());
+        let (mask, sticks) = match self.app.dpad_stick() {
+            true => dpad_as_stick(held, self.sticks),
+            false => (held, self.sticks),
+        };
+        let Some(emu) = &self.emu else {
+            return;
+        };
+        emu.set_input(mask);
+        // The sticks rest while a menu is over the game.
+        let to_game = self.playing() && self.app.in_game_menu().is_none();
+        let to_game = to_game && !self.app.game_page_open();
+        emu.set_sticks(if to_game { sticks } else { [0; 4] });
     }
 
     fn bridge_link(&mut self, f: impl FnOnce(&mut App)) {
@@ -311,6 +322,9 @@ impl Session {
             }
             if let Some(disc) = self.app.take_disc() {
                 emu.set_disk(disc);
+            }
+            if self.app.take_softcore() {
+                emu.cheevos_softcore();
             }
             self.app.set_disks(emu.disk_count(), emu.disk_index());
         }
@@ -546,11 +560,16 @@ impl Session {
         self.app.set_link_loaded(serial);
         // An eject's state may still be on its way to the card.
         self.app.settle_saves();
-        let resume = (!self.app.starting_clean())
+        let player = self.app.link_player();
+        let account = self.app.cheevos_account();
+        let console = crate::cheevos::console_for(platform).filter(|_| player.is_none());
+        // A hardcore game starts from power on: no state may be put under it.
+        let hardcore = self.app.wants_hardcore() && account.is_some() && console.is_some();
+        self.app.set_hardcore_game(hardcore);
+        let resume = (!self.app.starting_clean() && !hardcore)
             .then(|| persist::read_resume(&self.root, platform, core, stem))
             .flatten();
         launch("resume state read");
-        let player = self.app.link_player();
         let palette = crate::core::palette_for(self.app.gb_palette(), platform, &rom, player);
         self.app.set_palette_live(palette.is_some());
         let opened = open_core(
@@ -574,15 +593,12 @@ impl Session {
         };
         emu.set_volume(self.app.output_volume());
         emu.set_driven(self.driven);
-        if let (None, Some(console), Some(account)) = (
-            player,
-            crate::cheevos::console_for(platform, core),
-            self.app.cheevos_account(),
-        ) {
+        if let (Some(console), Some(account)) = (console, account) {
             emu.start_cheevos(crate::cheevos::Start {
                 account,
                 console,
-                http: std::sync::Arc::new(crate::cheevos::Curl),
+                http: crate::cheevos::http(&self.root),
+                hardcore,
             });
         }
         self.app.set_snapshot(Box::new(emu.snapshot()));

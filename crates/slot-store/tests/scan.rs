@@ -208,7 +208,8 @@ fn a_disc_set_in_its_own_folder_is_shelved_as_the_disc_named_after_it() {
     assert_eq!(stems, ["Crazy Taxi", "Tony Hawk's Pro Skater 2 (USA)"]);
     assert_eq!(
         carts[1].rom,
-        d.path().join("Games/DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA).cue")
+        d.path()
+            .join("Games/DC/Tony Hawk's Pro Skater 2 (USA)/Tony Hawk's Pro Skater 2 (USA).cue")
     );
 }
 

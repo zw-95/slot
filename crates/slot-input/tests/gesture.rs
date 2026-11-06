@@ -43,11 +43,8 @@ fn a_select_held_past_the_window_reaches_the_game_then() {
 fn a_game_button_under_select_hands_select_over_first() {
     let mut g = Gestures::new();
     assert!(g.feed(Down(Select), 0).is_empty());
-    assert_eq!(
-        g.feed(Down(Start), 100),
-        vec![GbaDown(Select), GbaDown(Start)]
-    );
-    assert_eq!(g.feed(Up(Start), 200), vec![GbaUp(Start)]);
+    assert_eq!(g.feed(Down(L3), 100), vec![GbaDown(Select), GbaDown(L3)]);
+    assert_eq!(g.feed(Up(L3), 200), vec![GbaUp(L3)]);
     assert!(
         g.tick(SELECT_CHORD_MS).is_empty(),
         "SELECT was pressed twice"
@@ -535,6 +532,17 @@ fn x_under_select_picks_the_cart_shell() {
     // In a game this still reaches the core's options; on the shelf a core has nothing to
     // configure, and the chord asks which shell to draw the cart with instead.
     assert_eq!(g.feed(Down(X), 10), vec![CartShell]);
+}
+
+#[test]
+fn start_under_select_toggles_the_dpad_as_the_left_stick() {
+    let mut g = Gestures::new();
+    assert!(g.feed(Down(Select), 0).is_empty());
+    assert_eq!(g.feed(Down(Start), 10), vec![DpadStickToggle]);
+    assert!(
+        g.feed(Up(Start), 20).is_empty(),
+        "the game saw Start let go"
+    );
 }
 
 #[test]

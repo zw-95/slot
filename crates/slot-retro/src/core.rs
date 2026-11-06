@@ -184,6 +184,17 @@ pub trait RetroCore: Send {
     fn gone(&self) -> bool {
         false
     }
+    /// A call to the `Sidecar` running beside the core in its host process, and its answer;
+    /// None for a core in slot's own, or a host gone.
+    fn sidecar(&mut self, _msg: &[u8]) -> Option<Vec<u8>> {
+        None
+    }
+}
+
+/// What runs beside a core in its host process, where the core's memory is (see remote's
+/// `serve`): slot's `RetroCore::sidecar` calls reach it with the core at hand.
+pub trait Sidecar {
+    fn call(&mut self, core: &mut dyn RetroCore, msg: &[u8]) -> Vec<u8>;
 }
 
 #[cfg(test)]

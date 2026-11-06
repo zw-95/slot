@@ -413,7 +413,7 @@ impl Media {
             Platform::AmstradCpc => Media::AmstradDisk,
             Platform::Psp => Media::Umd,
             Platform::EasyRpg => Media::Floppy35,
-            Platform::Pico8 | Platform::Tic80 => Media::Fantasy,
+            Platform::Pico8 | Platform::Tic80 | Platform::Apps => Media::Fantasy,
         })
     }
 

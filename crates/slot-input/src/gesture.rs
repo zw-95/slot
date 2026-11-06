@@ -46,6 +46,8 @@ pub enum Action {
     /// like. It **opens** a page rather than stepping, because there are too many to step through
     /// blind — a Game Boy's table alone is 343 long.
     PaletteBrowser,
+    /// Select + Start: the D-pad moves the left stick, or goes back to being the D-pad.
+    DpadStickToggle,
     PaletteNext,
     PalettePrev,
     ShaderNext,
@@ -351,7 +353,11 @@ impl Gestures {
         let held = self.power_hold_fired;
         self.power_down_at = None;
         self.power_hold_fired = false;
-        vec![if held { Action::PowerOff } else { Action::PowerTap }]
+        vec![if held {
+            Action::PowerOff
+        } else {
+            Action::PowerTap
+        }]
     }
 
     fn volume_press(&mut self, b: Btn, now: Millis) -> Vec<Action> {
@@ -493,6 +499,7 @@ fn chord(b: Btn) -> Option<(u16, Action)> {
         Btn::VolUp => (2048, Action::MuteToggle),
         Btn::VolDown => (4096, Action::MuteToggle),
         Btn::X => (8192, Action::CartShell),
+        Btn::Start => (16384, Action::DpadStickToggle),
         _ => return None,
     })
 }

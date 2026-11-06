@@ -94,7 +94,7 @@ fn the_run_ahead_row_offers_off_and_one_frame() {
 fn the_rows_run_in_the_order_the_user_chose() {
     assert_eq!(
         QuickRow::MAIN.map(QuickRow::label),
-        ["General", "Screen", "Gameplay", "Network", "Power", "About"]
+        ["General", "Screen", "Gameplay", "Network", "Online", "Power", "About"]
     );
     assert_eq!(
         QuickRow::GENERAL.map(QuickRow::label),
@@ -117,7 +117,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         .map(QuickRow::label)
         .collect();
     // The Game Boy family first, then every other system in the order of the shelves.
-    assert_eq!(screens.len(), Platform::COUNT);
+    // Every system but the apps, which draw no game.
+    assert_eq!(screens.len(), Platform::COUNT - 1);
     assert_eq!(
         screens[..13],
         [
@@ -141,21 +142,21 @@ fn the_rows_run_in_the_order_the_user_chose() {
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Bezel"]
+        ["Shader", "Color Correction", "Bezel", "Display"]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gbc)
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Bezel"]
+        ["Shader", "Color Correction", "Bezel", "Display"]
     );
     assert_eq!(
         QuickRow::screen_of(Platform::Gb)
             .into_iter()
             .map(QuickRow::label)
             .collect::<Vec<_>>(),
-        ["Shader", "Color Correction", "Palettes", "Bezel"]
+        ["Shader", "Color Correction", "Palettes", "Bezel", "Display"]
     );
     assert_eq!(
         QuickRow::GAME.map(QuickRow::label),
@@ -167,7 +168,10 @@ fn the_rows_run_in_the_order_the_user_chose() {
             "Run-Ahead",
             "Turbo Buttons",
             "Rumble",
-            "Auto Save on Eject"
+            "D-Pad as Stick",
+            "Controls",
+            "Auto Save on Eject",
+            "Hardcore Achievements"
         ]
     );
     let opens: Vec<QuickRow> = QuickRow::ALL.into_iter().filter(|r| r.opens()).collect();
@@ -199,6 +203,9 @@ fn the_rows_run_in_the_order_the_user_chose() {
             QuickRow::Achievements,
             QuickRow::Cast,
             QuickRow::PlayCast,
+            QuickRow::Controls,
+            QuickRow::Upload,
+            QuickRow::Online,
         ]
         .into_iter()
         .chain(Platform::ALL.map(QuickRow::ScreenOf))
@@ -209,6 +216,8 @@ fn the_rows_run_in_the_order_the_user_chose() {
         &QuickRow::screen_page()[..],
         &QuickRow::GAME[..],
         &QuickRow::GENERAL[..],
+        &QuickRow::NETWORK[..],
+        &QuickRow::ONLINE[..],
         &QuickRow::PLAY[..],
         &QuickRow::SETTINGS[..],
         &QuickRow::PLAY_SCREEN[..],
@@ -268,6 +277,9 @@ fn the_values_read_as_the_menu_prints_them() {
             "Disc 5",
             "24-Hour",
             "12-Hour",
+            "Whole",
+            "Fit",
+            "Full",
             "English",
             "简体中文",
         ]

@@ -106,6 +106,8 @@ pub fn source(platform: Platform, rom: &Path) -> (Vec<&'static str>, u32) {
         // No set and no ScreenScraper system has these games, so their labels come from the
         // card and nowhere else.
         Platform::EasyRpg => (vec![], 0),
+        // Not games: nothing to look up.
+        Platform::Apps => (vec![], 0),
     }
 }
 
@@ -497,11 +499,31 @@ impl Scraper {
 
     /// Finds labels for `carts`.
     pub fn fetch(&self, carts: Vec<Cart>) {
-        let _ = self.jobs.send(carts);
+        let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+        if view.running || carts.is_empty() {
+            return;
+        }
+        // Reserve the job before returning so standby cannot expire before the worker starts.
+        view.running = true;
+        view.total = carts.len();
+        view.done = 0;
+        view.error = None;
+        if self.jobs.send(carts).is_err() {
+            view.running = false;
+        }
     }
 
     pub fn view(&self) -> ScrapeView {
         self.view.lock().unwrap_or_else(|e| e.into_inner()).clone()
+    }
+
+    /// Forgets the labels made so far and what the last search came to, once they are cleared.
+    pub fn forget(&self) {
+        let mut view = self.view.lock().unwrap_or_else(|e| e.into_inner());
+        *view = ScrapeView {
+            running: view.running,
+            ..ScrapeView::default()
+        };
     }
 }
 
@@ -571,6 +593,29 @@ fn work(
             v.current = None;
         });
     }
+}
+
+/// Takes every label off the card, with the pictures of real carts beside them, the databases
+/// kept for finding them and the faces drawn from them, so the next search starts afresh. It
+/// answers how many labels went.
+pub fn clear(root: &Path) -> usize {
+    let mut gone = 0;
+    for platform in Platform::ALL {
+        let dir = root.join("Labels").join(platform.dir_name());
+        let _ = std::fs::remove_dir_all(dir.join(slot_ui::RENDERS));
+        for entry in std::fs::read_dir(&dir).into_iter().flatten().flatten() {
+            let path = entry.path();
+            let png = path
+                .extension()
+                .is_some_and(|e| e.eq_ignore_ascii_case("png"));
+            if png && path.is_file() && std::fs::remove_file(&path).is_ok() {
+                gone += 1;
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(root.join(CACHE));
+    let _ = std::fs::remove_dir_all(root.join("System/Cache/Labels"));
+    gone
 }
 
 /// What one game's search came to: its label once drawn, a picture of its real cart to draw in

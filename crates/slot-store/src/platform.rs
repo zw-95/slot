@@ -62,6 +62,8 @@ pub enum Platform {
     Tic80,
     Psp,
     EasyRpg,
+    /// The built-in apps and the ports in `Ports`, which slot opens itself rather than a core.
+    Apps,
 }
 
 /// How the scanner finds a game's title, and for the GBA its four-letter code, in the ROM.
@@ -104,7 +106,7 @@ pub struct Spec {
     pub colour_correction: bool,
     /// Whether the system has a Game Boy palette to pick for monochrome games.
     pub palettes: bool,
-    /// Whether it has a default bezel and a Bezels folder of its own.
+    /// Whether it has a default bezel built into slot.
     pub bezels: bool,
     /// Whether its games read L and R; when they do not, slot keeps the shoulders.
     pub shoulders: bool,
@@ -713,10 +715,17 @@ const SPECS: [Spec; Platform::COUNT] = [
         rewind: false,
         ..CONSOLE
     },
+    Spec {
+        name: "Apps",
+        dir: "APPS",
+        turbo: false,
+        rewind: false,
+        ..CONSOLE
+    },
 ];
 
 impl Platform {
-    pub const COUNT: usize = 56;
+    pub const COUNT: usize = 57;
     pub const ALL: [Platform; Platform::COUNT] = [
         Platform::Gba,
         Platform::Gb,
@@ -774,6 +783,7 @@ impl Platform {
         Platform::Tic80,
         Platform::Psp,
         Platform::EasyRpg,
+        Platform::Apps,
     ];
 
     pub fn spec(self) -> &'static Spec {
@@ -825,7 +835,9 @@ impl Platform {
             Some(ext) => ext,
             None => return false,
         };
-        self.extensions().iter().any(|k| ext.eq_ignore_ascii_case(k))
+        self.extensions()
+            .iter()
+            .any(|k| ext.eq_ignore_ascii_case(k))
     }
 }
 
@@ -842,7 +854,8 @@ mod tests {
 
     #[test]
     fn every_spec_is_complete() {
-        for p in Platform::ALL {
+        // The apps are opened by slot itself: no core, no files.
+        for p in Platform::ALL.into_iter().filter(|p| *p != Platform::Apps) {
             let s = p.spec();
             assert!(!s.name.is_empty() && !s.dir.is_empty(), "{p:?} has no name");
             assert!(!s.cores.is_empty(), "{p:?} has no core");

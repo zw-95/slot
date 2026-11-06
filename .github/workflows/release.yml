@@ -61,9 +61,20 @@ jobs:
           done
           test -f "$out/System/services/samba/lib/libnsl.so.1"
           test -s "$out/System/licenses/services.manifest"
-          ls "$out"/System/Wallpapers/*.jpg > /dev/null
-          test -s "$out/System/licenses/wallpapers.txt"
+          # A fork may ship other wallpapers or none; what it ships must be credited.
+          if [ -n "$(ls -A assets/wallpapers 2>/dev/null)" ]; then
+            test -n "$(ls -A "$out/System/Wallpapers")"
+            test -s "$out/System/licenses/wallpapers.txt"
+          fi
           test -x "$out/System/slot"
+          test -d "$out/Shaders"
+          for b in mutool ffmpeg; do
+            test -x "$out/System/bin/$b"
+            file "$out/System/bin/$b" | grep -q aarch64
+          done
+          test -s "$out/System/licenses/media.meta"
+          test -s "$out/System/licenses/mupdf-AGPL-3.0.txt"
+          test -s "$out/System/licenses/ffmpeg-GPLv3.txt"
           gpsp_src_sha="$(cat vendor/gpsp-src.sha)"
           test -f "$out/System/licenses/gpsp-${gpsp_src_sha}.tar.gz"
           test -f "$out/System/licenses/gpsp-${gpsp_src_sha}.meta"
