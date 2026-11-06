@@ -670,11 +670,11 @@ impl QuickValue {
         QuickValue::Disc5,
         QuickValue::Hours24,
         QuickValue::Hours12,
+        QuickValue::LangEn,
+        QuickValue::LangZh,
         QuickValue::DisplayInteger,
         QuickValue::DisplayFit,
         QuickValue::DisplayStretch,
-        QuickValue::LangEn,
-        QuickValue::LangZh,
     ];
 
     pub fn index(self) -> usize {

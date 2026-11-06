@@ -249,6 +249,9 @@ fn a_hidden_row_is_stepped_over_and_takes_no_place() {
 
 #[test]
 fn the_values_read_as_the_menu_prints_them() {
+    for (i, v) in QuickValue::ALL.iter().enumerate() {
+        assert_eq!((*v).index(), i, "a QuickValue is out of place in ALL");
+    }
     assert_eq!(
         QuickValue::ALL.map(QuickValue::text),
         [
@@ -277,11 +280,11 @@ fn the_values_read_as_the_menu_prints_them() {
             "Disc 5",
             "24-Hour",
             "12-Hour",
+            "English",
+            "简体中文",
             "Whole",
             "Fit",
             "Full",
-            "English",
-            "简体中文",
         ]
     );
     assert_eq!(QuickValue::disc(0), Some(QuickValue::Disc1));
